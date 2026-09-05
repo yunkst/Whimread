@@ -202,7 +202,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   _buildInfoPage(
                     icon: Icons.auto_stories,
                     iconColor: colorScheme.primary,
-                    title: '欢迎使用 Novel Builder',
+                    title: '欢迎使用「随心阅读」',
                     description: '聚合多个小说站点资源，离线缓存随时阅读，'
                         '更有 AI 阅读增强让阅读体验更沉浸。',
                   ),
