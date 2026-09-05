@@ -8,7 +8,18 @@ import '../../core/theme/app_colors.dart';
 /// 使用 Stack + Positioned 实现可拖动悬浮按钮，
 /// 点击展开聊天对话框。
 class AgentFloatingButton extends ConsumerStatefulWidget {
-  const AgentFloatingButton({super.key});
+  /// 打开对话时强制使用的场景 ID。
+  ///
+  /// 挂载在固定场景页面（阅读页/章节列表 = writing）时显式传入，
+  /// 不依赖全局 provider 的残留值（如浏览器 Tab 留下的 webview_extract）。
+  /// null（默认）= 不干预，沿用全局当前值——供跨 Tab 共享的 Shell
+  /// （main.dart 包含书架/浏览器/设置）使用，其场景由 Tab 切换逻辑维护。
+  final String? scenarioId;
+
+  const AgentFloatingButton({
+    super.key,
+    this.scenarioId,
+  });
 
   @override
   ConsumerState<AgentFloatingButton> createState() => _AgentFloatingButtonState();
@@ -105,7 +116,7 @@ class _AgentFloatingButtonState extends ConsumerState<AgentFloatingButton> {
   }
 
   void _showChatDialog() {
-    AgentChatLauncherEntry.open(context);
+    AgentChatLauncherEntry.open(context, scenarioId: widget.scenarioId);
   }
 }
 
@@ -115,9 +126,13 @@ class _AgentFloatingButtonState extends ConsumerState<AgentFloatingButton> {
 class AgentFloatingShell extends StatelessWidget {
   final Widget child;
 
+  /// 透传给 [AgentFloatingButton] 的场景 ID（null = 沿用全局当前值）。
+  final String? scenarioId;
+
   const AgentFloatingShell({
     super.key,
     required this.child,
+    this.scenarioId,
   });
 
   @override
@@ -125,7 +140,7 @@ class AgentFloatingShell extends StatelessWidget {
     return Stack(
       children: [
         child,
-        const AgentFloatingButton(),
+        AgentFloatingButton(scenarioId: scenarioId),
       ],
     );
   }

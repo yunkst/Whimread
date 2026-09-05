@@ -7,6 +7,7 @@ import '../core/providers/chapter_mutation_provider.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 import '../widgets/agent_chat/agent_floating_button.dart';
+import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../widgets/chapter_list/chapter_list_header.dart';
 import '../widgets/chapter_list/chapter_list_item.dart';
 import '../widgets/chapter_list/reorderable_chapter_item.dart';
@@ -133,6 +134,7 @@ class _ChapterListScreenRiverpodState
     }
 
     return AgentFloatingShell(
+      scenarioId: ScenarioIds.writing,
       child: Scaffold(
         appBar: LibraryAppBar(
           title: widget.novel.title,

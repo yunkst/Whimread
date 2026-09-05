@@ -29,6 +29,7 @@ import '../models/novel.dart';
 import '../models/chapter.dart';
 import '../models/search_result.dart';
 import '../services/api_service_wrapper.dart';
+import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../mixins/reader/auto_scroll_mixin.dart';
 import '../widgets/reader_settings_dialog.dart'; // 阅读设置合并对话框（字体大小/文字亮度/滚动速度）
 import '../widgets/reader_action_buttons.dart'; // 新增导入
@@ -594,6 +595,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         content.split('\n').where((p) => p.trim().isNotEmpty).toList();
 
     return AgentFloatingShell(
+      scenarioId: ScenarioIds.writing,
       child: Scaffold(
         // 直接返回 Scaffold，不使用 ChangeNotifierProvider 包装
         appBar: ReaderAppBar(
