@@ -247,15 +247,39 @@ class ScenarioSession {
     _sessionId = newSessionId;
     _pendingSegments.clear();
     _agentMessages.clear();
+    _lifecycle = SessionLifecycle.fresh;
+
+    // 小说上下文跟随会话走：从 DB 恢复目标会话持久化的 currentNovelId，
+    // 而不是一律清空（切历史会话后 LLM 才知道原本书在写哪本）。
+    // newSessionId == null 表示开启全新会话，无上下文可恢复，保持清空。
+    CurrentNovel? restoredNovel;
+    if (newSessionId != null) {
+      try {
+        final row = await _ref
+            .read(chatSessionRepositoryProvider)
+            .getSession(newSessionId);
+        final novelId = row?.currentNovelId;
+        if (novelId != null) {
+          restoredNovel = await selectCurrentNovel(_ref, novelId);
+        }
+      } catch (e, st) {
+        LoggerService.instance.e(
+          'ScenarioSession [$scenarioId] adoptSession 恢复 currentNovel 失败: $e',
+          stackTrace: st.toString(),
+          category: LogCategory.ai,
+          tags: ['session', 'adopt', 'novel', 'failed', scenarioId],
+        );
+      }
+    }
+    _currentNovel = restoredNovel;
     _state = _state.copyWith(
       messages: const [],
       isLoading: false,
       streamingSegments: const [],
       error: null,
-      clearCurrentNovel: true,
+      currentNovel: restoredNovel,
+      clearCurrentNovel: restoredNovel == null,
     );
-    _currentNovel = null;
-    _lifecycle = SessionLifecycle.fresh;
     _notifyStateChanged();
   }
 
@@ -280,14 +304,23 @@ class ScenarioSession {
       for (final r in records) {
         _agentMessages.add(r.toAgentMessage());
       }
+      // 恢复小说上下文：内存已有值优先（用户可能在 fire-and-forget hydrate
+      // 完成前刚选了书，不能被竞态抹掉）；否则从 DB 持久值恢复；
+      // 两处都没有（从未选过 / 小说已删除）才清空。
+      var novel = _currentNovel;
+      if (novel == null && session.currentNovelId != null) {
+        novel = await selectCurrentNovel(_ref, session.currentNovelId!);
+      }
+      _currentNovel = novel;
       _state = _state.copyWith(
         messages: _uiMessages,
-        clearCurrentNovel: true,
+        currentNovel: novel,
+        clearCurrentNovel: novel == null,
         scenarioDisplayName: _state.scenarioDisplayName,
       );
-      _currentNovel = null;
       LoggerService.instance.i(
-        'ScenarioSession [$scenarioId] hydrate sessionId=$sid → ${_agentMessages.length} 条 agent 消息',
+        'ScenarioSession [$scenarioId] hydrate sessionId=$sid '
+        '→ ${_agentMessages.length} 条 agent 消息, novel=${novel?.title ?? "无"}',
         category: LogCategory.ai,
         tags: ['session', 'hydrate', 'success', scenarioId],
       );
