@@ -55,7 +55,9 @@ _DEFAULT_ROOT_FINGERPRINT = (
     "3c33d0bba390c2c67eda33cb15db9a1036f0aae75002c75b4ef9b248e5565e49"
 )
 
-# pyasn1 schema：KeyDescription（AuthorizationList 只解我们关心的 tag，其余 Any 跳过）
+# pyasn1 schema：KeyDescription 顶层字段全已知可严格解码；
+# authorization list 含数十个未知 context tag，仅捕获内容字节不做字段级解析
+# （字段提取用 _find_tagged_content 手工 TLV 遍历）
 
 
 class _PackageInfo(univ.Sequence):
@@ -76,17 +78,10 @@ class _AttestationApplicationId(univ.Sequence):
     )
 
 
-class _AuthorizationList(univ.Sequence):
-    """context-tagged 授权项；仅 406 (attestationApplicationId) 关心内容。"""
-
-    componentType = namedtype.NamedTypes(
-        namedtype.OptionalNamedType(
-            "attestationApplicationId",
-            univ.Sequence().subtype(
-                implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 406)
-            ),
-        ),
-    )
+class _AuthorizationList(univ.OctetString):
+    """授权列表捕获 schema：以 implicit constructed tag 捕获内容字节，
+    不做字段级解析——真实链的 authorization list 含数十个未知 context tag，
+    pyasn1 严格解码会直接失败，字段提取交给 _find_tagged() 手工 TLV 遍历。"""
 
 
 class _KeyDescription(univ.Sequence):
@@ -97,9 +92,56 @@ class _KeyDescription(univ.Sequence):
         namedtype.NamedType("keymasterSecurityLevel", univ.Enumerated()),
         namedtype.NamedType("attestationChallenge", univ.OctetString()),
         namedtype.NamedType("uniqueId", univ.OctetString()),
-        namedtype.NamedType("softwareEnforced", _AuthorizationList()),
-        namedtype.NamedType("teeEnforced", _AuthorizationList()),
+        namedtype.NamedType(
+            "softwareEnforced",
+            _AuthorizationList().subtype(
+                implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 0)
+            ),
+        ),
+        namedtype.NamedType(
+            "teeEnforced",
+            _AuthorizationList().subtype(
+                implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 1)
+            ),
+        ),
     )
+
+
+def _iter_tlv(data: bytes, offset: int = 0):
+    """遍历 DER TLV，yield (tag_number, content_bytes, next_offset)。
+
+    definite length（attestation 扩展均为 DER）；支持多字节 tag
+    （真实链的 attestationApplicationId 是 context tag [406]）。
+    """
+    while offset < len(data):
+        first = data[offset]
+        tag_number = first & 0x1F
+        offset += 1
+        if tag_number == 0x1F:  # 高 tag 号形式：后续 7 位组（最高位=继续）
+            tag_number = 0
+            while True:
+                b = data[offset]
+                offset += 1
+                tag_number = (tag_number << 7) | (b & 0x7F)
+                if not b & 0x80:
+                    break
+        length = data[offset]
+        offset += 1
+        if length & 0x80:
+            n = length & 0x7F
+            length = int.from_bytes(data[offset : offset + n], "big")
+            offset += n
+        content = data[offset : offset + length]
+        offset += length
+        yield tag_number, content, offset
+
+
+def _find_tagged_content(data: bytes, target_tag: int) -> bytes | None:
+    """在 DER sequence 内容中找 context-constructed [target_tag] 的内容字节。"""
+    for tag_number, content, _ in _iter_tlv(data):
+        if tag_number == target_tag:
+            return content
+    return None
 
 
 @dataclass
@@ -223,17 +265,20 @@ def verify_key_attestation(
     # 官方 APK 签名摘要匹配（魔改包出局）
     expected_sig = (settings.expected_apk_signature_sha256 or "").strip().lower()
     if expected_sig:
-        app_id = None
+        # attestationApplicationId 在 teeEnforced [1] 或 softwareEnforced [0]
+        # 的授权列表内容里，context tag [406]；授权列表含大量未知 tag，
+        # 用手工 TLV 遍历提取（pyasn1 严格解码不容忍未知 tag）
+        app_id_der: bytes | None = None
         for field_name in ("teeEnforced", "softwareEnforced"):
-            auth_list = key_desc[field_name]
-            if "attestationApplicationId" in auth_list:
-                app_id = auth_list["attestationApplicationId"]
+            auth_list_der = bytes(key_desc[field_name])
+            app_id_der = _find_tagged_content(auth_list_der, 406)
+            if app_id_der is not None:
                 break
         digests: list[str] = []
-        if app_id is not None:
+        if app_id_der is not None:
             try:
                 app_id_obj, _ = der_decode(
-                    bytes(app_id), asn1Spec=_AttestationApplicationId()
+                    app_id_der, asn1Spec=_AttestationApplicationId()
                 )
                 digests = [bytes(d).hex() for d in app_id_obj["signatureDigests"]]
             except PyAsn1Error as e:
