@@ -30,18 +30,30 @@ class CurrentNovel {
 /// 工具执行器通过 [AgentScenarioContext.currentNovelId] 读取此值。
 final currentNovelProvider = StateProvider<CurrentNovel?>((ref) => null);
 
-/// 切换当前小说（UI / 工具统一入口）
+/// 仅查询小说，不写全局 provider
 ///
-/// 返回切换结果；找不到小说时返回 null。
-Future<CurrentNovel?> selectCurrentNovel(Ref ref, int novelId) async {
+/// 会话恢复路径（hydrate / adoptSession）用本函数装配会话私有的
+/// _currentNovel——写全局是"用户主动选书"的副作用，恢复历史会话时
+/// 不应顺手覆盖其他会话/工具看到的全局值（issue #24）。
+Future<CurrentNovel?> loadNovel(Ref ref, int novelId) async {
   final repo = ref.read(novelRepositoryProvider);
   final novel = await repo.getNovelById(novelId);
   if (novel == null) return null;
-  final current = CurrentNovel(
+  return CurrentNovel(
     id: novel.id!,
     title: novel.title,
     url: novel.url,
   );
-  ref.read(currentNovelProvider.notifier).state = current;
+}
+
+/// 切换当前小说（UI / 工具统一入口）
+///
+/// 与 [loadNovel] 的区别：本函数表达"用户/工具主动选书"意图，
+/// 会同步写全局 [currentNovelProvider]。返回切换结果；找不到小说时返回 null。
+Future<CurrentNovel?> selectCurrentNovel(Ref ref, int novelId) async {
+  final current = await loadNovel(ref, novelId);
+  if (current != null) {
+    ref.read(currentNovelProvider.notifier).state = current;
+  }
   return current;
 }

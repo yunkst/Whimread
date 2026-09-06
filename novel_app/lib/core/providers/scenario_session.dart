@@ -260,7 +260,9 @@ class ScenarioSession {
             .getSession(newSessionId);
         final novelId = row?.currentNovelId;
         if (novelId != null) {
-          restoredNovel = await selectCurrentNovel(_ref, novelId);
+          // loadNovel 纯查询：恢复历史会话不写全局 currentNovelProvider，
+          // 避免跨 session 污染（issue #24）
+          restoredNovel = await loadNovel(_ref, novelId);
         }
       } catch (e, st) {
         LoggerService.instance.e(
@@ -307,9 +309,12 @@ class ScenarioSession {
       // 恢复小说上下文：内存已有值优先（用户可能在 fire-and-forget hydrate
       // 完成前刚选了书，不能被竞态抹掉）；否则从 DB 持久值恢复；
       // 两处都没有（从未选过 / 小说已删除）才清空。
+      // loadNovel 的 await 期间用户/工具可能已调用 selectNovel 抢先改写
+      // 内存，返回后必须再读一次内存、非空则保留（issue #22 双向守卫）。
       var novel = _currentNovel;
       if (novel == null && session.currentNovelId != null) {
-        novel = await selectCurrentNovel(_ref, session.currentNovelId!);
+        final restored = await loadNovel(_ref, session.currentNovelId!);
+        novel = _currentNovel ?? restored;
       }
       _currentNovel = novel;
       _state = _state.copyWith(
