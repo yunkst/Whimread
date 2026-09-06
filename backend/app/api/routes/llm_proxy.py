@@ -128,6 +128,22 @@ async def chat_completions(
     db: Session = Depends(get_db),
 ):
     """OpenAI 兼容代理（模型由服务端强制指定，客户端无选择权）。"""
+    # 余额门槛前置：≤0 直接拒绝（本轮 0 消耗）——用户应看到明确的 402
+    # 而不是上游配置问题引发的 502
+    if device.quota_balance <= 0:
+        record_usage(
+            db,
+            device.id,
+            model=settings.llm_upstream_model or "unavailable",
+            status="insufficient_quota",
+            error="balance<=0",
+        )
+        db.commit()
+        return JSONResponse(
+            status_code=402,
+            content=_public_error("insufficient_quota", "免费额度已用完"),
+        )
+
     base, upstream_key, model = _require_upstream()
 
     lock = _lock_for(device.id)
@@ -144,17 +160,6 @@ async def chat_completions(
     stream = bool(body.get("stream"))
     body["model"] = model  # 模型选择权在服务端
     body.setdefault("stream", False)
-
-    # 余额门槛：≤0 直接拒绝（本轮 0 消耗）
-    if device.quota_balance <= 0:
-        record_usage(
-            db, device.id, model=model, status="insufficient_quota", error="balance<=0"
-        )
-        db.commit()
-        return JSONResponse(
-            status_code=402,
-            content=_public_error("insufficient_quota", "免费额度已用完"),
-        )
 
     started = time.monotonic()
     headers = {
