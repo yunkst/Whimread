@@ -14,6 +14,7 @@ import 'core/providers/agent_scenario_provider.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_typography.dart';
 import 'utils/toast_utils.dart';
+import 'services/device/device_auth_service.dart';
 import 'services/logger_service.dart';
 import 'services/llm_logger/llm_logger.dart';
 import 'services/log_reporter_service.dart';
@@ -107,7 +108,11 @@ void main() async {
     // 初始化 API 服务 - 使用Provider容器
     final container = ProviderContainer();
     try {
-      await container.read(apiServiceWrapperProvider).init();
+      final apiService = container.read(apiServiceWrapperProvider);
+      await apiService.init();
+      // 设备注册服务复用已初始化的 Dio 实例（AI 托管模式）
+      DeviceAuthService.instance.useWrapper(apiService);
+      await DeviceAuthService.instance.loadCached();
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         'API Service Error: $e',

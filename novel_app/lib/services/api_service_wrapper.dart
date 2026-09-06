@@ -4,6 +4,7 @@ import 'package:novel_api/novel_api.dart';
 import 'package:built_value/serializer.dart';
 import 'dart:io';
 import 'dart:typed_data';
+import '../core/constants/build_config.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
 
@@ -138,6 +139,8 @@ class ApiServiceWrapper {
 
   /// 获取配置的 Host
   Future<String?> getHost() async {
+    // 打包注入的托管后端优先（Whimread AI 托管模式）
+    if (kHasBundledBackend) return kBackendBaseUrl;
     return await PreferencesService.instance.getString(_prefsHostKey);
   }
 

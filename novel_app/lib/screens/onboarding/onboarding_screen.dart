@@ -2,14 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/onboarding_providers.dart';
-import '../../core/providers/service_providers.dart';
-import '../../core/providers/ui_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../models/llm_config.dart';
-import '../../services/logger_service.dart';
-import '../../utils/toast_utils.dart';
-import '../../widgets/onboarding/ai_capabilities_section.dart';
 
 /// 新手引导首次启动向导
 ///
@@ -42,25 +36,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   /// 向导步骤总数
   static const int _stepCount = 5;
 
-  /// 各步骤索引（与 PageView 顺序一致）
-  static const int _indexAi = 1;
-
   final PageController _pageController = PageController();
-  final TextEditingController _aiApiUrlController =
-      TextEditingController(text: 'https://api.deepseek.com');
-  final TextEditingController _aiApiKeyController = TextEditingController();
-  final TextEditingController _aiModelController =
-      TextEditingController(text: 'deepseek-v4-pro');
 
   int _currentPage = 0;
-  bool _isSaving = false;
 
   @override
   void dispose() {
     _pageController.dispose();
-    _aiApiUrlController.dispose();
-    _aiApiKeyController.dispose();
-    _aiModelController.dispose();
     super.dispose();
   }
 
@@ -80,91 +62,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
-    }
-  }
-
-  /// 跳转到设置页对应 Tab
-  void _goToSettings() {
-    if (widget.isReviewMode) {
-      // review 模式：先关闭向导弹层，再切 Tab
-      Navigator.of(context).maybePop();
-    }
-    ref
-        .read(homeTabIndexNotifierProvider.notifier)
-        .switchTo(HomeTabIndex.settings);
-  }
-
-  /// 保存 AI 引擎配置并前进
-  ///
-  /// 这是向导的关键步骤。用户填入一个 OpenAI 兼容的 LLM 地址 + Key，
-  /// 即可解锁 DSL Engine 驱动的全部 AI 能力（特写、改写、摘要、角色提取等）。
-  /// 留空可稍后配置。
-  Future<void> _saveAiAndContinue() async {
-    final apiUrl = _aiApiUrlController.text.trim();
-    final apiKey = _aiApiKeyController.text.trim();
-
-    // 任一为空视为"稍后配置"，直接前进
-    if (apiUrl.isEmpty || apiKey.isEmpty) {
-      _goToNextPage();
-      return;
-    }
-
-    if (Uri.tryParse(apiUrl)?.isAbsolute != true) {
-      ToastUtils.showWarning('请输入有效的 API 地址', context: context);
-      return;
-    }
-
-    setState(() => _isSaving = true);
-    try {
-      final model = _aiModelController.text.trim();
-
-      // 保存到 llm_configs 表（新的多配置序列）
-      // 同时保留旧 key 写入，保证向后兼容
-      final configService = ref.read(llmConfigServiceProvider);
-      final now = DateTime.now();
-      final id = await configService.saveConfig(LlmConfig(
-        name: '默认配置',
-        apiUrl: apiUrl,
-        apiKey: apiKey,
-        model: model,
-        isDefault: true,
-        sortOrder: 0,
-        createdAt: now,
-        updatedAt: now,
-      ));
-      await configService.setDefault(id);
-
-      // 兼容旧 key（引导页写 dsl_engine_* 以兼容未迁移的旧逻辑）
-      final prefs = ref.read(preferencesServiceProvider);
-      await prefs.setString('dsl_engine_api_url', apiUrl);
-      await prefs.setString('dsl_engine_api_key', apiKey);
-      if (model.isNotEmpty) {
-        await prefs.setString('dsl_engine_model', model);
-      }
-      await prefs.setBool('dsl_engine_enabled', true);
-
-      LoggerService.instance.i(
-        '新手引导：已保存 LLM 配置（AI 引擎）',
-        category: LogCategory.ai,
-        tags: ['onboarding', 'ai', 'config'],
-      );
-      if (mounted) {
-        ToastUtils.showSuccess('AI 引擎配置已保存，AI 功能已解锁',
-            context: context);
-        _goToNextPage();
-      }
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '新手引导：保存 AI 引擎配置失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ai,
-        tags: ['onboarding', 'ai', 'config', 'error'],
-      );
-      if (mounted) {
-        ToastUtils.showError('保存失败: $e', context: context);
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -206,8 +103,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     description: '聚合多个小说站点资源，离线缓存随时阅读，'
                         '更有 AI 阅读增强让阅读体验更沉浸。',
                   ),
-                  // 1 - AI 引擎（关键）
-                  _buildAiConfigPage(context),
+                  // 1 - AI 已内置（AI 托管模式：无需用户配置）
+                  _buildInfoPage(
+                    icon: Icons.auto_awesome,
+                    iconColor: context.appColors.agentAccent,
+                    title: 'AI 已内置就绪',
+                    description: '无需配置任何 AI 供应商，安装即可使用'
+                        ' AI 阅读增强：特写、改写、角色提取、创作助手。',
+                  ),
                   // 2 - 找书
                   _buildInfoPage(
                     icon: Icons.travel_explore,
@@ -228,8 +131,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     icon: Icons.rocket_launch,
                     iconColor: colorScheme.primary,
                     title: '一切就绪',
-                    description: '后续可在「设置」中随时调整后端地址、'
-                        'AI 引擎，或重新查看本引导。',
+                    description: 'AI 能力已内置，开箱即用。'
+                        '如需自部署后端，可在「设置」中调整，'
+                        '或重新查看本引导。',
                   ),
                 ],
               ),
@@ -367,129 +271,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  /// 构建 AI 引擎配置页（关键步骤）
-  Widget _buildAiConfigPage(BuildContext context) {
-    final theme = Theme.of(context);
-    final aiColor = context.appColors.agentAccent;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 图标 + 标题
-          Center(
-            child: Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: aiColor.withValues(alpha: 0.14),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.auto_awesome, size: 50, color: aiColor),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // 「关键」标签
-          Center(
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: aiColor.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '核心步骤 · 解锁 AI',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: aiColor,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: Text(
-              '配置 AI 引擎',
-              style: AppTypography.onboardingTitle.copyWith(
-                color: theme.colorScheme.onSurface,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '填入一个 OpenAI 兼容的 LLM 地址和密钥（如 DeepSeek、OpenAI、'
-            '本地 Ollama 等），即可解锁大部分 AI 能力。填写后立即生效。',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.6,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          // 配置输入
-          TextField(
-            controller: _aiApiUrlController,
-            decoration: const InputDecoration(
-              labelText: 'LLM API 地址',
-              hintText: 'https://api.deepseek.com',
-              prefixIcon: Icon(Icons.api),
-              border: OutlineInputBorder(),
-              helperText: 'OpenAI 兼容接口地址',
-            ),
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _aiApiKeyController,
-            decoration: const InputDecoration(
-              labelText: 'API Key',
-              hintText: 'sk-xxx',
-              prefixIcon: Icon(Icons.key),
-              border: OutlineInputBorder(),
-              helperText: '在 LLM 服务商后台获取',
-            ),
-            autocorrect: false,
-            obscureText: true,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _aiModelController,
-            decoration: const InputDecoration(
-              labelText: '模型名（可留空）',
-              hintText: 'deepseek-chat / gpt-4o-mini / qwen-turbo ...',
-              prefixIcon: Icon(Icons.memory),
-              border: OutlineInputBorder(),
-              helperText: '不填则使用 LLM 服务商默认模型',
-            ),
-            autocorrect: false,
-          ),
-          const SizedBox(height: 20),
-          // 解锁能力说明
-          const AiCapabilitiesSection(),
-        ],
-      ),
-    );
-  }
-
   /// 构建底部进度指示 + 主按钮
   Widget _buildBottomBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final isLastPage = _currentPage == _stepCount - 1;
-    final isAiPage = _currentPage == _indexAi;
 
     // 主按钮文案与行为
-    String primaryLabel;
-    if (isLastPage) {
-      primaryLabel = widget.isReviewMode ? '完成' : '开始使用';
-    } else if (isAiPage) {
-      primaryLabel = '保存并继续';
-    } else {
-      primaryLabel = '下一步';
-    }
+    final primaryLabel =
+        isLastPage ? (widget.isReviewMode ? '完成' : '开始使用') : '下一步';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
@@ -520,50 +309,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             width: double.infinity,
             height: 48,
             child: FilledButton(
-              onPressed: _isSaving
-                  ? null
-                  : () {
-                      if (isLastPage) {
-                        _finishOnboarding();
-                      } else if (isAiPage) {
-                        _saveAiAndContinue();
-                      } else {
-                        _goToNextPage();
-                      }
-                    },
-              child: _isSaving
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Theme.of(context).colorScheme.onPrimary,
-                      ),
-                    )
-                  : Text(primaryLabel),
+              onPressed: () {
+                if (isLastPage) {
+                  _finishOnboarding();
+                } else {
+                  _goToNextPage();
+                }
+              },
+              child: Text(primaryLabel),
             ),
           ),
-          // AI 配置页提供"稍后配置 / 去设置页详细配置"
-          if (isAiPage) ...[
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                TextButton(
-                  onPressed: _isSaving ? null : _goToNextPage,
-                  child: const Text('稍后配置'),
-                ),
-                Text(
-                  '·',
-                  style: TextStyle(color: colorScheme.outline),
-                ),
-                TextButton(
-                  onPressed: _isSaving ? null : _goToSettings,
-                  child: const Text('去设置页详细配置'),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );

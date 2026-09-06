@@ -7,8 +7,10 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/constants/build_config.dart';
 import '../core/providers/database_providers.dart';
 import '../models/llm_config.dart' as app;
+import '../services/device/device_auth_service.dart';
 import '../services/dsl_engine/llm_provider.dart' as llm;
 import '../services/logger_service.dart';
 import 'ai/ai_service_factory.dart';
@@ -108,15 +110,38 @@ class LlmConfigService {
     );
   }
 
+  /// 构建 Whimread 托管后端代理的 LlmProvider。
+  ///
+  /// AI 托管模式：所有 LLM 请求走打包内置的后端代理（OpenAI 兼容 /v1 端点），
+  /// 鉴权用设备 JWT（Authorization: Bearer），模型由服务端指定——
+  /// 用户不再配置任何 AI 供应商。
+  ///
+  /// [scenarioId] 仅用于缓存绑定场景（当前各场景共用同一后端配置）。
+  Future<llm.LlmProvider?> buildManagedProvider(String scenarioId) async {
+    if (!kHasBundledBackend) return null; // 未注入托管后端 → 走旧用户自配路径
+    final token = await DeviceAuthService.instance.ensureRegistered();
+    return AiServiceFactory.buildLlmProvider(
+      llm.LlmConfig(
+        baseUrl: '$kBackendBaseUrl/v1',
+        apiKey: token,
+        defaultModel: 'whimread-managed', // 实际模型由服务端强制覆写
+      ),
+    );
+  }
+
   /// 解析场景激活配置并构建 [llm.LlmProvider]（内部先确保旧配置迁移）。
   ///
-  /// 收口此前散落在 novel_agent_service / subagent_runner /
-  /// chapter_write_executor 三处的同构「迁移 → getActiveConfig →
-  /// buildLlmProviderConfig → AiServiceFactory」链（原 chapter_write_executor
-  /// 一支漏了迁移钩子）。返回 null 表示该场景没有激活配置，调用方各自决定报错形态。
+  /// AI 托管模式（打包注入 BACKEND_BASE_URL）：返回托管代理 Provider，
+  /// 与用户自配完全解耦。未注入托管后端时回退旧路径（自部署场景），
+  /// 返回 null 表示没有激活配置，调用方各自决定报错形态。
   Future<llm.LlmProvider?> buildActiveProvider(String scenarioId) async {
     await ensureMigratedFromLegacy();
     await ensureGlobalActiveMigrated();
+
+    // AI 托管模式：托管后端代理是唯一 AI 通道
+    final managed = await buildManagedProvider(scenarioId);
+    if (managed != null) return managed;
+
     final activeConfig = await getActiveConfig(scenarioId: scenarioId);
     if (activeConfig == null) return null;
     return AiServiceFactory.buildLlmProvider(

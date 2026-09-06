@@ -3,14 +3,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
-import '../screens/llm_config_management_screen.dart';
 import '../utils/toast_utils.dart';
 
-/// AI 配置页面
+/// AI 设定页面
 ///
-/// 提供两个分组：
-/// 1. **LLM 配置管理** — 跳转到配置管理页（增删改查多配置、设默认）
-/// 2. **AI 设定** — 作家设定 prompt
+/// AI 托管模式后，LLM 供应商配置已由内置后端承担，本页仅保留：
+/// **AI 设定**（作家设定 prompt）。
 class AiSettingsScreen extends StatefulWidget {
   const AiSettingsScreen({super.key});
 
@@ -89,21 +87,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // AI 托管模式：LLM 由内置后端提供，无需用户配置供应商
                   Card(
                     child: ListTile(
-                      leading: const Icon(Icons.tune),
-                      title: const Text('LLM 配置管理'),
-                      subtitle: const Text('添加、编辑、删除 LLM 配置'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                const LlmConfigManagementScreen(),
-                          ),
-                        );
-                      },
+                      leading: const Icon(Icons.cloud_done_outlined),
+                      title: const Text('AI 服务已内置'),
+                      subtitle: const Text('开箱即用，无需配置 AI 供应商'),
+                      trailing: const Icon(Icons.check_circle_outline),
                     ),
                   ),
                   const SizedBox(height: 24),

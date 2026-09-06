@@ -15,6 +15,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val APP_INSTALL_CHANNEL = "com.example.novel_app/app_install"
+    private val DEVICE_CHANNEL = "com.example.novel_app/device"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,6 +25,16 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             this,
         )
+
+        // Device Attestation Channel：设备注册（Key Attestation）+ 请求签名
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEVICE_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "attest" -> DeviceAttestation.attest(call, result, this)
+                "sign" -> DeviceAttestation.signChallenge(call, result)
+                "hasKey" -> result.success(DeviceAttestation.hasKey())
+                else -> result.notImplemented()
+            }
+        }
 
         // App Install Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_INSTALL_CHANNEL).setMethodCallHandler { call, result ->
