@@ -125,6 +125,45 @@ def client() -> Iterator[TestClient]:
         yield test_client
 
 
+# ---- 设备注册测试共享 fixtures ---------------------------------------------
+
+@pytest.fixture(autouse=True)
+def fresh_challenge_store(monkeypatch):
+    """每用例全新的 challenge 存储（隔离 IP 限速与一次性 nonce 状态）。"""
+    from app.api.routes import devices as devices_route
+    from app.services.challenge_store import ChallengeStore
+
+    store = ChallengeStore(max_per_hour=5)
+    monkeypatch.setattr(devices_route, "challenge_store", store)
+    return store
+
+
+@pytest.fixture
+def attestation_off(monkeypatch):
+    """本地联调模式：跳过 attestation 验证。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "attestation_required", False)
+
+
+@pytest.fixture
+def attestation_ok(monkeypatch):
+    """attestation 必开 + 假 verifier 恒通过（真实验证器需 TEE 证书链）。"""
+    from app.api.routes import devices as devices_route
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "attestation_required", True)
+
+    class _FakeResult:
+        security_level = "TrustedEnvironment"
+        verified = True
+        leaf_public_key_sha256 = "ZmFrZQ=="
+
+    monkeypatch.setattr(
+        devices_route, "verify_key_attestation", lambda **kwargs: _FakeResult()
+    )
+
+
 @pytest.fixture
 def app_instance():
     """暴露 FastAPI app 实例,供需要直接操作 dependency_overrides 的测试使用。"""

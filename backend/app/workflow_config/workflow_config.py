@@ -49,7 +49,7 @@ class WorkflowConfig(BaseModel):
 class WorkflowConfigManager:
     """工作流配置管理器"""
 
-    def __init__(self, config_path: str | None = None):
+    def __init__(self, config_path: str | Path | None = None):
         """
         初始化配置管理器
 

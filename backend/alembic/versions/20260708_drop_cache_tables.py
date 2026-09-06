@@ -20,11 +20,21 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    """守卫：遗留漂移操作仅对真实存在旧表的存量库执行。
+
+    全新数据库（从未有过爬虫/缓存时代的表）直接跳过，
+    使 `alembic upgrade head` 可从零跑通（2026-09-06 修复）。
+    """
+    from sqlalchemy import inspect
+    return inspect(op.get_bind()).has_table(name)
+
+
 def upgrade() -> None:
-    """删除爬虫/缓存专用表，顺序：子表 → 父表 → 独立表。"""
-    op.drop_table("novel_chapters_cache")
-    op.drop_table("novel_cache_tasks")
-    op.drop_table("chapter_list_cache")
+    """删除爬虫/缓存专用表，顺序：子表 → 父表 → 独立表（存在才删）。"""
+    for table in ("novel_chapters_cache", "novel_cache_tasks", "chapter_list_cache"):
+        if _has_table(table):
+            op.drop_table(table)
 
 
 def downgrade() -> None:

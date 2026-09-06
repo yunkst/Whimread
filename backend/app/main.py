@@ -24,7 +24,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import __version__
+from .api.routes.admin import router as admin_router
 from .api.routes.backup import router as backup_router
+from .api.routes.devices import router as devices_router
+from .api.routes.llm_proxy import router as llm_proxy_router
 from .api.routes.logs import router as logs_router
 from .api.routes.models import router as models_router
 from .config import settings
@@ -75,6 +78,9 @@ app.add_middleware(
 app.include_router(backup_router)
 app.include_router(logs_router)
 app.include_router(models_router)
+app.include_router(devices_router)
+app.include_router(llm_proxy_router)
+app.include_router(admin_router)
 
 
 # 应用启动事件
@@ -403,6 +409,10 @@ async def get_models() -> ModelsResponse:
                 title=workflow.title,
                 description=workflow.description,
                 path=workflow.path,
+                width=None,
+                height=None,
+                is_default=False,
+                prompt_skill=None,
             )
             for workflow in i2v_response.workflows
         ]

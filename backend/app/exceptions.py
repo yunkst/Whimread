@@ -40,8 +40,12 @@ class AuthenticationError(NovelBuilderException):
 
     status_code = 401
 
-    def __init__(self, message: str = "认证失败", **kwargs):
-        super().__init__(message, "AUTH_ERROR", **kwargs)
+    def __init__(
+        self, message: str = "认证失败", error_code: str | None = None, **kwargs
+    ):
+        # 允许调用方细化 error_code（如 DEVICE_TOKEN_EXPIRED / ATTESTATION_*
+        # / CHALLENGE_INVALID），客户端据此区分处理；未指定时保持默认
+        super().__init__(message, error_code or "AUTH_ERROR", **kwargs)
 
 
 class ConfigurationError(NovelBuilderException):
@@ -85,6 +89,7 @@ class ValidationError(NovelBuilderException):
         message: str = "数据验证失败",
         field: str | None = None,
         value: Any | None = None,
+        error_code: str | None = None,
         **kwargs,
     ):
         details = kwargs.get("details", {})
@@ -94,7 +99,7 @@ class ValidationError(NovelBuilderException):
             details["value"] = str(value)
         kwargs["details"] = details
 
-        super().__init__(message, "VALIDATION_ERROR", **kwargs)
+        super().__init__(message, error_code or "VALIDATION_ERROR", **kwargs)
 
 
 class ContentNotFoundError(NovelBuilderException):
@@ -107,6 +112,7 @@ class ContentNotFoundError(NovelBuilderException):
         message: str = "请求的内容不存在",
         content_type: str | None = None,
         identifier: str | None = None,
+        error_code: str | None = None,
         **kwargs,
     ):
         details = kwargs.get("details", {})
@@ -116,7 +122,7 @@ class ContentNotFoundError(NovelBuilderException):
             details["identifier"] = identifier
         kwargs["details"] = details
 
-        super().__init__(message, "NOT_FOUND", **kwargs)
+        super().__init__(message, error_code or "NOT_FOUND", **kwargs)
 
 
 class RateLimitError(NovelBuilderException):
@@ -129,6 +135,7 @@ class RateLimitError(NovelBuilderException):
         message: str = "请求频率过高",
         retry_after: int | None = None,
         limit: int | None = None,
+        error_code: str | None = None,
         **kwargs,
     ):
         details = kwargs.get("details", {})
@@ -138,7 +145,7 @@ class RateLimitError(NovelBuilderException):
             details["limit"] = limit
         kwargs["details"] = details
 
-        super().__init__(message, "RATE_LIMIT", **kwargs)
+        super().__init__(message, error_code or "RATE_LIMIT", **kwargs)
 
 
 class ExternalServiceError(NovelBuilderException):
@@ -152,6 +159,7 @@ class ExternalServiceError(NovelBuilderException):
         message: str = "外部服务调用失败",
         service_name: str | None = None,
         service_url: str | None = None,
+        error_code: str | None = None,
         **kwargs,
     ):
         details = kwargs.get("details", {})
@@ -161,7 +169,7 @@ class ExternalServiceError(NovelBuilderException):
             details["service_url"] = service_url
         kwargs["details"] = details
 
-        super().__init__(message, "EXTERNAL_SERVICE_ERROR", **kwargs)
+        super().__init__(message, error_code or "EXTERNAL_SERVICE_ERROR", **kwargs)
 
 
 def handle_exception(exc: Exception, logger=None) -> NovelBuilderException:

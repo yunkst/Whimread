@@ -80,9 +80,6 @@ docker-build:
 docker-run:
 	docker run -p 8000:8000 --env-file .env novel-backend
 
-docker-test:
-	docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
-
 # Cleanup
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +

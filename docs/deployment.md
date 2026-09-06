@@ -145,9 +145,6 @@ docker-compose logs -f
 ```bash
 # 运行数据库迁移
 docker-compose exec backend alembic upgrade head
-
-# 创建初始用户（如果需要）
-docker-compose exec backend python -m app.scripts.create_admin
 ```
 
 ## 开发环境部署

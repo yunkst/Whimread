@@ -55,7 +55,7 @@ def upgrade() -> None:
             sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'),
             sa.Column('filename', sa.String(length=500), nullable=True),
             sa.Column('error_message', sa.Text(), nullable=True),
-            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=True),
             sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint('id'),
         )
@@ -73,7 +73,7 @@ def upgrade() -> None:
             sa.Column('status', sa.String(length=20), nullable=False, server_default='pending'),
             sa.Column('video_filename', sa.String(length=500), nullable=True),
             sa.Column('error_message', sa.Text(), nullable=True),
-            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=True),
             sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
             sa.PrimaryKeyConstraint('id'),
         )

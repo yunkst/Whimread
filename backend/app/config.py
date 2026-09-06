@@ -50,6 +50,29 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    # ===== 设备注册与免费额度 =====
+    # 新设备注册发放的免费额度（点数）
+    device_free_quota: int = Field(default=500, alias="DEVICE_FREE_QUOTA")
+    # 是否强制 Android Key Attestation（生产必须 true；本地联调可关）
+    attestation_required: bool = Field(default=True, alias="ATTESTATION_REQUIRED")
+    # 官方 release APK 签名证书的 SHA-256（attestation 里必须匹配）
+    expected_apk_signature_sha256: str = Field(
+        default="", alias="EXPECTED_APK_SIGNATURE_SHA256"
+    )
+    # 设备 token 有效期（天）
+    jwt_expire_days: int = Field(default=30, alias="JWT_EXPIRE_DAYS")
+    # 同一 IP 每小时最多注册的设备数（IP 聚类风控第一道闸）
+    device_register_rate_limit_per_hour: int = Field(
+        default=5, alias="DEVICE_REGISTER_RATE_LIMIT_PER_HOUR"
+    )
+
+    # ===== LLM 上游代理 =====
+    # OpenAI 兼容上游（如 DeepSeek）。三者任一为空视为上游未配置，代理端点返回 503。
+    llm_upstream_base_url: str = Field(default="", alias="LLM_UPSTREAM_BASE_URL")
+    llm_upstream_api_key: str = Field(default="", alias="LLM_UPSTREAM_API_KEY")
+    # 服务端强制覆写的模型名（客户端传什么都会被替换，模型选择权在服务端）
+    llm_upstream_model: str = Field(default="", alias="LLM_UPSTREAM_MODEL")
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # secret_key 处理:仅当用户通过环境变量/参数显式提供非空值时,

@@ -9,8 +9,7 @@ and initialization utilities for the application.
 import logging
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
 
@@ -30,8 +29,9 @@ engine = create_engine(
 # 创建会话工厂 - 使用 UPPER_CASE 常量命名
 SESSION_LOCAL = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# 创建基类
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """ORM 基类（SQLAlchemy 2.0 DeclarativeBase，兼容 Column 与 Mapped 两种声明）"""
 
 
 def get_db():
@@ -70,7 +70,7 @@ def init_db():
     """
     try:
         # 导入所有模型以确保它们被注册
-        from .models.client_log import ClientLog  # noqa: F401
+        import app.models  # noqa: F401
 
         logger.warning(
             "init_db 使用 Base.metadata.create_all 创建表;生产环境应使用 "

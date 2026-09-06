@@ -16,7 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+def _has_table(name: str) -> bool:
+    """守卫：遗留漂移操作仅对真实存在旧表的存量库执行。
+
+    全新数据库（从未有过爬虫/缓存时代的表）直接跳过，
+    使 `alembic upgrade head` 可从零跑通（2026-09-06 修复）。
+    """
+    from sqlalchemy import inspect
+    return inspect(op.get_bind()).has_table(name)
+
+
 def upgrade():
+    if not _has_table('scene_comfyui_tasks'):
+        # 全新库：目标遗留表从未存在，跳过本迁移的漂移操作
+        return
     """创建 ComfyUI 映射表并清空旧的图片表."""
 
     # 创建 scene_comfyui_tasks 表

@@ -7,7 +7,8 @@ Stores logs uploaded from the Flutter mobile application.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
 
@@ -17,18 +18,20 @@ class ClientLog(Base):
 
     __tablename__ = "client_logs"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    level = Column(String(10), nullable=False, index=True)  # debug/info/warning/error
-    message = Column(Text, nullable=False)
-    stack_trace = Column(Text, nullable=True)
-    category = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    level: Mapped[str] = mapped_column(
+        String(10), nullable=False, index=True
+    )  # debug/info/warning/error
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    stack_trace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(
         String(20), nullable=False, default="general", index=True
     )  # database/network/ai/ui/cache/tts/character/backup/general
-    tags = Column(Text, nullable=True)  # JSON array string
-    timestamp = Column(
+    tags: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array string
+    timestamp: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, index=True
     )  # client-side timestamp (UTC)
-    received_at = Column(
+    received_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC)
     )  # server-side timestamp
 

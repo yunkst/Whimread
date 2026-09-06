@@ -14,8 +14,7 @@ from app.config import settings
 from app.database import Base
 
 # 导入所有模型以确保autogenerate能检测到所有表
-from app.models.text2img import Text2ImgTask, ImageToVideoTask
-from app.models.client_log import ClientLog  # noqa: F401 — 注册 client_logs 表到 Base.metadata
+import app.models  # noqa: F401 — 注册全部表到 Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

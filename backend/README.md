@@ -64,17 +64,14 @@ FastAPI backend service for **novel AI image/video generation, backup, and model
 
 ```bash
 docker-compose up --build
-# Tests
-docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
 ```
 
 ## 🧪 Testing
 
 ```bash
-pytest                       # All tests
+pytest                       # 全部测试（179+ 用例）
 pytest --cov=app --cov-report=html
-pytest -m unit
-pytest -m integration
+pytest tests/test_devices.py tests/test_llm_proxy.py   # 设备/额度/代理模块
 ```
 
 ## 🔍 Code Quality
@@ -107,7 +104,6 @@ backend/
 ├── pyproject.toml
 ├── Dockerfile
 ├── docker-compose.yml
-├── docker-compose.test.yml
 └── .env.example
 ```
 

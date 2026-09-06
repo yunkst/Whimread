@@ -31,13 +31,16 @@ def setup_logging(
     Returns:
         logging.Logger: 配置好的根logger
     """
-    # 确定日志级别
-    level_name = log_level or ("DEBUG" if settings.debug else "INFO")
-    log_level = getattr(logging, level_name.upper(), logging.INFO)
+    # 确定日志级别（显式解析为 int，避免 getattr 的 str 默认值类型污染）
+    level_name = str(log_level or ("DEBUG" if settings.debug else "INFO")).upper()
+    resolved_level = logging.getLevelName(level_name)
+    effective_level: int = (
+        resolved_level if isinstance(resolved_level, int) else logging.INFO
+    )
 
     # 创建根logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
+    root_logger.setLevel(effective_level)
 
     # 清除现有的处理器
     root_logger.handlers.clear()
@@ -51,7 +54,7 @@ def setup_logging(
     # 控制台处理器
     if enable_console:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(log_level)
+        console_handler.setLevel(effective_level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 
@@ -68,7 +71,7 @@ def setup_logging(
             backupCount=5,
             encoding="utf-8",
         )
-        file_handler.setLevel(log_level)
+        file_handler.setLevel(effective_level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
