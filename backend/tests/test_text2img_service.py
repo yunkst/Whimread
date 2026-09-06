@@ -102,7 +102,8 @@ class TestText2ImgGenerate:
         )
 
         assert result == "abc123"
-        mock_comfyui_client.generate_image.assert_called_once_with("a cat")
+        # 未传 negative_prompt 时,ComfyUI 客户端收到 (prompt, None)
+        mock_comfyui_client.generate_image.assert_called_once_with("a cat", None)
 
         task = db.query(Text2ImgTask).filter_by(prompt_id="abc123").first()
         assert task is not None
@@ -110,6 +111,25 @@ class TestText2ImgGenerate:
         assert task.model_name == "动漫风17.5"
         assert task.status == "pending"
         assert task.filename is None
+
+    def test_passes_negative_prompt(self, patched_t2i_service, mock_comfyui_client, db):
+        """negative_prompt 透传给 ComfyUI 客户端并落库(1.9.21)."""
+        mock_comfyui_client.generate_image.return_value = "neg456"
+
+        result = asyncio.run(
+            patched_t2i_service.generate(
+                "a cat", "动漫风17.5", db, negative_prompt="blurry, lowres"
+            )
+        )
+
+        assert result == "neg456"
+        mock_comfyui_client.generate_image.assert_called_once_with(
+            "a cat", "blurry, lowres"
+        )
+
+        task = db.query(Text2ImgTask).filter_by(prompt_id="neg456").first()
+        assert task is not None
+        assert task.negative_prompt == "blurry, lowres"
 
     def test_comfyui_submit_failure_raises(self, patched_t2i_service, mock_comfyui_client, db):
         """ComfyUI 提交失败(None)时抛 RuntimeError,不落库."""
@@ -539,24 +559,45 @@ class TestExtractVideoFilename:
 class TestFetchVideoUrlSplit:
     """_fetch_video 的 subfolder 拆分逻辑."""
 
+    @staticmethod
+    def _mock_httpx_client(response: MagicMock) -> MagicMock:
+        """构造 httpx.AsyncClient 的 async context manager mock."""
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client
+
     def test_plain_filename(self, patched_i2v_service):
         """无 '/' 时不加 subfolder 参数."""
-        with patch("app.services.image_to_video_service.requests.get") as mock_get:
-            mock_get.return_value = MagicMock(status_code=200, content=b"V")
-            result = patched_i2v_service._fetch_video("plain.mp4")
+        mock_client = self._mock_httpx_client(
+            MagicMock(status_code=200, content=b"V")
+        )
+        with patch(
+            "app.services.image_to_video_service.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = asyncio.run(patched_i2v_service._fetch_video("plain.mp4"))
 
         assert result == b"V"
-        called_url = mock_get.call_args[0][0]
+        called_url = mock_client.get.call_args[0][0]
         assert "filename=plain.mp4" in called_url
         assert "subfolder=" not in called_url
 
     def test_subfolder_filename(self, patched_i2v_service):
         """含 '/' 时拆分,最后一段是 filename,前面是 subfolder."""
-        with patch("app.services.image_to_video_service.requests.get") as mock_get:
-            mock_get.return_value = MagicMock(status_code=200, content=b"V")
-            result = patched_i2v_service._fetch_video("video/nested.mp4")
+        mock_client = self._mock_httpx_client(
+            MagicMock(status_code=200, content=b"V")
+        )
+        with patch(
+            "app.services.image_to_video_service.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = asyncio.run(
+                patched_i2v_service._fetch_video("video/nested.mp4")
+            )
 
         assert result == b"V"
-        called_url = mock_get.call_args[0][0]
+        called_url = mock_client.get.call_args[0][0]
         assert "filename=nested.mp4" in called_url
         assert "subfolder=video" in called_url
