@@ -61,6 +61,7 @@ class EventTagger {
         droppedMessageCount: final droppedMessageCount,
         droppedAgentFromIndex: final droppedAgentFromIndex,
         compactionNote: final compactionNote,
+        rewrittenContent: final rewrittenContent,
       ) =>
         CompactionEvent(
           removedChars: removedChars,
@@ -70,6 +71,7 @@ class EventTagger {
           droppedMessageCount: droppedMessageCount,
           droppedAgentFromIndex: droppedAgentFromIndex,
           compactionNote: compactionNote,
+          rewrittenContent: rewrittenContent,
           runId: runId,
         ),
       RetryEvent(

@@ -108,6 +108,34 @@ void main() {
           runId) as CompactionEvent;
       expect(tagged7.runId, runId);
     });
+
+    test('CompactionEvent.rewrittenContent 经 tag 转发不丢失（issue #11 回归）', () {
+      const runId = 'sub-xyz-2';
+      final tagged = EventTagger.tag(
+        const CompactionEvent(
+          removedChars: 1000,
+          originalChars: 4000,
+          compactedChars: 800,
+          keptMessageCount: 6,
+          droppedMessageCount: 4,
+          droppedAgentFromIndex: 5,
+          compactionNote:
+              '[上下文压缩|removedChars=1000|originalChars=4000|compactedChars=800|rewrittenCount=1|timestamp=0]\n早期 4 条消息已被压缩移除。',
+          rewrittenContent: [
+            (index: 5, newContent: '[read_chapter_content dup of idx#ab12] 精简为 1-liner'),
+          ],
+        ),
+        runId,
+      ) as CompactionEvent;
+
+      expect(tagged.runId, runId);
+      expect(tagged.rewrittenContent.length, 1,
+          reason: '子 Agent 压缩事件的改写记录必须随 runId 转发，'
+              '否则主 session 无法把 1-liner 版落库（issue #11）');
+      expect(tagged.rewrittenContent.first.index, 5);
+      expect(tagged.rewrittenContent.first.newContent,
+          '[read_chapter_content dup of idx#ab12] 精简为 1-liner');
+    });
   });
 
   group('SubagentStateProjector', () {
