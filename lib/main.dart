@@ -110,8 +110,10 @@ void main() async {
     try {
       final apiService = container.read(apiServiceWrapperProvider);
       await apiService.init();
-      // 设备注册服务复用已初始化的 Dio 实例（AI 托管模式）
+      // 设备注册服务复用已初始化的 Dio 实例（AI 托管模式）；
+      // 反向注入设备 JWT 请求头，备份/媒体/日志等请求以设备身份鉴权
       DeviceAuthService.instance.useWrapper(apiService);
+      apiService.authHeaderProvider = DeviceAuthService.instance.authedHeaders;
       await DeviceAuthService.instance.loadCached();
     } catch (e, stackTrace) {
       LoggerService.instance.e(

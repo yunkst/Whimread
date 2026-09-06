@@ -10,14 +10,15 @@ import 'preferences_service.dart';
 
 /// API 服务封装层
 ///
-/// 提供统一的 Dio HTTP 客户端配置、后端地址/Token 管理、错误处理与重试。
+/// 提供统一的 Dio HTTP 客户端配置、后端地址管理、错误处理与重试。
 /// 直接调用 backend REST API（不走 OpenAPI 生成的 DefaultApi），
 /// 部分方法使用 novel_api 包定义的类型做反序列化（如 BackupUploadResponse）。
 ///
 /// ## 核心职责
-/// 1. **配置管理**：统一管理后端 Host 和 API Token
-/// 2. **错误处理**：网络异常的统一处理和重试机制
-/// 3. **连接管理**：自动检测连接健康状态，必要时重新初始化
+/// 1. **配置管理**：统一管理后端 Host（托管模式以打包注入地址优先）
+/// 2. **设备鉴权**：经 [authHeaderProvider] 注入设备 JWT 请求头
+/// 3. **错误处理**：网络异常的统一处理和重试机制
+/// 4. **连接管理**：自动检测连接健康状态，必要时重新初始化
 ///
 /// ## 使用示例
 /// ```dart
@@ -25,7 +26,6 @@ import 'preferences_service.dart';
 /// ```
 class ApiServiceWrapper {
   static const String _prefsHostKey = 'backend_host';
-  static const String _prefsTokenKey = 'backend_token';
 
   /// 公共构造函数 - 通过依赖注入创建实例
   ///
@@ -40,6 +40,22 @@ class ApiServiceWrapper {
   ///
   /// 供单元测试注入 [HttpClientAdapter] 拦截 HTTP 请求，也可用于调试。
   Dio get dio => _dio;
+
+  /// 设备 JWT 请求头提供者（`Authorization: Bearer <设备JWT>`）。
+  ///
+  /// AI 托管模式下所有后端请求以匿名设备身份鉴权（原 X-API-TOKEN 已移除）。
+  /// 由 APP 启动时注入 `DeviceAuthService.authedHeaders`，避免本文件与
+  /// 设备服务形成循环 import；未注入时需要鉴权的请求直接抛错。
+  Future<Map<String, String>> Function()? authHeaderProvider;
+
+  /// 取设备鉴权请求头
+  Future<Map<String, String>> _authHeaders() async {
+    final provider = authHeaderProvider;
+    if (provider == null) {
+      throw Exception('设备凭证未就绪（authHeaderProvider 未注入）');
+    }
+    return await provider();
+  }
 
   bool _initialized = false;
 
@@ -79,8 +95,8 @@ class ApiServiceWrapper {
       // CORS headers for web requests
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers':
-          'Content-Type, Authorization, X-API-TOKEN',
+          'Access-Control-Allow-Headers':
+              'Content-Type, Authorization',
     };
 
     // 重置 httpClientAdapter（关闭旧 client,创建新的）
@@ -144,17 +160,9 @@ class ApiServiceWrapper {
     return await PreferencesService.instance.getString(_prefsHostKey);
   }
 
-  /// 获取配置的 Token
-  Future<String?> getToken() async {
-    return await PreferencesService.instance.getString(_prefsTokenKey);
-  }
-
-  /// 设置后端配置
-  Future<void> setConfig({required String host, String? token}) async {
+  /// 设置后端配置（本地开发自定义 Host 用；托管模式 Host 以打包注入为准）
+  Future<void> setConfig({required String host}) async {
     await PreferencesService.instance.setString(_prefsHostKey, host.trim());
-    if (token != null) {
-      await PreferencesService.instance.setString(_prefsTokenKey, token.trim());
-    }
 
     // 重新初始化
     await init();
@@ -225,11 +233,7 @@ class ApiServiceWrapper {
   }) async {
     _ensureInitialized();
     return _guard('备份上传失败', () async {
-      final token = await getToken();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
 
       // 直接用 Dio 构造 multipart 请求，绕过生成的 BackupApi
       // （生成的 BackupApi 的 encodeFormParameter 处理文件路径时格式不正确，导致 422）
@@ -245,7 +249,7 @@ class ApiServiceWrapper {
         '/api/backup/upload',
         data: formData,
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
           contentType: 'multipart/form-data',
         ),
         onSendProgress: onProgress,
@@ -276,16 +280,12 @@ class ApiServiceWrapper {
   Future<List<Map<String, dynamic>>> getBackupList() async {
     _ensureInitialized();
     return _guard('获取备份列表失败', () async {
-      final token = await getToken();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
 
       final response = await _dio.get(
         '/api/backup/list',
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
         ),
       );
 
@@ -321,11 +321,7 @@ class ApiServiceWrapper {
   }) async {
     _ensureInitialized();
     return _guard('备份下载失败: $backupId', () async {
-      final token = await getToken();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
 
       // 对 backupId 进行 URL 编码（路径含 /）
       final encodedId = Uri.encodeComponent(backupId);
@@ -334,7 +330,7 @@ class ApiServiceWrapper {
         '/api/backup/download/$encodedId',
         savePath,
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
         ),
         onReceiveProgress: onProgress,
       );
@@ -354,18 +350,14 @@ class ApiServiceWrapper {
   Future<void> deleteBackupOnServer({required String backupId}) async {
     _ensureInitialized();
     return _guard('备份删除失败: $backupId', () async {
-      final token = await getToken();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
 
       final encodedId = Uri.encodeComponent(backupId);
 
       final response = await _dio.delete(
         '/api/backup/delete/$encodedId',
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
         ),
       );
 
@@ -391,13 +383,10 @@ class ApiServiceWrapper {
   Future<List<Map<String, dynamic>>> getText2ImgModels() async {
     _ensureInitialized();
     return _guard('获取文生图模型列表失败', () async {
-      final token = await getToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
       final response = await _dio.get(
         '/api/models',
-        options: Options(headers: {'X-API-TOKEN': token}),
+        options: Options(headers: authHeaders),
       );
       if (response.statusCode == 200 && response.data != null) {
         final data = response.data as Map<String, dynamic>;
@@ -430,10 +419,7 @@ class ApiServiceWrapper {
   }) async {
     _ensureInitialized();
     return _guard('提交文生图任务失败: prompt=${prompt.length}字符', () async {
-      final token = await getToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
       final response = await _dio.post(
         '/api/text2img/generate',
         data: {
@@ -444,7 +430,7 @@ class ApiServiceWrapper {
             'negative_prompt': negativePrompt,
         },
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
           contentType: 'application/json',
         ),
       );
@@ -469,14 +455,11 @@ class ApiServiceWrapper {
   Future<(Uint8List?, int)> fetchText2ImgImage(String taskId) async {
     _ensureInitialized();
     try {
-      final token = await getToken();
-      if (token == null || token.isEmpty) {
-        return (null, 401);
-      }
+      final authHeaders = await _authHeaders();
       final response = await _dio.get(
         '/api/text2img/image/$taskId',
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
           responseType: ResponseType.bytes,
           // 202/404 不当错误抛，统一靠 statusCode 判断
           validateStatus: (status) =>
@@ -521,10 +504,7 @@ class ApiServiceWrapper {
   }) async {
     _ensureInitialized();
     return _guard('提交图生视频任务失败: prompt=${prompt.length}字符', () async {
-      final token = await getToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('API Token未配置');
-      }
+      final authHeaders = await _authHeaders();
       final formData = FormData.fromMap({
         'prompt': prompt,
         if (modelName != null && modelName.isNotEmpty) 'model_name': modelName,
@@ -534,7 +514,7 @@ class ApiServiceWrapper {
         '/api/image-to-video/generate',
         data: formData,
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
           contentType: 'multipart/form-data',
         ),
       );
@@ -559,14 +539,11 @@ class ApiServiceWrapper {
   Future<(Uint8List?, int)> fetchImageToVideoVideo(String taskId) async {
     _ensureInitialized();
     try {
-      final token = await getToken();
-      if (token == null || token.isEmpty) {
-        return (null, 401);
-      }
+      final authHeaders = await _authHeaders();
       final response = await _dio.get(
         '/api/image-to-video/video/$taskId',
         options: Options(
-          headers: {'X-API-TOKEN': token},
+          headers: authHeaders,
           responseType: ResponseType.bytes,
           validateStatus: (status) =>
               status != null && status >= 200 && status < 300,

@@ -16,11 +16,9 @@ class BackendSettingsScreen extends ConsumerStatefulWidget {
 
 class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
   final TextEditingController _hostController = TextEditingController();
-  final TextEditingController _tokenController = TextEditingController();
   bool _isLoading = true;
 
   static const String _prefsHostKey = 'backend_host';
-  static const String _prefsTokenKey = 'backend_token';
 
   @override
   void initState() {
@@ -32,9 +30,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final host = prefs.getString(_prefsHostKey) ?? '';
-      final token = prefs.getString(_prefsTokenKey) ?? '';
       _hostController.text = host;
-      _tokenController.text = token;
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -44,7 +40,6 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
 
   Future<void> _saveConfig() async {
     final host = _hostController.text.trim();
-    final token = _tokenController.text.trim();
 
     if (host.isEmpty) {
       LoggerService.instance.w(
@@ -68,7 +63,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
     setState(() => _isLoading = true);
     try {
       final apiService = ref.read(apiServiceWrapperProvider);
-      await apiService.setConfig(host: host, token: token);
+      await apiService.setConfig(host: host);
       if (mounted) {
         ToastUtils.showSuccess('已保存后端配置', context: context);
         Navigator.pop(context);
@@ -93,7 +88,6 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
     // 移除 _api.dispose() 调用，避免关闭共享的Dio连接
     // _api.dispose(); // 已移除，ApiServiceWrapper是单例，不应由Screen关闭
     _hostController.dispose();
-    _tokenController.dispose();
     super.dispose();
   }
 
@@ -122,14 +116,13 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
                       prefixIcon: Icon(Icons.link),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _tokenController,
-                    decoration: const InputDecoration(
-                      labelText: 'TOKEN',
-                      hintText: '选填: 访问令牌',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.vpn_key),
+                  const SizedBox(height: 12),
+                  Text(
+                    'AI 托管模式已使用内置服务器地址并自动完成设备鉴权，'
+                    '此项仅本地开发调试自定义后端时有效。',
+                    style: AppTypography.bodyProse.copyWith(
+                      fontSize: 12,
+                      height: 1.5,
                     ),
                   ),
                   const Spacer(),

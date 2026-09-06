@@ -12,6 +12,7 @@ class _MockAdapter implements HttpClientAdapter {
   final Map<String, ResponseBody> _routes = {};
   String? lastUrl;
   String? lastMethod;
+  Map<String, dynamic>? lastHeaders;
 
   void addRoute(String method, String path, ResponseBody body) {
     _routes['$method $path'] = body;
@@ -36,6 +37,7 @@ class _MockAdapter implements HttpClientAdapter {
   ) async {
     lastUrl = options.path;
     lastMethod = options.method;
+    lastHeaders = options.headers;
     final key = '${options.method} ${options.path}';
     if (_routes.containsKey(key)) {
       return _routes[key]!;
@@ -51,24 +53,31 @@ class _MockAdapter implements HttpClientAdapter {
 /// ApiServiceWrapper 备份方法单元测试
 ///
 /// 验证 getBackupList / downloadBackup / deleteBackupOnServer
-/// 三个方法的正确行为。
+/// 三个方法的正确行为。鉴权契约：设备 JWT（Authorization: Bearer），
+/// 由 authHeaderProvider 注入（原 X-API-TOKEN 已移除）。
 void main() {
   late _MockAdapter mockAdapter;
 
   setUp(() {
     SharedPreferences.setMockInitialValues({
       'backend_host': 'http://localhost:3800',
-      'backend_token': 'test-token',
     });
     mockAdapter = _MockAdapter();
   });
 
+  /// 构造已初始化且带设备凭证的 wrapper
+  Future<ApiServiceWrapper> makeApi() async {
+    final api = ApiServiceWrapper();
+    await api.init();
+    // init() 重建了 dio，需要替换 adapter
+    api.dio.httpClientAdapter = mockAdapter;
+    api.authHeaderProvider = () async => {'Authorization': 'Bearer test-jwt'};
+    return api;
+  }
+
   group('getBackupList', () {
     test('正常列表返回 - 有数据', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      // init() 重建了 dio，需要替换 adapter
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'GET',
@@ -77,11 +86,11 @@ void main() {
           '{"backups":['
               '{"filename":"novel_app_backup.db","file_size":2048,'
               '"stored_name":"novel_app_backup.db",'
-              '"backup_id":"2026-06-15/novel_app_backup.db",'
+              '"backup_id":"1/2026-06-15/novel_app_backup.db",'
               '"uploaded_at":"2026-06-15T10:30:00"},'
               '{"filename":"novel_app_backup_120000.db","file_size":4096,'
               '"stored_name":"novel_app_backup_120000.db",'
-              '"backup_id":"2026-06-15/novel_app_backup_120000.db",'
+              '"backup_id":"1/2026-06-15/novel_app_backup_120000.db",'
               '"uploaded_at":"2026-06-15T12:00:00"}'
               ']}',
           200,
@@ -96,10 +105,27 @@ void main() {
       expect(result[0]['backup_id'], contains('/'));
     });
 
+    test('请求携带设备 JWT（Authorization: Bearer）', () async {
+      final api = await makeApi();
+
+      mockAdapter.addRoute(
+        'GET',
+        '/api/backup/list',
+        mockAdapter.jsonRoute('{"backups":[]}', 200),
+      );
+
+      await api.getBackupList();
+
+      expect(
+        mockAdapter.lastHeaders?['Authorization'],
+        'Bearer test-jwt',
+        reason: '备份接口必须以设备身份鉴权，不得回退到静态 token',
+      );
+      expect(mockAdapter.lastHeaders?.containsKey('X-API-TOKEN'), isFalse);
+    });
+
     test('空备份列表', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'GET',
@@ -112,9 +138,7 @@ void main() {
     });
 
     test('网络错误应抛出异常', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'GET',
@@ -145,9 +169,7 @@ void main() {
 
   group('downloadBackup', () {
     test('正常下载返回保存路径', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       final fakeDbBytes = Uint8List.fromList([
         ...'SQLite format 3\x00'.codeUnits,
@@ -169,9 +191,7 @@ void main() {
     });
 
     test('backupId 含 / 应正确编码', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'GET',
@@ -189,9 +209,7 @@ void main() {
     });
 
     test('下载失败应抛出异常', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'GET',
@@ -211,9 +229,7 @@ void main() {
 
   group('deleteBackupOnServer', () {
     test('正常删除应成功', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'DELETE',
@@ -228,9 +244,7 @@ void main() {
     });
 
     test('删除不存在备份应抛出异常', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'DELETE',
@@ -247,9 +261,7 @@ void main() {
     });
 
     test('backupId 含 / 应正确编码', () async {
-      final api = ApiServiceWrapper();
-      await api.init();
-      api.dio.httpClientAdapter = mockAdapter;
+      final api = await makeApi();
 
       mockAdapter.addRoute(
         'DELETE',

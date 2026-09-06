@@ -46,10 +46,14 @@ class BackupService {
   static const String _tokenKey = 'api_token';
 
   /// 默认排除的键（设备相关 / 缓存时间戳 / 已完成迁移的标记）
-  /// 恢复时绝不写入这些键，避免旧设备状态污染新设备
+  /// 恢复时绝不写入这些键，避免旧设备状态污染新设备。
+  /// backend_token：已废弃的静态令牌；device_jwt：设备绑定凭证，
+  /// 重装后由设备重新注册自动换发（同设备同 device_id），不应跨安装复活
   static const Set<String> _excludedKeys = {
     'last_backup_time',
     'log_reporter_last_upload_time',
+    'backend_token',
+    'device_jwt',
   };
 
   /// 默认排除的键前缀（WebView Cookie、迁移标记等）

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
+import '../core/constants/build_config.dart';
+import 'device/device_auth_service.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
 
@@ -251,10 +253,15 @@ class LogReporterService {
   /// 上报一批日志到后端
   Future<bool> _upload(List<LogEntry> batch) async {
     try {
-      final host = await PreferencesService.instance.getString('backend_host');
+      // Host 与 ApiServiceWrapper 同源：托管模式取打包注入地址
+      final host = kHasBundledBackend
+          ? kBackendBaseUrl
+          : await PreferencesService.instance.getString('backend_host');
       if (host.isEmpty) return false;
 
-      final token = await PreferencesService.instance.getString('backend_token');
+      // 设备 JWT 鉴权（原 X-API-TOKEN 已移除）。
+      // 凭证不可用（未配置后端/未注册成功）时静默放弃本轮上报。
+      final authHeaders = await DeviceAuthService.instance.authedHeaders();
 
       _dio ??= Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 10),
@@ -262,7 +269,6 @@ class LogReporterService {
         receiveTimeout: const Duration(seconds: 10),
         headers: {
           'Content-Type': 'application/json',
-          if (token.isNotEmpty) 'X-API-TOKEN': token,
         },
       ));
 
@@ -273,6 +279,7 @@ class LogReporterService {
       final response = await _dio!.post(
         '$host/api/logs/upload',
         data: jsonEncode(payload),
+        options: Options(headers: authHeaders),
       );
 
       if (response.statusCode == 200) {
