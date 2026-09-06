@@ -740,7 +740,7 @@ def wait_and_check_ci(project_root: Path, version: str, wait_seconds: int = 600)
     rc, _, _ = run_command(["gh", "--version"], project_root)
     if rc != 0:
         print("  ⚠️  gh CLI 未安装，请手动检查 GitHub Actions:")
-        print("     https://github.com/yunkst/novel_builder/actions")
+        print("     https://github.com/yunkst/Whimread/actions")
         return "unknown"
 
     # 3. 查询最新 run 状态
@@ -752,7 +752,7 @@ def wait_and_check_ci(project_root: Path, version: str, wait_seconds: int = 600)
     )
     if rc != 0:
         print(f"  ⚠️  gh run list 执行失败: {stderr[:200]}")
-        print("     请手动检查: https://github.com/yunkst/novel_builder/actions")
+        print("     请手动检查: https://github.com/yunkst/Whimread/actions")
         return "unknown"
 
     try:
@@ -872,7 +872,7 @@ def main():
     if skip_ci_check:
         print("\n" + "=" * 60)
         print("⚠️  SKIP_CI_CHECK=1，跳过 CI 等待和检查")
-        print(f"   请手动检查: https://github.com/yunkst/novel_builder/actions")
+        print(f"   请手动检查: https://github.com/yunkst/Whimread/actions")
         print("=" * 60)
         return
 
@@ -881,17 +881,17 @@ def main():
     print("=" * 60)
     if ci_status == "success":
         print(f"🎉 发布成功! Release {version} 已上线")
-        print(f"  Release 页面: https://github.com/yunkst/novel_builder/releases/tag/v{version}")
+        print(f"  Release 页面: https://github.com/yunkst/Whimread/releases/tag/v{version}")
     elif ci_status == "failure":
         print(f"❌ CI 构建失败，请修复后重新发布")
         print(f"  修复后使用新版本号重新运行发布脚本")
         sys.exit(2)
     elif ci_status == "pending":
         print(f"🟡 CI 仍在构建中")
-        print(f"  几分钟后手动检查: https://github.com/yunkst/novel_builder/actions")
+        print(f"  几分钟后手动检查: https://github.com/yunkst/Whimread/actions")
     else:
         print(f"⚠️  CI 状态未知")
-        print(f"  请手动检查: https://github.com/yunkst/novel_builder/actions")
+        print(f"  请手动检查: https://github.com/yunkst/Whimread/actions")
 
 
 if __name__ == "__main__":

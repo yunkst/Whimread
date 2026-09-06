@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 # 配置
-OUTPUT_DIR = "D:/myspace/novel_builder/diagrams"
+OUTPUT_DIR = "./diagrams"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # 图纸尺寸 (16:9 横向, 高分辨率)

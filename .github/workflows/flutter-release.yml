@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 60
     defaults:
       run:
-        working-directory: novel_app
+        working-directory: .
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
     timeout-minutes: 60
     defaults:
       run:
-        working-directory: novel_app
+        working-directory: .
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
         id: version
         run: |
           # pubspec.yaml: version: 1.7.20+69
-          # NOTE: defaults.working-directory = novel_app
+          # NOTE: 默认 working-directory = 仓库根
           VERSION_CODE=$(grep -E "^version:" pubspec.yaml | sed -E 's/.*\+([0-9]+).*/\1/')
           if [ -z "$VERSION_CODE" ]; then
             echo "❌ 无法从 pubspec.yaml 解析 version code"
@@ -181,10 +181,10 @@ jobs:
         run: |
           # 用实际版本号替换 {{VERSION}}，用 changelog 替换 {{CHANGELOG}}
           # 用 Python 避免 sed 的特殊字符（/、&、\、换行）转义问题
-          # NOTE: defaults.working-directory = novel_app，所以 ../.github = 仓库根
+          # NOTE: working-directory = 仓库根，.github 即仓库根
           python3 -c '
           import os
-          with open("../.github/release_template.md", "r", encoding="utf-8") as f:
+          with open(".github/release_template.md", "r", encoding="utf-8") as f:
               body = f.read()
           body = body.replace("{{VERSION}}", "v" + os.environ["VERSION"])
           body = body.replace("{{CHANGELOG}}", os.environ["CHANGELOG"])
@@ -238,7 +238,7 @@ jobs:
         run: flutter build apk --release --split-per-abi
 
       - name: Compute SHA256 checksums
-        working-directory: novel_app/build/app/outputs/flutter-apk
+        working-directory: ./build/app/outputs/flutter-apk
         run: |
           sha256sum app-*-release.apk > SHA256SUMS.txt
           echo "===== SHA256SUMS.txt ====="
@@ -249,13 +249,13 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ steps.tag.outputs.name }}
-          body_path: novel_app/release_body.md
+          body_path: release_body.md
           # draft 永远 false：preview 版也直接发布（仅靠 prerelease 标记区分通道），
           # 否则 /releases?per_page=1 拿不到 draft 版本，预览通道失效。
           draft: false
           prerelease: ${{ steps.prerelease.outputs.flag == 'true' }}
           files: |
-            novel_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            novel_app/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            novel_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
-            novel_app/build/app/outputs/flutter-apk/SHA256SUMS.txt
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+            build/app/outputs/flutter-apk/SHA256SUMS.txt

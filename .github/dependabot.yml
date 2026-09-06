@@ -10,18 +10,9 @@ updates:
       - "dependencies"
       - "ci"
 
-  - package-ecosystem: "pip"
-    directory: "/backend"
-    schedule:
-      interval: "weekly"
-    commit:
-      message: "chore(backend): update Python dependencies"
-    labels:
-      - "dependencies"
-      - "backend"
 
   - package-ecosystem: "pub"
-    directory: "/novel_app"
+    directory: "/"
     schedule:
       interval: "weekly"
     commit:

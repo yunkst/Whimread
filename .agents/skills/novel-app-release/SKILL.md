@@ -315,8 +315,8 @@ PR / push 到 main 时(`.github/workflows/flutter-ci.yml`)还会跑:
 
 脚本会自动等 10 分钟并检查 CI。手动确认:
 1. 本地 tag:`git tag -l "v*"`
-2. Actions:`https://github.com/yunkst/novel_builder/actions`
-3. Release:`https://github.com/yunkst/novel_builder/releases`
+2. Actions:`https://github.com/yunkst/Whimread/actions`
+3. Release:`https://github.com/yunkst/Whimread/releases`
 
 ### Q: 推送失败怎么办?
 

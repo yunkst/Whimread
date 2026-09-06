@@ -1,320 +1,58 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-# 只忽略Python项目的lib目录，但允许Flutter项目的lib目录
-backend/lib/
-!novel_app/lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-*.gz
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 
-# Virtual Environments
-venv/
-ENV/
-env/
-.venv
-.env
-.env.local
-.env.*.local
-env.bak/
-venv.bak/
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
 
-# Flask/FastAPI
-instance/
-.webassets-cache
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-*.cover
-.hypothesis/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre
-.pyre/
-
-# Ruff
-.ruff_cache/
-
-# Flutter/Dart
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
 .dart_tool/
-.flutter-plugins
 .flutter-plugins-dependencies
-.packages
 .pub-cache/
 .pub/
 /build/
-pubspec.lock
+/coverage/
 
-# Flutter web
-*.dart.js
-*.mocks.dart
-*.dart.js.map
-*.info.json
-*.part.js
-*.part.js.map
+# Symbolication related
+app.*.symbols
 
-# Flutter coverage
-coverage/
+# Obfuscation related
+app.*.map.json
 
-# Node.js / npm
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# 图标设计中间产物（候选图、生成脚本、旧图标备份），不入仓库
+/assets/icon_candidates/
+
+# Whimread 公开仓（Flutter）
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-.pnpm-debug.log*
-
-# Node package lock (optional, uncomment if needed)
-# package-lock.json
-# yarn.lock
-
-# Playwright
-.playwright-mcp/
-playwright-report/
-test-results/
-playwright/.cache/
-
-# Docker
-.dockerignore
-*.log
-docker-compose.override.yml
-
-# Database
+test_reports/
+test_run.log
+.env
 *.db
-*.sqlite
-*.sqlite3
-
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-*.code-workspace
-.history/
-
-# IDE - IntelliJ / WebStorm / PyCharm
-.idea/
-*.iml
-*.iws
-*.ipr
-out/
-
-# IDE - Eclipse
-.settings/
-.project
-.classpath
-
-# Operating System Files
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.cab
-*.msi
-*.msix
-*.msm
-*.msp
-*.lnk
-*.apk
-*.cmake
-# Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# Temporary files
-*.tmp
-*.temp
-*.swp
-*.swo
-*~
-.tmp/
-temp/
-
-# Logs and databases
-*.log
-logs/
-*.sql
-*.sqlite
-
-# Backup files
-*.bak
-*.backup
-*~
-
-# 备份目录
-backups/
-
-# Sensitive data
-secrets/
-credentials/
-*.pem
-*.key
-*.cert
-*.crt
-
-# Test coverage
-htmlcov/
-.tox/
-.nox/
-.coverage
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-
-# Build artifacts
-dist/
-build/
-*.egg-info/
-
-# Claude Code
-.claude/settings.local.json
-
-# Git Worktrees
-.worktrees/
-
-# Project specific
-ch1.txt
-
-# 小说同步数据（用户上传的小说文件）
-backend/novel_sync/
-
-# Logs (already defined above, keeping for reference)
-logs/
-dev-debug.log
-
-# 临时报告和文档（避免提交测试报告、修复报告等）
-*_report.md
-*_REPORT.md
-*_FIX_REPORT.md
-*_COMPLETION_REPORT.md
-*_ANALYSIS.md
-*_SUMMARY.md
-TEST_*.md
-baseline_analysis.txt
-test_failures_detailed.log
-
-# 临时测试脚本(仅仓库根目录,避免误伤 backend/tests/test_*.py)
-/test_*.py
-replace_*.py
-upload_apk_now.py
-
-# 临时配置文件
-pubspec_fixed.yaml
-devtools_options.yaml
-openapi-config.yaml
-openapitools.json
-playwright.config.ts
-run-e2e-tests.bat
-test_debug.dart
-
-# 外部依赖库（嵌套的 Git 仓库）
-Scrapling/
-
-# Windows 保留文件名
-nul
-
-# 大文件类型
-*.exe
-*.dll
-*.zip
-*.tar
-*.tar.gz
-*.gz
-
-# 文本文件（小说、日志、测试结果）
-*.txt
-!README*
-!CHANGELOG*
-!LICENSE*
-!TODO*
-!.gitkeep
-!**/cpp/CMakeLists.txt
-
-# 主题预览产物（设计稿/截图，非源码）
-design_preview/
-shelf-preview
-
-.superpowers/
-
-# 番茄小说反爬调研产物（字体文件、截图、抓取样本、调研笔记）
-fanqie-evidence/
-fanqie-*.png
-fanqie-home.png
-fanqie-login.png
-fanqie-login-page.png
-fanqie-book.png
-fanqie-search.png
-fanqie-reader.png
-fanqie-cdp.png
-fanqie-visible.png
-fanqie-headed.png
-fanqie-now.png
-
-# 仓库根的 OCR onnx 是误放的复制，pubspec 只引用 novel_app/assets/models/inference.onnx
-/inference.onnx
-
-# OCR 准确率测试临时资产（番茄截图，PoC 用，别提交）
-novel_app/tool/ocr_test_assets/
-novel_app/lib/main_ocr_test.dart
-
-# 个人草稿/推广素材（本地保留，不进仓库）
-promo_covers/
-zhihu_article.md
-
-# 滚动日志（如 backend/novel_builder.log.1 这类带数字后缀的轮转日志）
-*.log.*
-
-# Flutter 应用图标生成产物（flutter_launcher_icons / 手工导出）
-app_icons/
-
-# 仓库根悬挂的临时测试文件（已被上方 *.txt 通配覆盖，此处显式标注意图）
-_preflight_test.txt
+coverage/
+flutter_0*.log
+tr.log

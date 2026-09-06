@@ -5,7 +5,7 @@
 
 **读喜欢的 · 改不爽的 · 写自己的**
 
-[⬇️ 下载 APK](https://github.com/yunkst/novel_builder/releases/latest)  ·  [🌐 在线介绍](https://yunkst.github.io/novel_builder/)  ·  [⭐ 给个 Star](https://github.com/yunkst/novel_builder)
+[⬇️ 下载 APK](https://github.com/yunkst/Whimread/releases/latest)  ·  [🌐 在线介绍](https://yunkst.github.io/novel_builder/)  ·  [⭐ 给个 Star](https://github.com/yunkst/Whimread)
 
 本地书架 · 任意网站阅读 · 离线缓存 · AI 改写 · AI 创作
 
@@ -147,7 +147,7 @@
 **源码运行**
 
 ```bash
-git clone https://github.com/yunkst/novel_builder.git
+git clone https://github.com/yunkst/Whimread.git
 cd novel_builder/novel_app
 flutter pub get
 flutter run

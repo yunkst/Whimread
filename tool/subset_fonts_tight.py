@@ -33,7 +33,7 @@ KEEP_RANGES = {
 KEEP = sorted(KEEP_RANGES)
 print(f"final keep count: {len(KEEP):,}")
 
-DIR = pathlib.Path(r"D:/my_space/novel_builder/novel_app/assets/fonts")
+DIR = pathlib.Path(r"assets/fonts")
 for ttf_path in sorted(DIR.glob("Noto*.ttf")):
     size_before = ttf_path.stat().st_size
     print(f"=> {ttf_path.name}  before {size_before:,}B")

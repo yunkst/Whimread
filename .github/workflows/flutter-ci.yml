@@ -4,12 +4,18 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'novel_app/**'
+      - 'lib/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'pubspec.yaml'
       - '.github/workflows/flutter-ci.yml'
   pull_request:
     branches: [main, master]
     paths:
-      - 'novel_app/**'
+      - 'lib/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'pubspec.yaml'
       - '.github/workflows/flutter-ci.yml'
 
 jobs:
@@ -18,9 +24,6 @@ jobs:
     # 冷启动本地预估 9-12 分钟（无 cache 的 build_runner + 184 个测试文件单 worker）；
     # CI 有 cache 后实测更短。30 分钟留 buffer。
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: novel_app
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,5 +117,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flutter-coverage
-          path: novel_app/coverage/
+          path: coverage/
           retention-days: 14

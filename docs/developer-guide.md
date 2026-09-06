@@ -45,9 +45,9 @@ Whimread 采用 monorepo 架构，包含两个主要模块：
 ### 克隆项目
 
 ```bash
-git clone https://github.com/yunkst/novel_builder.git
-cd novel_builder
-git remote add upstream https://github.com/yunkst/novel_builder.git
+git clone https://github.com/yunkst/Whimread.git
+cd Whimread
+git remote add upstream https://github.com/yunkst/Whimread.git
 ```
 
 ### 后端开发环境
@@ -117,7 +117,7 @@ dart run tool/generate_api.dart
 ### 根目录
 
 ```
-novel_builder/
+Whimread/
 ├── novel_app/          # Flutter 移动应用
 ├── backend/            # Python FastAPI 后端
 ├── docs/               # 项目文档
@@ -555,7 +555,7 @@ git push origin master --tags
 
 ## 📚 更多资源
 
-- **项目主页** - https://github.com/yunkst/novel_builder
+- **项目主页** - https://github.com/yunkst/Whimread
 - **API 文档** - http://localhost:3800/docs
 - **后端模块文档** - [backend/CLAUDE.md](../backend/CLAUDE.md)
 - **前端模块文档** - [novel_app/CLAUDE.md](../novel_app/CLAUDE.md)

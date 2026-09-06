@@ -8,7 +8,7 @@ echo "🧪 运行全部测试（Mock + 真实数据库 + 覆盖率）..."
 echo ""
 
 # 切换到项目目录
-cd "$(dirname "$0")/../novel_app"
+cd "$(dirname "$0")/.."
 
 # 清理旧的覆盖率数据
 echo "清理旧的覆盖率数据..."
@@ -62,7 +62,7 @@ if command -v lcov &> /dev/null; then
   genhtml coverage/lcov.info -o coverage/html
 
   echo "✅ 覆盖率报告已生成"
-  echo "📊 HTML报告位置: novel_app/coverage/html/index.html"
+  echo "📊 HTML报告位置: coverage/html/index.html"
 
   # 显示覆盖率摘要
   echo ""
@@ -70,7 +70,7 @@ if command -v lcov &> /dev/null; then
   lcov --summary coverage/lcov.info | grep lines
 else
   echo "⚠️  lcov 未安装，跳过HTML报告生成"
-  echo "📊 原始覆盖率数据: novel_app/coverage/lcov.info"
+  echo "📊 原始覆盖率数据: coverage/lcov.info"
 fi
 
 echo ""

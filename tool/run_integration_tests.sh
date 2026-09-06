@@ -8,7 +8,7 @@ echo "🗄️  运行数据库集成测试（真实SQLite）..."
 echo ""
 
 # 切换到项目目录
-cd "$(dirname "$0")/../novel_app"
+cd "$(dirname "$0")/.."
 
 # 定义集成测试文件列表（使用真实数据库）
 REAL_DB_TESTS=(

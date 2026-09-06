@@ -8,7 +8,7 @@ echo "🚀 运行快速单元测试（Mock版本）..."
 echo ""
 
 # 切换到项目目录
-cd "$(dirname "$0")/../novel_app"
+cd "$(dirname "$0")/.."
 
 # 定义测试文件列表（使用Mock的单元测试）
 UNIT_TESTS=(

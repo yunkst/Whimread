@@ -24,13 +24,13 @@
 
 1. **Fork 并克隆项目**
 ```bash
-git clone https://github.com/yunkst/novel_builder.git
+git clone https://github.com/yunkst/Whimread.git
 cd novel_builder
 ```
 
 2. **设置上游仓库**
 ```bash
-git remote add upstream https://github.com/yunkst/novel_builder.git
+git remote add upstream https://github.com/yunkst/Whimread.git
 ```
 
 3. **安装依赖**
@@ -196,7 +196,7 @@ git push origin feature/your-feature-name
 - 最小可重现示例（如有）
 
 ### 安全漏洞
-如发现安全漏洞，请不要在公开 Issue 中报告，请通过 [Security Advisories](https://github.com/yunkst/novel_builder/security/advisories/new) 私下报告。
+如发现安全漏洞，请不要在公开 Issue 中报告，请通过 [Security Advisories](https://github.com/yunkst/Whimread/security/advisories/new) 私下报告。
 
 ## 💡 功能请求
 
@@ -244,8 +244,8 @@ git push origin feature/your-feature-name
 
 如果您在贡献过程中遇到问题：
 
-- 💬 GitHub Discussions：https://github.com/yunkst/novel_builder/discussions
-- 🐛 Issues：https://github.com/yunkst/novel_builder/issues
+- 💬 GitHub Discussions：https://github.com/yunkst/Whimread/discussions
+- 🐛 Issues：https://github.com/yunkst/Whimread/issues
 
 ## 📜 行为准则
 

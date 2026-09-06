@@ -18,7 +18,7 @@ RANGES = [
 KEEP = sorted({c for s, e in RANGES for c in range(s, e)})
 print(f"subset unicode count: {len(KEEP):,}")
 
-OUT = pathlib.Path(r"D:/my_space/novel_builder/novel_app/assets/fonts")
+OUT = pathlib.Path(r"assets/fonts")
 OUT.mkdir(parents=True, exist_ok=True)
 
 BASE_SANS = "https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/{f}"

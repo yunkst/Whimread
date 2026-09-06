@@ -2,7 +2,7 @@
 
 欢迎使用 Whimread！这里包含项目的部署、开发与日志相关文档。
 
-> 📌 面向普通用户的产品介绍，请看根目录 [README](../README.md) 与 [在线介绍页](https://yunkst.github.io/novel_builder/)。
+> 📌 面向普通用户的产品介绍，请看根目录 [README](../README.md) 与 [在线介绍页](https://yunkst.github.io/Whimread/)。
 
 ## 📚 文档目录
 
@@ -30,9 +30,9 @@
 
 ## 🔗 相关链接
 
-- **项目主页**：https://github.com/yunkst/novel_builder
-- **在线介绍页**：https://yunkst.github.io/novel_builder/
-- **最新发布**：https://github.com/yunkst/novel_builder/releases
+- **项目主页**：https://github.com/yunkst/Whimread
+- **在线介绍页**：https://yunkst.github.io/Whimread/
+- **最新发布**：https://github.com/yunkst/Whimread/releases
 
 ---
 
