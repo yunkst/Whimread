@@ -56,3 +56,15 @@ test_run.log
 coverage/
 flutter_0*.log
 tr.log
+
+# AI 工作区与本地会话产物，不入仓库（本地文件保留）
+.claude/
+.zcode/
+.pytest_cache/
+
+# 备份/临时文件
+*.bak
+
+# 架构图冗余产物：generate_architecture_diagram.py 会同时产出三份，仓库仅保留 png
+docs/diagrams/flutter_architecture_diagram.pdf
+docs/diagrams/flutter_architecture_diagram_4k.png

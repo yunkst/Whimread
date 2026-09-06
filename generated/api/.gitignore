@@ -39,3 +39,7 @@ pubspec.lock
 
 # Mac
 .DS_Store
+
+# OpenAPI 生成器元数据与生成的 API 文档，不入仓库
+/.openapi-generator/
+/doc/
