@@ -162,7 +162,26 @@ function handleRequest(req, res) {
 
 const clients = new Set();
 
+// CSWSH 防护（issue #12）：浏览器跨站 WebSocket 不受同源策略约束，
+// 恶意网页可直连 ws://localhost:<port>，必须由服务器校验 Origin。
+// 规则：Origin 缺失（curl/脚本等非浏览器客户端）放行；
+// Origin 存在时其 host 必须与本服务响应的 Host 头一致（即同源页面）。
+function isAllowedOrigin(origin, hostHeader) {
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === hostHeader;
+  } catch (e) {
+    return false;
+  }
+}
+
 function handleUpgrade(req, socket) {
+  if (!isAllowedOrigin(req.headers.origin, req.headers.host)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
   const key = req.headers['sec-websocket-key'];
   if (!key) { socket.destroy(); return; }
 
