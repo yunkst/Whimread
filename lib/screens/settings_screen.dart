@@ -154,12 +154,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.auto_awesome_outlined,
             title: 'AI',
             accentColor: appColors.agentAccent,
-            subtitle: '智能助手 · 模型配置 · 主题偏好',
+            subtitle: '智能助手 · AI 设定 · 主题偏好',
             children: [
               ListTile(
                 leading: Icon(Icons.smart_toy, color: appColors.agentAccent),
                 title: const Text('AI 配置'),
-                subtitle: const Text('配置全局默认 LLM 和 AI 设定'),
+                subtitle: const Text('内置 AI 服务状态与作家设定'),
                 trailing: const Icon(Icons.arrow_forward_ios),
                 onTap: () {
                   Navigator.push(

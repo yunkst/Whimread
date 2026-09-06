@@ -3,12 +3,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
+import '../services/device/device_auth_service.dart';
 import '../utils/toast_utils.dart';
 
 /// AI 设定页面
 ///
 /// AI 托管模式后，LLM 供应商配置已由内置后端承担，本页仅保留：
-/// **AI 设定**（作家设定 prompt）。
+/// **服务状态**（额度展示）与 **AI 设定**（作家设定 prompt）。
 class AiSettingsScreen extends StatefulWidget {
   const AiSettingsScreen({super.key});
 
@@ -21,6 +22,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   final _aiWriterPromptController = TextEditingController();
 
   bool _isLoading = true;
+  DeviceQuotaInfo? _deviceInfo;
 
   @override
   void initState() {
@@ -40,6 +42,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
     _aiWriterPromptController.text =
         prefs.getString('ai_writer_prompt') ?? '';
     setState(() => _isLoading = false);
+    _refreshQuota();
+  }
+
+  /// 额度自查是尽力而为的展示（未注册/失败时保持静默）
+  Future<void> _refreshQuota() async {
+    final info = await DeviceAuthService.instance.fetchQuota();
+    if (mounted) setState(() => _deviceInfo = info);
   }
 
   Future<void> _saveSettings() async {
@@ -69,9 +78,9 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16.0),
                 children: [
-                  // ── LLM 配置管理 ──
+                  // ── AI 服务状态 ──
                   Text(
-                    'LLM 配置',
+                    'AI 服务',
                     style: AppTypography.novelTitle.copyWith(
                       fontSize: 16,
                       color: context.appColors.ink,
@@ -79,7 +88,7 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '管理多个 LLM 后端配置（API URL、Key、模型），在 Agent 和章节生成中切换使用。',
+                    'AI 请求由内置服务托管，无需配置 API URL、Key 或模型。',
                     style: AppTypography.bodyProse.copyWith(
                       fontSize: 13,
                       height: 1.5,
@@ -92,7 +101,13 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
                     child: ListTile(
                       leading: const Icon(Icons.cloud_done_outlined),
                       title: const Text('AI 服务已内置'),
-                      subtitle: const Text('开箱即用，无需配置 AI 供应商'),
+                      subtitle: Text(
+                        _deviceInfo == null
+                            ? '开箱即用，无需配置 AI 供应商'
+                            : '开箱即用，无需配置 AI 供应商\n'
+                                '剩余额度：${_deviceInfo!.quotaBalance} 点'
+                                '（1000 tokens = 1 点）',
+                      ),
                       trailing: const Icon(Icons.check_circle_outline),
                     ),
                   ),

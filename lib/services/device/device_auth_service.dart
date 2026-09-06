@@ -35,6 +35,21 @@ class DeviceAuthException implements Exception {
   String toString() => 'DeviceAuthException($code): $message';
 }
 
+/// /api/v1/devices/me 的展示用快照
+class DeviceQuotaInfo {
+  final String deviceId;
+  final int quotaBalance;
+  final String status;
+  final bool attestationVerified;
+
+  const DeviceQuotaInfo({
+    required this.deviceId,
+    required this.quotaBalance,
+    required this.status,
+    required this.attestationVerified,
+  });
+}
+
 class DeviceAuthService {
   DeviceAuthService._();
 
@@ -141,6 +156,56 @@ class DeviceAuthService {
   Future<Map<String, String>> authedHeaders() async {
     final token = await ensureRegistered();
     return {'Authorization': 'Bearer $token'};
+  }
+
+  /// 查询当前设备额度（GET /api/v1/devices/me），供设置页额度展示。
+  ///
+  /// 尽力而为：未配置托管后端 / 未注册 / 请求失败一律返回 null。
+  /// 有意不触发注册——纯展示场景不应产生 attestation 副作用。
+  Future<DeviceQuotaInfo?> fetchQuota() async {
+    if (!kHasBundledBackend) return null;
+    final token = _cachedToken;
+    if (token == null) return null;
+    return fetchMeWithToken(token);
+  }
+
+  /// 用给定 token 调 /api/v1/devices/me 并解析余额。
+  ///
+  /// 单测经 [fetchQuota] 不可达（kHasBundledBackend 是编译期常量），
+  /// 因此独立暴露，供测试注入 token 直测网络与解析路径。
+  @visibleForTesting
+  Future<DeviceQuotaInfo?> fetchMeWithToken(String token) async {
+    try {
+      final Response resp = await _api.dio.get(
+        '/api/v1/devices/me',
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
+      return parseMeResponse(resp.data);
+    } catch (e) {
+      LoggerService.instance.w(
+        '查询设备额度失败（不影响使用）: $e',
+        category: LogCategory.ai,
+        tags: ['device', 'quota'],
+      );
+      return null;
+    }
+  }
+
+  /// 解析 /api/v1/devices/me 响应；余额缺失或类型异常时返回 null。
+  static DeviceQuotaInfo? parseMeResponse(dynamic data) {
+    if (data is! Map) return null;
+    final balance = data['quota_balance'];
+    if (balance is! int) return null;
+    return DeviceQuotaInfo(
+      deviceId: data['device_id']?.toString() ?? '',
+      quotaBalance: balance,
+      status: data['status']?.toString() ?? '',
+      attestationVerified: data['attestation_verified'] == true,
+    );
   }
 
   Future<List<String>> _attest(String challenge) async {
