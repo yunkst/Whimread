@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pytest configuration and fixtures for Novel Builder Backend tests.
+Pytest configuration and fixtures for Whimread Backend tests.
 
 设计要点:
 - 测试不依赖外部服务(ComfyUI / PostgreSQL),所有外部依赖在测试中被替换。

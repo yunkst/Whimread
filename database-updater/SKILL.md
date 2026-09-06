@@ -1,13 +1,13 @@
 ---
 name: database-updater
-description: Database schema migration and update skill for Novel Builder project. Use this skill when encountering database errors like "column does not exist", needing to add/modify database tables or columns, or when SQLAlchemy model definitions don't match the actual database structure. This skill guides through the complete Alembic migration workflow including diagnosis, migration creation, execution, and verification in Docker-based environments.
+description: Database schema migration and update skill for Whimread project. Use this skill when encountering database errors like "column does not exist", needing to add/modify database tables or columns, or when SQLAlchemy model definitions don't match the actual database structure. This skill guides through the complete Alembic migration workflow including diagnosis, migration creation, execution, and verification in Docker-based environments.
 ---
 
 # Database Updater
 
 ## Overview
 
-Enable database schema updates for the Novel Builder project using Alembic migrations. This skill handles the complete workflow for resolving database schema mismatches, adding new columns/tables, and maintaining database consistency across development and production environments.
+Enable database schema updates for the Whimread project using Alembic migrations. This skill handles the complete workflow for resolving database schema mismatches, adding new columns/tables, and maintaining database consistency across development and production environments.
 
 ## When to Use This Skill
 

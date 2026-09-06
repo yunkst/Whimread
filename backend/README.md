@@ -1,4 +1,4 @@
-# Novel Builder Backend
+# Whimread Backend
 
 FastAPI backend service for **novel AI image/video generation, backup, and model management**.
 

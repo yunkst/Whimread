@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Novel Builder Backend Application
+Whimread Backend Application
 
 A FastAPI-based web service for novel content crawling and caching.
 """

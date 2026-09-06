@@ -1,6 +1,6 @@
 # Alembic 数据库迁移工作流程
 
-本文档详细说明在 Novel Builder 项目中使用 Alembic 进行数据库迁移的完整流程。
+本文档详细说明在 Whimread 项目中使用 Alembic 进行数据库迁移的完整流程。
 
 ## 迁移工作流程概览
 

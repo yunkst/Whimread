@@ -52,7 +52,7 @@ text2img_service = create_text2img_service()
 image_to_video_service = create_image_to_video_service()
 
 app = FastAPI(
-    title="Novel Builder Backend",
+    title="Whimread Backend",
     version=__version__,
     description="FastAPI backend for novel AI image/video generation, backup, and model management",
 )
@@ -86,7 +86,7 @@ async def startup_event() -> None:
     # 初始化数据库
     init_db()
 
-    logger.info("Novel Builder Backend 启动完成")
+    logger.info("Whimread Backend 启动完成")
 
     if settings.debug:
         logger.warning("调试模式已开启")
@@ -416,7 +416,7 @@ async def get_models() -> ModelsResponse:
 @app.get("/")
 def index():
     return {
-        "message": "Novel Builder Backend",
+        "message": "Whimread Backend",
         "version": __version__,
         "docs": "/docs",
         "token_required": True,

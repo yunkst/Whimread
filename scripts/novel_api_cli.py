@@ -190,7 +190,7 @@ def do_search_flow(base_url: str, token_header: str, token_value: Optional[str])
 
 
 def main() -> None:
-    print("欢迎使用 Novel Builder 后台 API 交互脚本")
+    print("欢迎使用 Whimread 后台 API 交互脚本")
     base_url = DEFAULT_BASE_URL
     print(f"默认后台地址：{base_url}")
     # 允许用户修改后台地址

@@ -10,7 +10,7 @@
 
 ## 模块职责
 
-Python 后端是 Novel Builder 平台的 AI 与配套服务，提供 FastAPI 驱动的：
+Python 后端是 Whimread 平台的 AI 与配套服务，提供 FastAPI 驱动的：
 
 - ComfyUI 文生图 / 图生视频任务提交与结果轮询
 - ComfyUI 工作流与可用模型列表管理

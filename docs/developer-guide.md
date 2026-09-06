@@ -1,10 +1,10 @@
-# Novel Builder 开发者指南
+# Whimread 开发者指南
 
-本指南面向希望为 Novel Builder 贡献代码或自部署的开发者。涵盖项目架构、开发环境搭建、扩展开发等主题。
+本指南面向希望为 Whimread 贡献代码或自部署的开发者。涵盖项目架构、开发环境搭建、扩展开发等主题。
 
 ## 🏗️ 架构总览
 
-Novel Builder 采用 monorepo 架构，包含两个主要模块：
+Whimread 采用 monorepo 架构，包含两个主要模块：
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -263,7 +263,7 @@ Future<List<Novel>> searchNovels(
 
 ### 章节提取（前端本地完成）
 
-Novel Builder 不再依赖服务端爬虫：章节列表与正文由 **Flutter 端 Headless WebView + 本地 JS 提取脚本**（`lib/services/headless_webview_*.dart` + `site_scripts` 表）直接获取；对字体反爬站点（如番茄）走 OCR 还原（`OcrRestoreService` + 系统 OCR-JS 模板，PP-OCRv6）。
+Whimread 不再依赖服务端爬虫：章节列表与正文由 **Flutter 端 Headless WebView + 本地 JS 提取脚本**（`lib/services/headless_webview_*.dart` + `site_scripts` 表）直接获取；对字体反爬站点（如番茄）走 OCR 还原（`OcrRestoreService` + 系统 OCR-JS 模板，PP-OCRv6）。
 
 - 客户端实现：见 [lib/services/headless_webview_*.dart](../novel_app/lib/services/)
 - 站点脚本：`site_scripts` 表（v39，含 `chapter_list_ocr` / `chapter_content_ocr` 独立列）
@@ -377,7 +377,7 @@ workflow:
 
 ## 🕷️ 添加新站点提取脚本
 
-Novel Builder 已不使用服务端爬虫。要支持新站点，**在前端编写 site_script**：
+Whimread 已不使用服务端爬虫。要支持新站点，**在前端编写 site_script**：
 
 ### 步骤 1：在 APP 内通过 Agent Chat 引导创建
 

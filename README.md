@@ -1,7 +1,7 @@
 <div align="center">
 
 # 随心阅读
-### Novel Builder · AI 原生小说阅读平台
+### Whimread · AI 原生小说阅读平台
 
 **读喜欢的 · 改不爽的 · 写自己的**
 
@@ -91,7 +91,7 @@
 <details>
 <summary>🔧 技术细节</summary>
 
-- **创作引导机制**：AI 在 system prompt 里被设定为「Novel Builder 的小说写作助手」+ 「专业的小说写作助手，只输出小说正文」（`agent_system_prompt.dart:31` / `chapter_write_executor.dart:549`）；工作原则第 4 条指令 AI 在用户说"新建一本小说"时直接 `create_novel`（`agent_system_prompt.dart:42-43`）
+- **创作引导机制**：AI 在 system prompt 里被设定为「Whimread 的小说写作助手」+ 「专业的小说写作助手，只输出小说正文」（`agent_system_prompt.dart:31` / `chapter_write_executor.dart:549`）；工作原则第 4 条指令 AI 在用户说"新建一本小说"时直接 `create_novel`（`agent_system_prompt.dart:42-43`）
 - `create_novel`：建空白书并自动切为当前工作小说（`agent_tools.dart:132`）
 - `create_chapter`：position + instruction + `characterNames` + `tagNames` → 调 LLM 生成正文插入（`agent_tools.dart:240`）；前一章正文作为衔接上下文注入（`chapter_write_executor.dart:90`）
 - `write_outline` / `update_outline` / `get_outline`：大纲 CRUD（`agent_tools.dart:625+`）

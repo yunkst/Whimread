@@ -2,7 +2,7 @@
 
 ## 安全承诺
 
-Novel Builder 项目致力于维护一个安全的开源项目。我们认真对待所有安全报告，并会及时响应和修复安全问题。
+Whimread (随心阅读) 项目致力于维护一个安全的开源项目。我们认真对待所有安全报告，并会及时响应和修复安全问题。
 
 ## 支持的版本
 
@@ -19,7 +19,7 @@ Novel Builder 项目致力于维护一个安全的开源项目。我们认真对
 
 ### 📧 邮件报告
 **收件人**：[Security Advisories](https://github.com/yunkst/novel_builder/security/advisories/new)
-**主题**：[Security] Novel Builder 安全漏洞报告
+**主题**：[Security] Whimread 安全漏洞报告
 
 ### 报告内容
 请在邮件中包含以下信息：

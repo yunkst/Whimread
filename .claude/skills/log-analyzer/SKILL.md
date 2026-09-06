@@ -1,13 +1,13 @@
 ---
 name: log-analyzer
-description: 读取并分析 Novel Builder APP 上报的客户端日志。此 skill 用于从 PostgreSQL 数据库中获取 APP 上报的日志数据，进行 Bug 检测、错误统计、趋势分析和配置问题诊断等全面分析。当用户请求查看日志、分析日志、检查APP错误、诊断问题或查看日志趋势时触发此 skill。
+description: 读取并分析 Whimread APP 上报的客户端日志。此 skill 用于从 PostgreSQL 数据库中获取 APP 上报的日志数据，进行 Bug 检测、错误统计、趋势分析和配置问题诊断等全面分析。当用户请求查看日志、分析日志、检查APP错误、诊断问题或查看日志趋势时触发此 skill。
 ---
 
 # Log Analyzer - APP 日志分析
 
 ## 概述
 
-从 PostgreSQL 数据库中读取 Novel Builder Flutter APP 上报的客户端日志（`client_logs` 表），进行全面的 Bug 检测、错误统计、趋势分析和问题诊断。提供结构化的分析报告和可操作的建议。
+从 PostgreSQL 数据库中读取 Whimread Flutter APP 上报的客户端日志（`client_logs` 表），进行全面的 Bug 检测、错误统计、趋势分析和问题诊断。提供结构化的分析报告和可操作的建议。
 
 ## 触发场景
 

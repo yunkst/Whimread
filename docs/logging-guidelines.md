@@ -2447,4 +2447,4 @@ MIT License - 与项目主许可证一致
 
 **文档版本**: 1.1.0
 **最后更新**: 2026-07-27
-**维护者**: Novel Builder Team
+**维护者**: Whimread Team

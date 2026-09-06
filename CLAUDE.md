@@ -1,4 +1,4 @@
-# Novel Builder - 全栈小说阅读平台
+# Whimread (随心阅读) - 全栈小说阅读平台
 
 ## 变更记录 (Changelog)
 
@@ -27,13 +27,13 @@
 
 ## 项目愿景
 
-Novel Builder 是一个 **AI 原生小说阅读平台**。前端 Flutter 离线优先（本地书架 + Headless WebView 章节提取 + PP-OCRv6 字体反爬还原），AI 层由 DSL Engine + Agent Chat + Subagent 驱动，后端 FastAPI 仅承担 ComfyUI 文生图/图生视频、AI 结果轮询、客户端备份、客户端日志上报 等轻量职责。
+Whimread 是一个 **AI 原生小说阅读平台**。前端 Flutter 离线优先（本地书架 + Headless WebView 章节提取 + PP-OCRv6 字体反爬还原），AI 层由 DSL Engine + Agent Chat + Subagent 驱动，后端 FastAPI 仅承担 ComfyUI 文生图/图生视频、AI 结果轮询、客户端备份、客户端日志上报 等轻量职责。
 
 ## 架构总览
 
 ```mermaid
 graph TD
-    A["(根) Novel Builder"] --> B["novel_app"];
+    A["(根) Whimread"] --> B["novel_app"];
     A --> C["backend"];
     A --> D["docker-compose.yml"];
     A --> E["PostgreSQL"];

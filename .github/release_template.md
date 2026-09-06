@@ -1,4 +1,4 @@
-# Novel Builder {{VERSION}}
+# Whimread {{VERSION}}
 
 ## 📦 下载说明
 

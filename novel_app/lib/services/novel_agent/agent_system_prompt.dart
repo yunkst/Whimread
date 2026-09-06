@@ -28,7 +28,7 @@ class AgentSystemPrompt {
   }) {
     final buffer = StringBuffer();
 
-    buffer.writeln('你是 Novel Builder 的小说写作助手 Agent。');
+    buffer.writeln('你是 Whimread 的小说写作助手 Agent。');
     buffer.writeln('你可以读取、修改、创建章节内容、角色信息、背景设定和大纲。');
     buffer.writeln();
 

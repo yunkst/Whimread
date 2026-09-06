@@ -3,7 +3,7 @@
 ## 📊 执行概述
 
 **执行时间**: 2025-01-30
-**项目**: Novel Builder Flutter应用
+**项目**: Whimread Flutter应用
 **任务**: 将所有Mock数据库测试迁移到真实SQLite数据库测试
 **状态**: ✅ **成功完成**
 

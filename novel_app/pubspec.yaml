@@ -1,5 +1,5 @@
 name: novel_app
-description: "Novel Builder — AI 原生小说阅读平台前端（书架 / 阅读 / Agent Chat / 角色 / 关系图 / OCR 反爬）"
+description: "Whimread — AI 原生小说阅读平台前端（书架 / 阅读 / Agent Chat / 角色 / 关系图 / OCR 反爬）"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

@@ -167,7 +167,7 @@
 ## [1.0.0] - 2025-12-15
 
 ### 新增
-- 🎉 Novel Builder 初始版本发布
+- 🎉 Whimread 初始版本发布
 - 📱 Flutter 跨平台移动应用
 - 🌐 FastAPI 后端服务
 - 🗄️ PostgreSQL 数据库缓存
@@ -239,7 +239,7 @@
 
 ## 贡献
 
-感谢所有为 Novel Builder 项目做出贡献的开发者！
+感谢所有为 Whimread 项目做出贡献的开发者！
 
 ### 主要贡献者
 - [@yunkst](https://github.com/yunkst) - 项目创建者和主要维护者

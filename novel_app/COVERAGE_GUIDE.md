@@ -1,6 +1,6 @@
 # Flutter 测试覆盖率指南
 
-本文档介绍如何在 Novel Builder 项目中使用代码覆盖率工具。
+本文档介绍如何在 Whimread 项目中使用代码覆盖率工具。
 
 ## 📋 目录
 
@@ -414,4 +414,4 @@ genhtml coverage/single_file.info -o coverage/single_file_html
 ---
 
 **最后更新**: 2026-01-30
-**维护者**: Novel Builder Team
+**维护者**: Whimread Team

@@ -165,7 +165,7 @@ def draw_architecture_diagram():
     font_title = get_font(48, bold=True)
 
     # 标题
-    title = "Flutter App Architecture - Novel Builder"
+    title = "Flutter App Architecture - Whimread"
     title_bbox = draw.textbbox((0, 0), title, font=font_title)
     title_x = (WIDTH - (title_bbox[2] - title_bbox[0])) // 2
     draw.text((title_x, MARGIN - 80), title, fill=COLORS['text_primary'], font=font_title)

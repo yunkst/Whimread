@@ -30,7 +30,7 @@ def test_root_returns_service_info(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.json()
-    assert body["message"] == "Novel Builder Backend"
+    assert body["message"] == "Whimread Backend"
     # 端点清单非空
     assert isinstance(body["endpoints"], list)
     assert len(body["endpoints"]) > 0

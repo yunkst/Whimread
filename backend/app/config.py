@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration settings for the Novel Builder Backend.
+Configuration settings for the Whimread Backend.
 
 This module contains application configuration using Pydantic BaseSettings
 for environment variable management.

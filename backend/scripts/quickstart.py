@@ -92,7 +92,7 @@ def setup_environment():
     else:
         print("⚠️ 没有找到.env.example文件")
         # 创建基本的环境变量文件
-        basic_env = """# Novel Builder Backend - Environment Configuration
+        basic_env = """# Whimread Backend - Environment Configuration
 
 # API Configuration
 API_HOST=0.0.0.0
@@ -242,7 +242,7 @@ def check_requirements():
 
 def main():
     """主函数"""
-    print("🚀 Novel Builder Backend 快速启动")
+    print("🚀 Whimread Backend 快速启动")
     print("=" * 50)
 
     # 检查系统要求
