@@ -409,6 +409,12 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     // IndexedStack 会保留各 Tab 的 element 与 State，切换 Tab 不再销毁 WebView。
     return Scaffold(
       body: AgentFloatingShell(
+        // 共享 FAB 的场景随当前 Tab 显式声明（issue #23）：
+        // 从阅读页 pop 回浏览器 Tab 不会触发 _onItemTapped，读全局残留值
+        // 会在浏览器 Tab 误开写作助手；Tab 切换经 setState 重建时同步更新。
+        scenarioId: selectedIndex == _browserTabIndex
+            ? ScenarioIds.webviewExtract
+            : ScenarioIds.writing,
         child: IndexedStack(
           index: selectedIndex,
           children: [
