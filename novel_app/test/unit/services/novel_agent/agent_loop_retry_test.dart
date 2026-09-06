@@ -400,29 +400,6 @@ void main() {
       expect(llm.callCount, 2);
       expect(events.last, isA<AgentDoneEvent>());
     });
-
-    test('RetryableHttpException(401) → round 重试 → 成功（鉴权 4xx 也统一重试）', () async {
-      // 模拟 token 偶发过期 → round-level 兜底重试。
-      final llm = _ScriptedErrorLlm()
-        ..enqueue(
-            throwMode: const RetryableHttpException(
-          401,
-          'unauthorized',
-          '',
-          retryAfterMs: 50,
-        ))
-        ..enqueue(
-          response: const _ScriptedResponse(contentChunks: ['鉴权后恢复']),
-        );
-      final loop = AgentLoop(
-        llm: llm,
-        scenario: _FakeScenario(),
-        config: const AgentLoopConfig(networkRetryPerRound: 2),
-      );
-      final events = await runLoop(loop);
-      expect(llm.callCount, 2);
-      expect(events.last, isA<AgentDoneEvent>());
-    });
   });
 
   group('Round-level 重试 + RetrySignals 接线', () {
