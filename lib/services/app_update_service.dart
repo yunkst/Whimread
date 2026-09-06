@@ -5,17 +5,22 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../core/constants/build_config.dart';
 import '../models/app_version.dart';
 import '../utils/device_arch.dart';
 import 'app_update_check_exception.dart';
 import 'app_update_result.dart';
+import 'backend_release_service.dart';
 import 'github_release_service.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
 
 /// APP更新服务
 ///
-/// 通过 GitHub Releases 获取版本信息和下载 APK
+/// 更新源双链：打包注入了 `BACKEND_BASE_URL` 时首选托管后端
+/// （[BackendReleaseService]），失败或未注入则回退 GitHub Releases
+/// （[GithubReleaseService]）。两条源的通道语义对齐（stable 跳过预览版，
+/// preview 取含预览版的最新一条）。
 class AppUpdateService {
   static const String _ignoreVersionKey = 'app_update_ignore_version';
   static const String _previewChannelKey = 'app_update_preview_channel';
@@ -23,12 +28,18 @@ class AppUpdateService {
       MethodChannel('com.example.novel_app/app_install');
 
   final GithubReleaseService _githubService;
+  final BackendReleaseService? _backendService;
+  final String _backendBaseUrl;
   final Future<PackageInfo> Function()? _packageInfoGetter;
 
   AppUpdateService({
     GithubReleaseService? githubService,
+    BackendReleaseService? backendReleaseService,
+    String? backendBaseUrl,
     Future<PackageInfo> Function()? packageInfoGetter,
   })  : _githubService = githubService ?? GithubReleaseService(),
+        _backendService = backendReleaseService,
+        _backendBaseUrl = backendBaseUrl ?? kBackendBaseUrl,
         _packageInfoGetter = packageInfoGetter;
 
   /// 获取当前APP版本信息
@@ -68,42 +79,14 @@ class AppUpdateService {
       // 记录检查时间
       await _githubService.recordCheckTime();
 
-      // 先从 GitHub 获取最新 release（限流/网络错误在此步抛 AppUpdateCheckException）
-      final release = await _githubService.fetchLatestRelease(
+      // 后端优先，失败回退 GitHub；两源都失败时若后端错误在先，
+      // 归类为 CheckFailed（避免把网络故障误报成「已是最新」）
+      final appVersion = await _resolveLatestVersion(
         includePrerelease: includePrerelease,
       );
-      if (release == null) {
+      if (appVersion == null) {
         return const AppUpdateUpToDate();
       }
-
-      // 检测设备 CPU 架构，按架构选择最合适的 APK
-      final arch = await DeviceArchDetector.getCurrent();
-      final archSegment = arch.apkNameSegment;
-
-      LoggerService.instance.d(
-        '设备架构: ${arch.name} (segment=$archSegment)',
-        category: LogCategory.general,
-        tags: ['update', 'arch'],
-      );
-
-      final asset = release.apkAssetFor(archSegment);
-      if (asset == null) {
-        LoggerService.instance.w(
-          'Release ${release.tagName} 无可用 APK asset (arch=$archSegment)',
-          category: LogCategory.general,
-          tags: ['update', 'arch', 'noapk'],
-        );
-        return const AppUpdateUpToDate();
-      }
-
-      // 构造 AppVersion（downloadUrl 使用 GitHub 直链）
-      final appVersion = AppVersion(
-        version: release.versionNumber,
-        downloadUrl: asset.browserDownloadUrl,
-        fileSize: asset.size,
-        changelog: _extractChangelog(release.body),
-        createdAt: release.publishedAt,
-      );
 
       // 获取当前版本（延后到确认有可用 release 之后，避免无 release 时也依赖平台）
       final currentInfo = await getCurrentVersion();
@@ -140,6 +123,104 @@ class AppUpdateService {
       );
       return AppUpdateCheckFailed('检查更新失败，请稍后重试');
     }
+  }
+
+  /// 解析最新可用版本：后端优先，失败或未配置回退 GitHub
+  ///
+  /// 返回 null 表示两源都正常但均无可用 release；后端曾失败且 GitHub 也
+  /// 无结果时，重抛后端异常让调用方归为 [AppUpdateCheckFailed]。
+  Future<AppVersion?> _resolveLatestVersion({
+    required bool includePrerelease,
+  }) async {
+    Object? backendError;
+    if (_backendBaseUrl.isNotEmpty) {
+      try {
+        final service =
+            _backendService ?? BackendReleaseService(baseUrl: _backendBaseUrl);
+        final fromBackend = await _appVersionFromBackend(
+          service,
+          includePrerelease: includePrerelease,
+        );
+        if (fromBackend != null) return fromBackend;
+        // 后端正常但无 release（新部署 / 未同步）：继续走 GitHub 兜底
+      } on AppUpdateCheckException catch (e) {
+        backendError = e;
+      }
+    }
+
+    final fromGithub = await _appVersionFromGithub(
+      includePrerelease: includePrerelease,
+    );
+    if (fromGithub != null) return fromGithub;
+    if (backendError is AppUpdateCheckException) throw backendError;
+    return null;
+  }
+
+  /// 从托管后端构造 AppVersion（downloadUrl 指向后端 / CDN）
+  Future<AppVersion?> _appVersionFromBackend(
+    BackendReleaseService service, {
+    required bool includePrerelease,
+  }) async {
+    final release = await service.fetchLatestRelease(
+      includePrerelease: includePrerelease,
+    );
+    if (release == null) return null;
+
+    final arch = await DeviceArchDetector.getCurrent();
+    final file = release.apkFileFor(arch.apkNameSegment);
+    if (file == null) {
+      LoggerService.instance.w(
+        '后端 release ${release.version} 无可用 APK (arch=${arch.apkNameSegment})',
+        category: LogCategory.general,
+        tags: ['update', 'arch', 'noapk'],
+      );
+      return null;
+    }
+
+    return AppVersion(
+      version: release.version,
+      downloadUrl: file.url,
+      fileSize: file.size,
+      changelog: release.changelog,
+      createdAt: release.publishedAt,
+    );
+  }
+
+  /// 从 GitHub Releases 构造 AppVersion（兜底路径，行为与历史版本一致）
+  Future<AppVersion?> _appVersionFromGithub({
+    required bool includePrerelease,
+  }) async {
+    final release = await _githubService.fetchLatestRelease(
+      includePrerelease: includePrerelease,
+    );
+    if (release == null) return null;
+
+    final arch = await DeviceArchDetector.getCurrent();
+    final archSegment = arch.apkNameSegment;
+
+    LoggerService.instance.d(
+      '设备架构: ${arch.name} (segment=$archSegment)',
+      category: LogCategory.general,
+      tags: ['update', 'arch'],
+    );
+
+    final asset = release.apkAssetFor(archSegment);
+    if (asset == null) {
+      LoggerService.instance.w(
+        'Release ${release.tagName} 无可用 APK asset (arch=$archSegment)',
+        category: LogCategory.general,
+        tags: ['update', 'arch', 'noapk'],
+      );
+      return null;
+    }
+
+    return AppVersion(
+      version: release.versionNumber,
+      downloadUrl: asset.browserDownloadUrl,
+      fileSize: asset.size,
+      changelog: _extractChangelog(release.body),
+      createdAt: release.publishedAt,
+    );
   }
 
   /// 检查是否有新版本（向后兼容入口）
@@ -209,6 +290,9 @@ class AppUpdateService {
   }
 
   /// 下载更新
+  ///
+  /// [version.downloadUrl] 可以来自托管后端 / CDN 或 GitHub 直链，
+  /// 下载流程相同（dio 流式下载 + 进度回调）。
   ///
   /// [onProgress] 进度回调 0.0-1.0
   /// [onStatus] 状态文本回调
