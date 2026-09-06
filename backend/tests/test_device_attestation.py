@@ -26,6 +26,7 @@ from pyasn1.codec.der.encoder import encode as der_encode
 from app.config import settings
 from app.exceptions import AuthenticationError
 from app.services import device_attestation as att
+from app.services.device_attestation import verify_key_attestation
 
 ATTESTATION_OID = ObjectIdentifier("1.3.6.1.4.1.11129.2.1.17")
 
@@ -54,13 +55,6 @@ def _make_cert(subject_key, signer_key, issuer_name, subject_name, ca=False):
             x509.BasicConstraints(ca=True, path_length=None), critical=True
         )
     return builder.sign(signer_key, hashes.SHA256())
-
-
-def _encode_app_id(app_sig: str) -> bytes:
-    """AttestationApplicationId DER：packageInfos 空表 + 签名摘要表。"""
-    pkg_infos = univ_seq([])
-    digests = univ_seq([bytes.fromhex(app_sig)])
-    return der_encode(_AppId(packageInfos=pkg_infos, signatureDigests=digests))
 
 
 def univ_seq(items):
@@ -219,7 +213,9 @@ def _build_chain(
     if not trust_anchor:
         root_fp = "ff" * 32
 
-    pem = lambda c: c.public_bytes(serialization.Encoding.PEM).decode()
+    def pem(c):
+        return c.public_bytes(serialization.Encoding.PEM).decode()
+
     return [pem(leaf), pem(root)], root_fp
 
 
@@ -234,11 +230,6 @@ def _trusted_root(monkeypatch):
 @pytest.fixture(autouse=True)
 def _official_signature(monkeypatch):
     monkeypatch.setattr(settings, "expected_apk_signature_sha256", APP_SIG_SHA256)
-
-
-from app.services.device_attestation import verify_key_attestation  # noqa: E402
-
-att = __import__("app.services.device_attestation", fromlist=["verify_key_attestation"])
 
 
 class TestHappyPath:
