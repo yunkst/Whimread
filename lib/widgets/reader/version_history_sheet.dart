@@ -264,11 +264,13 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
   }
 
   /// 还原到指定版本
+  ///
+  /// 注意时序：确认框必须先于面板关闭弹出（盖在面板上）。若先 pop 面板，
+  /// 面板退出动画结束即 dispose，用户在确认框点「还原」时 `mounted` 已为
+  /// false，早退导致还原静默不执行（表现为「选了历史版本切不回去」）。
+  /// 确认后面板仍挂载，写库全程 ref/mounted 有效，最后再关面板。
   Future<void> _restoreVersion(ChapterVersion version) async {
-    // 先关闭 BottomSheet
-    Navigator.of(context).pop();
-
-    // 二次确认
+    // 二次确认（面板仍打开，确认框盖在其上）
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -301,11 +303,11 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
     try {
       // 走 ChapterMutationNotifier 收口：写库 + bump signal 触发章节列表软刷新。
       await ref.read(chapterMutationProvider.notifier).updateChapterContent(
-        widget.chapterUrl,
-        version.content,
-        source: 'restore',
-        novelUrl: widget.novelUrl,
-      );
+            widget.chapterUrl,
+            version.content,
+            source: 'restore',
+            novelUrl: widget.novelUrl,
+          );
 
       if (mounted) {
         ToastUtils.showSuccess('已还原到历史版本', context: context);
@@ -317,14 +319,18 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
       if (mounted) {
         ToastUtils.showError('还原失败: $e', context: context);
       }
+    } finally {
+      // 收尾关闭面板（此前一直保持打开）
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
     }
   }
 
   /// 删除指定版本
+  ///
+  /// 时序同 [_restoreVersion]：确认框先于面板关闭弹出，删除在面板仍挂载时执行。
   Future<void> _deleteVersion(ChapterVersion version) async {
-    // 先关闭 BottomSheet
-    Navigator.of(context).pop();
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -349,11 +355,13 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
       ),
     );
 
+    final versionId = version.id;
     if (confirmed != true || !mounted) return;
+    if (versionId == null) return;
 
     try {
       final versionRepo = ref.read(chapterVersionRepositoryProvider);
-      await versionRepo.deleteVersion(version.id!);
+      await versionRepo.deleteVersion(versionId);
 
       if (mounted) {
         ToastUtils.showSuccess('版本已删除', context: context);
@@ -361,6 +369,10 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
     } catch (e) {
       if (mounted) {
         ToastUtils.showError('删除失败: $e', context: context);
+      }
+    } finally {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
       }
     }
   }
