@@ -204,4 +204,47 @@ void main() {
 
     expect(await result, isA<AppUpdateUpToDate>());
   });
+
+  group('hasNewVersion 预发布版本比较', () {
+    final service = AppUpdateService();
+
+    test('正式版用户收到数值段更新的预发布', () {
+      expect(service.hasNewVersion('1.9.0', '2.0.0-preview.1'), isTrue);
+    });
+
+    test('预览版之间按后缀序号递进', () {
+      expect(service.hasNewVersion('2.0.0-preview.1', '2.0.0-preview.2'),
+          isTrue);
+      expect(service.hasNewVersion('2.0.0-preview.2', '2.0.0-preview.1'),
+          isFalse);
+    });
+
+    test('预览版收到同版本的正式版', () {
+      expect(service.hasNewVersion('2.0.0-preview.2', '2.0.0'), isTrue);
+    });
+
+    test('正式版不提示语义上更旧的预发布', () {
+      // 语义化版本：2.0.0-preview.9 < 2.0.0
+      expect(service.hasNewVersion('2.0.0', '2.0.0-preview.9'), isFalse);
+    });
+
+    test('两位数后缀按数值而非字符串比较', () {
+      expect(service.hasNewVersion('2.0.0-preview.9', '2.0.0-preview.10'),
+          isTrue);
+    });
+
+    test('相同版本与回退版本不提示', () {
+      expect(service.hasNewVersion('1.0.0', '1.0.0'), isFalse);
+      expect(service.hasNewVersion('1.0.0', '0.9.9'), isFalse);
+    });
+
+    test('更高正式版之后收到新预览版', () {
+      expect(service.hasNewVersion('2.1.0', '2.2.0-preview.1'), isTrue);
+    });
+
+    test('非法版本号不抛异常，返回 false（保留历史契约）', () {
+      expect(service.hasNewVersion('not-a-version', '2.0.0'), isFalse);
+      expect(service.hasNewVersion('1.0.0', ''), isFalse);
+    });
+  });
 }

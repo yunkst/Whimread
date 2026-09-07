@@ -242,34 +242,25 @@ class AppUpdateService {
     return null;
   }
 
-  /// 比较版本号
+  /// 比较版本号，判定 [latest] 是否比 [current] 新
   ///
-  /// 返回 true 表示有新版本
+  /// 支持预发布版本号（如 `2.0.0-preview.1`，即预览通道 tag 去掉 `v` 前缀后的
+  /// 形态）：数值段剥离 `-` 后缀参与比较；数值段相等时按语义化版本规则——
+  /// 正式版 > 任意预发布，预发布之间按后缀逐段比较且数字段按数值比
+  /// （`preview.10` > `preview.9`）。
   bool hasNewVersion(String current, String latest) {
     try {
-      final currentParts = current.split('.').map(int.parse).toList();
-      final latestParts = latest.split('.').map(int.parse).toList();
+      final c = _ParsedVersion.parse(current);
+      final l = _ParsedVersion.parse(latest);
 
-      // 补齐版本号位数
-      while (currentParts.length < 3) {
-        currentParts.add(0);
-      }
-      while (latestParts.length < 3) {
-        latestParts.add(0);
-      }
+      final coreCompared = _compareIntSegments(l.core, c.core);
+      if (coreCompared != 0) return coreCompared > 0;
 
-      // 比较主版本号
-      if (latestParts[0] > currentParts[0]) return true;
-      if (latestParts[0] < currentParts[0]) return false;
-
-      // 比较次版本号
-      if (latestParts[1] > currentParts[1]) return true;
-      if (latestParts[1] < currentParts[1]) return false;
-
-      // 比较修订号
-      if (latestParts[2] > currentParts[2]) return true;
-
-      return false;
+      // 数值段相同：正式版 > 任意预发布
+      if (c.prerelease == null && l.prerelease == null) return false;
+      if (c.prerelease != null && l.prerelease == null) return true;
+      if (c.prerelease == null) return false;
+      return _comparePrerelease(l.prerelease!, c.prerelease!) > 0;
     } catch (e) {
       LoggerService.instance.e(
         '版本号比较失败: $e',
@@ -431,4 +422,56 @@ class AppUpdateService {
   static Future<void> setPreviewChannelEnabled(bool enabled) async {
     await PreferencesService.instance.setBool(_previewChannelKey, enabled);
   }
+}
+
+/// 版本号的解析形态：数值主段 + 可选预发布后缀
+///
+/// `2.0.0-preview.1` → core=`[2,0,0]`，prerelease=`"preview.1"`
+class _ParsedVersion {
+  final List<int> core;
+  final String? prerelease;
+
+  const _ParsedVersion(this.core, this.prerelease);
+
+  factory _ParsedVersion.parse(String version) {
+    final cleaned = version.replaceFirst(RegExp(r'^v'), '');
+    final dashIdx = cleaned.indexOf('-');
+    final coreStr = dashIdx == -1 ? cleaned : cleaned.substring(0, dashIdx);
+    final core = coreStr.split('.').map(int.parse).toList();
+    while (core.length < 3) {
+      core.add(0);
+    }
+    return _ParsedVersion(
+      core,
+      dashIdx == -1 ? null : cleaned.substring(dashIdx + 1),
+    );
+  }
+}
+
+/// 逐段数值比较（调用方保证段数对齐），a>b 返回 1、a<b 返回 -1、相等返回 0
+int _compareIntSegments(List<int> a, List<int> b) {
+  for (var i = 0; i < a.length; i++) {
+    final diff = a[i] - b[i];
+    if (diff != 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/// 预发布后缀逐段比较：数字段按数值，缺段方更小
+int _comparePrerelease(String a, String b) {
+  final aParts = a.split('.');
+  final bParts = b.split('.');
+  for (var i = 0; i < aParts.length || i < bParts.length; i++) {
+    final aSeg = i < aParts.length ? aParts[i] : null;
+    final bSeg = i < bParts.length ? bParts[i] : null;
+    if (aSeg == null) return -1;
+    if (bSeg == null) return 1;
+    final aNum = int.tryParse(aSeg);
+    final bNum = int.tryParse(bSeg);
+    final cmp = (aNum != null && bNum != null)
+        ? aNum.compareTo(bNum)
+        : aSeg.compareTo(bSeg);
+    if (cmp != 0) return cmp > 0 ? 1 : -1;
+  }
+  return 0;
 }
