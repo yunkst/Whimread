@@ -295,7 +295,9 @@ jobs:
           channel = os.environ["CHANNEL"]
           changelog = os.environ.get("CHANGELOG") or ""
           apk_dir = "build/app/outputs/flutter-apk"
-          chunk_size = 5 * 1024 * 1024  # 5MB,SCF event 上限 6MB
+          # 分片大小 2MB:网关 body 限制 6MB,base64 膨胀 1.33x → 2MB 实际 ~2.7MB,安全
+          # (5MB 曾实测 413 EXCEED_MAX_PAYLOAD_SIZE)
+          chunk_size = 2 * 1024 * 1024
 
           abi_map = [
               ("app-arm64-v8a-release.apk", "arm64-v8a"),

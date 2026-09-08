@@ -28,7 +28,12 @@
 
 const { ok, err, handleCors, ErrorCodes } = require('./common/errors');
 const { getDb } = require('./common/db');
-const { signPutUrl, publicUrl } = require('./common/cos-admin');
+const {
+    initiateMultipartUpload,
+    uploadPart,
+    completeMultipartUpload,
+    publicUrl,
+} = require('./common/cos-admin');
 const logger = require('./common/logger');
 
 exports.main = async (event, context) => {
@@ -48,6 +53,12 @@ exports.main = async (event, context) => {
         }
         if (method === 'POST' && route === 'init') {
             return await handleInit(event, context);
+        }
+        if (method === 'POST' && route === 'chunk') {
+            return await handleChunk(event, context);
+        }
+        if (method === 'POST' && route === 'finalize') {
+            return await handleFinalize(event, context);
         }
         return err(404, ErrorCodes.NOT_FOUND, `Unknown route: ${method} ${rawPath}`);
     } catch (e) {
@@ -232,8 +243,7 @@ async function handlePublish(event, context) {
         return err(500, ErrorCodes.INTERNAL, `deactivate old releases failed`);
     }
 
-    // 6b. 插入新 release(ExecutePGSql 不返回 INSERT RETURNING 的 Rows,
-    // 用 affectedRows=1 判断成功,然后 SELECT 拿自增 id)
+    // 6b. 插入新 release
     const { error: insertErr } = await db.from('app_releases')
         .insert({
             version: raw.version,
@@ -298,6 +308,94 @@ async function handlePublish(event, context) {
     });
 }
 
+// ============================================================
+// POST /api/admin/app/releases/chunk
+// Header: X-API-TOKEN
+// Query: key=<storageKey>&uploadId=<id>&partNumber=<N>
+// Body: 原始二进制(≤ 5MB,SCF event 上限 6MB)
+// Resp: { etag }
+// ============================================================
+async function handleChunk(event, context) {
+    const expected = process.env.PUBLISH_API_TOKEN;
+    if (!expected) return err(500, ErrorCodes.INTERNAL, 'Server misconfigured');
+    const got = event.headers?.['x-api-token'] || event.headers?.['X-API-Token'] || '';
+    if (got !== expected) {
+        return err(401, 'UNAUTHORIZED', 'Invalid or missing X-API-TOKEN');
+    }
+
+    const bucket = process.env.STORAGE_BUCKET;
+    if (!bucket) return err(500, ErrorCodes.INTERNAL, 'STORAGE_BUCKET not configured');
+
+    // SCF 网关会把 query 拆进 queryStringParameters
+    const params = event.queryStringParameters || {};
+    const key = params.key;
+    const uploadId = params.uploadId;
+    const partNumber = parseInt(params.partNumber, 10);
+    if (!key || !uploadId || !partNumber || partNumber < 1 || partNumber > 10000) {
+        return err(400, ErrorCodes.BAD_REQUEST, 'query {key, uploadId, partNumber} required (1..10000)');
+    }
+
+    let bodyBuf;
+    if (event.body == null) {
+        return err(400, ErrorCodes.BAD_REQUEST, 'empty body');
+    }
+    bodyBuf = Buffer.isBuffer(event.body)
+        ? event.body
+        : Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8');
+    if (bodyBuf.length === 0) {
+        return err(400, ErrorCodes.BAD_REQUEST, 'empty chunk');
+    }
+    if (bodyBuf.length > 3 * 1024 * 1024) {
+        return err(413, 'PAYLOAD_TOO_LARGE', 'chunk must be <= 3MB');
+    }
+
+    let etag;
+    try {
+        etag = await uploadPart({ bucket, key, uploadId, partNumber, body: bodyBuf });
+    } catch (e) {
+        logger.error(context, `uploadPart ${partNumber} failed: ${e.message}`, { code: e.code });
+        return err(502, 'COS_UPLOAD_FAILED', `part ${partNumber}: ${e.message.slice(0, 200)}`);
+    }
+
+    return ok({ partNumber, etag, size: bodyBuf.length });
+}
+
+// ============================================================
+// POST /api/admin/app/releases/finalize
+// Header: X-API-TOKEN
+// Body: { key, uploadId, parts: [{partNumber, etag}] }
+// Resp: { ok: true }
+// ============================================================
+async function handleFinalize(event, context) {
+    const expected = process.env.PUBLISH_API_TOKEN;
+    if (!expected) return err(500, ErrorCodes.INTERNAL, 'Server misconfigured');
+    const got = event.headers?.['x-api-token'] || event.headers?.['X-API-Token'] || '';
+    if (got !== expected) {
+        return err(401, 'UNAUTHORIZED', 'Invalid or missing X-API-TOKEN');
+    }
+
+    const bucket = process.env.STORAGE_BUCKET;
+    if (!bucket) return err(500, ErrorCodes.INTERNAL, 'STORAGE_BUCKET not configured');
+
+    const raw = parseBody(event);
+    if (!raw || !raw.key || !raw.uploadId || !Array.isArray(raw.parts) || raw.parts.length === 0) {
+        return err(400, ErrorCodes.BAD_REQUEST, 'body {key, uploadId, parts[]} required');
+    }
+
+    try {
+        await completeMultipartUpload({
+            bucket, key: raw.key, uploadId: raw.uploadId,
+            parts: raw.parts.map((p) => ({ partNumber: Number(p.partNumber), etag: p.etag })),
+        });
+    } catch (e) {
+        logger.error(context, `finalize failed: ${e.message}`, { code: e.code });
+        return err(502, 'COS_FINALIZE_FAILED', e.message.slice(0, 200));
+    }
+
+    logger.info(context, 'finalize ok', { key: raw.key, parts: raw.parts.length });
+    return ok({ key: raw.key, publicUrl: publicUrl(bucket, raw.key) });
+}
+
 function parseBody(event) {
     if (!event.body) return {};
     if (typeof event.body === 'object') return event.body;
@@ -312,13 +410,14 @@ function parseBody(event) {
 // POST /api/admin/app/releases/init
 // Header: X-API-TOKEN
 // Body: { version, channel, files: [{abi, filename, size, sha256}] }
-// Resp: { uploadUrls: [{abi, filename, uploadUrl, storageKey, publicUrl}], expiresAt }
+// Resp: { files: [{abi, filename, storageKey, uploadId}], expiresAt }
 //
-// 流程:
-//   1. 验证 token + 必填字段
-//   2. 用 SCF 运行时凭据(TC3 不需要,纯本地 HMAC-SHA1)生成每个 APK 的 COS 预签名 PUT URL
-//   3. 返回 URL(30 分钟内有效),CI 用这些 URL 直接 PUT APK 到 COS
-//   4. CI 再调 POST /publish(同 X-API-TOKEN)写 PG,文件已经在 Storage 里
+// 流程(分片上传,零腾讯云密钥在 CI):
+//   1. CI 调 /init,云函数对每个 APK 调 COS InitiateMultipartUpload 拿 uploadId
+//   2. CI 把 APK 切成 5MB 分片,逐片 POST /chunk?key=...&uploadId=...&partNumber=N
+//      (云函数用 SCF runtime STS 凭据调 COS UploadPart)
+//   3. CI 调 /finalize 汇总 parts 让 COS 合并
+//   4. CI 调 /publish JSON 写 PG
 // ============================================================
 async function handleInit(event, context) {
     const expected = process.env.PUBLISH_API_TOKEN;
@@ -343,37 +442,38 @@ async function handleInit(event, context) {
         return err(500, ErrorCodes.INTERNAL, 'STORAGE_BUCKET not configured');
     }
 
-    let uploadUrls;
+    const files = [];
     try {
-        uploadUrls = raw.files.map((f) => {
+        for (const f of raw.files) {
             if (!f.abi || !f.filename) {
-                throw new Error(`each file must have {abi, filename}`);
+                throw new Error('each file must have {abi, filename}');
             }
             const storageKey = `app-releases/${raw.version}/${f.filename}`;
-            return {
+            const uploadId = await initiateMultipartUpload({
+                bucket, key: storageKey,
+                contentType: 'application/vnd.android.package-archive',
+            });
+            files.push({
                 abi: f.abi,
                 filename: f.filename,
                 storageKey,
-                uploadUrl: signPutUrl({ bucket, key: storageKey, expiresSec: 1800 }),
-                publicUrl: publicUrl(bucket, storageKey),
-            };
-        });
+                uploadId,
+            });
+        }
     } catch (e) {
-        logger.error(context, `signPutUrl failed: ${e.message}`, { code: e.code });
-        return err(500, ErrorCodes.INTERNAL, `sign url failed: ${e.message}`);
+        logger.error(context, `init multipart failed: ${e.message}`, { code: e.code });
+        return err(502, 'COS_INIT_FAILED', e.message.slice(0, 200));
     }
 
-    const expiresAt = Math.floor(Date.now() / 1000) + 1800;
-    logger.info(context, 'publish init', {
+    logger.info(context, 'publish init (multipart)', {
         version: raw.version,
         channel: raw.channel,
-        fileCount: uploadUrls.length,
+        fileCount: files.length,
     });
 
     return ok({
         version: raw.version,
         channel: raw.channel,
-        expiresAt,
-        uploadUrls,
+        files,
     });
 }
