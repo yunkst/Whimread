@@ -261,9 +261,12 @@ jobs:
             build/app/outputs/flutter-apk/SHA256SUMS.txt
 
       - name: Publish release to backend
-        # GitHub Release 之后把 APK 同步推送到 whimread-backend，客户端检查更新
-        # 以后端为首选源（GitHub 保留兜底）。初期最佳努力：后端故障不阻塞发布，
-        # 跑稳后可移除 continue-on-error 改为强校验。
+        # GitHub Release 之后把 APK 同步推送到 CloudBase 后端 + 写 app_releases 表。
+        # 流程(零腾讯云密钥):
+        #   1. POST /api/admin/app/releases/init 拿每个 APK 的 COS 预签名 PUT URL
+        #      (云函数用 SCF 运行时凭据本地算 HMAC-SHA1,不联网)
+        #   2. curl PUT 每个 APK 到预签名 URL(走 COS,不受 6MB 网关限制)
+        #   3. POST /api/admin/app/releases/publish JSON 写 PG(文件已在 Storage)
         continue-on-error: true
         env:
           BACKEND_URL: ${{ secrets.WHIMREAD_BACKEND_URL }}
@@ -273,48 +276,112 @@ jobs:
           CHANNEL: ${{ steps.prerelease.outputs.flag == 'true' && 'preview' || 'stable' }}
           CHANGELOG: ${{ steps.changelog.outputs.changelog }}
         run: |
+          set -e
           if [ -z "$BACKEND_URL" ] || [ -z "$BACKEND_TOKEN" ]; then
-            echo "⚠️ 未配置 WHIMREAD_BACKEND_URL / WHIMREAD_BACKEND_TOKEN，跳过后端发布"
+            echo "⚠️ 未配置 WHIMREAD_BACKEND_URL / WHIMREAD_BACKEND_TOKEN,跳过后端发布"
             exit 0
           fi
-          APK_DIR=build/app/outputs/flutter-apk
-          python3 - "$APK_DIR" "$VERSION" "$VERSION_CODE" "$CHANNEL" <<'EOF'
-          import hashlib
-          import json
-          import os
-          import sys
 
-          apk_dir, version, version_code, channel = sys.argv[1:5]
-          abi_map = {
-              "app-arm64-v8a-release.apk": "arm64-v8a",
-              "app-armeabi-v7a-release.apk": "armeabi-v7a",
-              "app-x86_64-release.apk": "x86_64",
-          }
-          entries = []
-          for apk, abi in abi_map.items():
-              path = os.path.join(apk_dir, apk)
-              if not os.path.exists(path):
-                  continue
-              with open(path, "rb") as f:
-                  digest = hashlib.sha256(f.read()).hexdigest()
-              entries.append({"abi": abi, "filename": apk, "sha256": digest})
-          if not entries:
-              sys.exit("❌ 未找到任何 APK 产物")
-          meta = {
-              "version": version,
-              "version_code": int(version_code),
-              "channel": channel,
-              "changelog": os.environ.get("CHANGELOG", ""),
-              "files": entries,
-          }
-          with open(os.path.join(apk_dir, "meta.json"), "w", encoding="utf-8") as f:
-              json.dump(meta, f, ensure_ascii=False)
-          print("meta.json:", json.dumps(meta, ensure_ascii=False)[:500])
-          EOF
-          curl --fail-with-body -sS -X POST \
-            "$BACKEND_URL/api/admin/app/releases/publish" \
+          APK_DIR=build/app/outputs/flutter-apk
+
+          # 1. 算每个 APK 的 SHA256
+          abi_map=(
+              "app-arm64-v8a-release.apk|arm64-v8a"
+              "app-armeabi-v7a-release.apk|armeabi-v7a"
+              "app-x86_64-release.apk|x86_64"
+          )
+          declare -a apk_files=()
+          declare -a apk_abi=()
+          declare -a apk_sha=()
+          for entry in "${abi_map[@]}"; do
+              apk="${entry%%|*}"
+              abi="${entry##*|}"
+              path="$APK_DIR/$apk"
+              if [ ! -f "$path" ]; then continue; fi
+              sha=$(sha256sum "$path" | awk '{print $1}')
+              apk_files+=("$path")
+              apk_abi+=("$abi")
+              apk_sha+=("$sha")
+          done
+          if [ ${#apk_files[@]} -eq 0 ]; then
+            echo "❌ 未找到任何 APK 产物"; exit 1
+          fi
+
+          # 2. 构造 init 请求体
+          init_files_json=""
+          for i in "${!apk_files[@]}"; do
+              apk=$(basename "${apk_files[$i]}")
+              [ -n "$init_files_json" ] && init_files_json+=",
+              init_files_json+="{\"abi\":\"${apk_abi[$i]}\",\"filename\":\"$apk\",\"size\":$(stat -c%s "${apk_files[$i]}"),\"sha256\":\"${apk_sha[$i]}\"}"
+          done
+          init_body="{\"version\":\"$VERSION\",\"channel\":\"$CHANNEL\",\"files\":[$init_files_json]}"
+
+          echo "==> 步骤 1: POST /init 拿 COS 预签名上传 URL"
+          init_resp=$(curl --fail-with-body -sS -X POST "$BACKEND_URL/api/admin/app/releases/init" \
             -H "X-API-TOKEN: $BACKEND_TOKEN" \
-            -F "meta=@$APK_DIR/meta.json;type=application/json" \
-            -F "files=@$APK_DIR/app-arm64-v8a-release.apk" \
-            -F "files=@$APK_DIR/app-armeabi-v7a-release.apk" \
-            -F "files=@$APK_DIR/app-x86_64-release.apk"
+            -H "Content-Type: application/json" \
+            -d "$init_body")
+          echo "$init_resp" | head -c 400; echo "..."
+          echo "$init_resp" > /tmp/init_resp.json
+
+          # 3. 解析每个 uploadUrl 并 PUT APK
+          echo "==> 步骤 2: 用预签名 URL PUT 每个 APK 到 CloudBase Storage"
+          python3 - <<'PYEOF'
+          import json, subprocess, sys, os
+          init = json.load(open("/tmp/init_resp.json"))
+          apk_dir = os.environ.get("APK_DIR", "build/app/outputs/flutter-apk")
+          for item in init["uploadUrls"]:
+              apk_path = os.path.join(apk_dir, item["filename"])
+              print(f"PUT {item['filename']} → {item['uploadUrl'][:120]}...")
+              rc = subprocess.run([
+                  "curl", "--fail-with-body", "-sS",
+                  "-X", "PUT", item["uploadUrl"],
+                  "-H", "Content-Type: application/vnd.android.package-archive",
+                  "--data-binary", f"@{apk_path}",
+              ], check=False).returncode
+              if rc != 0:
+                  print(f"❌ {item['filename']} 上传失败 (curl exit {rc})")
+                  sys.exit(1)
+          print("✅ 3 个 APK 全部上传到 CloudBase Storage")
+          PYEOF
+
+          # 4. POST /publish JSON 写 PG
+          echo "==> 步骤 3: POST /publish JSON 写 PG"
+          python3 - <<'PYEOF'
+          import json, os, sys, urllib.request, urllib.error
+          init = json.load(open("/tmp/init_resp.json"))
+          apk_dir = os.environ.get("APK_DIR", "build/app/outputs/flutter-apk")
+          files = []
+          for item in init["uploadUrls"]:
+              apk_path = os.path.join(apk_dir, item["filename"])
+              files.append({
+                  "abi": item["abi"],
+                  "filename": item["filename"],
+                  "size": os.path.getsize(apk_path),
+                  "sha256": __import__("hashlib").sha256(open(apk_path, "rb").read()).hexdigest(),
+                  "storageKey": item["storageKey"],
+                  "storageUrl": item["publicUrl"],
+              })
+          payload = {
+              "version": os.environ["VERSION"],
+              "versionCode": int(os.environ.get("VERSION_CODE") or 0),
+              "channel": os.environ["CHANNEL"],
+              "changelog": os.environ.get("CHANGELOG") or "",
+              "files": files,
+          }
+          req = urllib.request.Request(
+              f"{os.environ['BACKEND_URL']}/api/admin/app/releases/publish",
+              data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+              method="POST",
+              headers={
+                  "Content-Type": "application/json; charset=utf-8",
+                  "X-API-TOKEN": os.environ["BACKEND_TOKEN"],
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  print(f"✅ publish 成功 (HTTP {resp.status}): {resp.read().decode('utf-8')[:300]}")
+          except urllib.error.HTTPError as e:
+              print(f"❌ publish 失败 (HTTP {e.code}): {e.read().decode('utf-8')[:300]}")
+              sys.exit(1)
+          PYEOF

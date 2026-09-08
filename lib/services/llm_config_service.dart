@@ -112,19 +112,20 @@ class LlmConfigService {
 
   /// 构建 Whimread 托管后端代理的 LlmProvider。
   ///
-  /// AI 托管模式：所有 LLM 请求走打包内置的后端代理（OpenAI 兼容 /v1 端点），
-  /// 鉴权用设备 JWT（Authorization: Bearer），模型由服务端指定——
-  /// 用户不再配置任何 AI 供应商。
+  /// **AI 托管模式(打包注入 BACKEND_BASE_URL)**:所有 LLM 请求走 CloudBase
+  /// `llm-proxy` 函数(`/v1/chat/completions`),由服务端持有 LLM API Key 并转发
+  /// 到真实 LLM 供应商(DeepSeek/OpenAI/GLM/Kimi/Claude)。客户端只用设备 JWT
+  /// 鉴权,**不持有任何 LLM Key**。模型字段被服务端强制覆写。
   ///
-  /// [scenarioId] 仅用于缓存绑定场景（当前各场景共用同一后端配置）。
+  /// [scenarioId] 仅用于缓存绑定场景(当前各场景共用同一后端配置)。
   Future<llm.LlmProvider?> buildManagedProvider(String scenarioId) async {
     if (!kHasBundledBackend) return null; // 未注入托管后端 → 走旧用户自配路径
     final token = await DeviceAuthService.instance.ensureRegistered();
     return AiServiceFactory.buildLlmProvider(
       llm.LlmConfig(
         baseUrl: '$kBackendBaseUrl/v1',
-        apiKey: token,
-        defaultModel: 'whimread-managed', // 实际模型由服务端强制覆写
+        apiKey: token,                        // ⚠️ 这里传的是设备 JWT,不是 LLM Key
+        defaultModel: 'whimread-managed',    // 实际模型由服务端强制覆写
       ),
     );
   }

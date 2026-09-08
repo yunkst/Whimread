@@ -68,3 +68,13 @@ tr.log
 # 架构图冗余产物：generate_architecture_diagram.py 会同时产出三份，仓库仅保留 png
 docs/diagrams/flutter_architecture_diagram.pdf
 docs/diagrams/flutter_architecture_diagram_4k.png
+
+# CloudBase 本地密钥(PEM / envvars JSON)
+.secrets/
+
+# CloudBase: sync-common.mjs 生成的函数内 common/ 副本(部署用,不入库)
+cloudfunctions/*/common/
+cloudfunctions/*/node_modules/
+cloudfunctions/*/package-lock.json
+cloudfunctions/*/__tests__/
+.agents/skills/cloudbase/

@@ -2,11 +2,16 @@
 ///
 /// 用户可选择一个已有的 LLM 配置作为当前场景的 LLM 后端，
 /// 也可清空选择以使用全局默认配置。
+///
+/// **AI 托管模式**(`kHasBundledBackend == true`,打包注入了 BACKEND_BASE_URL):
+/// 所有 LLM 请求走 CloudBase `llm-proxy` 函数,LLM Key 由服务端持有,客户端零配置。
+/// 此时自配 LLM 配置不再生效,对话框显示托管模式提示。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/constants/build_config.dart';
 import '../../core/providers/services/ai_service_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/llm_config.dart';
@@ -63,6 +68,47 @@ class _AgentScenarioConfigDialogState
     final scenarioInfo = AgentScenarioFactory.availableScenarios
         .where((s) => s.id == widget.scenarioId)
         .firstOrNull;
+
+    // AI 托管模式:LLM 由服务端统一提供,客户端配置不再生效
+    if (kHasBundledBackend) {
+      return AlertDialog(
+        title: Row(
+          children: [
+            Icon(AgentIcons.quill,
+                size: 22, color: context.appColors.chatButtonPrimary),
+            const SizedBox(width: 8),
+            Text('${scenarioInfo?.displayName ?? widget.scenarioId} 配置'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.cloud_outlined,
+                    size: 18, color: context.appColors.chatButtonPrimary),
+                const SizedBox(width: 8),
+                Text('AI 托管模式已启用',
+                    style: Theme.of(context).textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '当前 LLM 请求统一通过 Whimread 服务端转发,'
+              'API Key 由服务端持有,客户端无需配置。'
+              '\n\n模型与额度由服务端管理,可在「设置 → 设备额度」查看余额。',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      );
+    }
 
     return AlertDialog(
       title: Row(

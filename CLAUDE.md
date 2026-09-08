@@ -769,16 +769,19 @@ class NovelListScreen extends ConsumerWidget {
 **Screen**: `lib/screens/settings_screen.dart`
 
 **子页面**:
-- `backend_settings_screen.dart` - 后端API配置
-- `llm_config_management_screen.dart` - LLM配置管理（DSL Engine + AI Agent 统一入口）
+- `prompt_tag_management_screen.dart` - 提示词标签管理
+- `agent_memory_management_screen.dart` - Agent 记忆管理
+- `log_report_settings_screen.dart` - 日志上报设置
+- `log_viewer_screen.dart` - 日志查看
+- `preload_queue_debug_screen.dart` - 预加载队列调试
 
 **存储**: SharedPreferences
 
 **功能**:
-- API地址配置
-- LLM API URL / Key / 模型配置（DSL Engine + AI Agent）
-- 阅读设置（字体、字号、行间距）
+- 阅读设置(字体、字号、行间距)
 - 主题设置
+- Agent 提示词 / 记忆管理
+- 检查 APP 更新(后端为主,GitHub Release 兜底)
 
 ### 8. 插图管理
 

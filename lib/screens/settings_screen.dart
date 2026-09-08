@@ -3,13 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/native_crash_reporter.dart' show kGitHubRepo;
-import 'ai_settings_screen.dart';
 import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
-import 'backend_settings_screen.dart';
 import 'log_report_settings_screen.dart';
 import 'log_viewer_screen.dart';
-import 'llm_log_viewer_screen.dart';
 import '../widgets/common/library_app_bar.dart';
 import 'preload_queue_debug_screen.dart';
 import '../services/app_update_service.dart';
@@ -154,22 +151,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.auto_awesome_outlined,
             title: 'AI',
             accentColor: appColors.agentAccent,
-            subtitle: '智能助手 · AI 设定 · 主题偏好',
+            subtitle: '智能助手 · 主题偏好',
             children: [
-              ListTile(
-                leading: Icon(Icons.smart_toy, color: appColors.agentAccent),
-                title: const Text('AI 配置'),
-                subtitle: const Text('内置 AI 服务状态与作家设定'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const AiSettingsScreen(),
-                    ),
-                  );
-                },
-              ),
               ListTile(
                 leading: Icon(Icons.label_outline, color: appColors.agentAccent),
                 title: const Text('提示词标签管理'),
@@ -258,21 +241,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const LogViewerScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading:
-                    Icon(Icons.smart_toy_outlined, color: appColors.success),
-                title: const Text('LLM 调用日志'),
-                subtitle: const Text('查看前端 LLM 请求/响应记录'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LlmLogViewerScreen(),
                     ),
                   );
                 },
@@ -463,24 +431,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: Icons.cloud_outlined,
             title: '进阶服务',
             accentColor: appColors.neutral,
-            subtitle: '后端部署 · 数据备份 · 远程日志',
+            subtitle: '数据备份 · 远程日志',
             badgeLabel: '进阶',
             initiallyExpanded: false,
             children: [
-              ListTile(
-                leading: Icon(Icons.settings_ethernet, color: appColors.neutral),
-                title: const Text('后端服务配置'),
-                subtitle: const Text('本地部署后端后可解锁云备份、AI 出图'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const BackendSettingsScreen(),
-                    ),
-                  );
-                },
-              ),
               ListTile(
                 leading: Icon(Icons.backup_rounded, color: appColors.neutral),
                 title: const Text('数据备份'),

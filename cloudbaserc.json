@@ -1,0 +1,34 @@
+{
+  "version": "2.0",
+  "envId": "whimread-dev-d0gm4oi0z3099082d",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "device-auth",
+      "runtime": "Nodejs20.19",
+      "installDependency": true,
+      "timeout": 30,
+      "envVariables": {},
+      "handler": "index.main",
+      "src": "./cloudfunctions/device-auth"
+    },
+    {
+      "name": "app-release",
+      "runtime": "Nodejs20.19",
+      "installDependency": true,
+      "timeout": 30,
+      "envVariables": {},
+      "handler": "index.main",
+      "src": "./cloudfunctions/app-release"
+    },
+    {
+      "name": "llm-proxy",
+      "runtime": "Nodejs20.19",
+      "installDependency": true,
+      "timeout": 60,
+      "envVariables": {},
+      "handler": "index.main",
+      "src": "./cloudfunctions/llm-proxy"
+    }
+  ]
+}
