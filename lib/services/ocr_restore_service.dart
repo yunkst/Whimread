@@ -155,10 +155,25 @@ class OcrRestoreService {
     return cjk / total;
   }
 
-  /// 内部识别抽象：产品实现读 provider，测试实现走注入函数。
+  /// 内部识别抽象:产品实现读 provider,测试实现走注入函数。
+  ///
+  /// 模型未就绪 / 下载失败时降级:PUA 字符留 □,由外层 [restorePuaInText]
+  /// 聚合失败日志,避免 native crash / 未捕获异常。
   Future<String> _recognizeImage(String base64Png) async {
     if (_recognizeFn != null) return _recognizeFn!(base64Png);
-    final ocr = await _ref!.read(ocrPredictorProvider.future);
-    return ocr.recognizeImage(base64Png);
+    try {
+      final ocr = await _ref!.read(ocrPredictorProvider.future);
+      return ocr.recognizeImage(base64Png);
+    } on StateError catch (e, st) {
+      // OcrModelDownloader 下载失败(重试 3 次后)→ StateError
+      // 记日志 + 抛出哨兵异常,由 restorePuaInText 的 try/catch 捕获
+      LoggerService.instance.e(
+        'OCR 模型不可用(下载失败或未就绪): $e',
+        stackTrace: st.toString(),
+        category: LogCategory.ai,
+        tags: ['ocr', 'restore-pua', 'model-unavailable'],
+      );
+      rethrow;
+    }
   }
 }

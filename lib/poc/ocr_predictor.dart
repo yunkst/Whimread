@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show File;
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -31,20 +32,33 @@ class OcrPredictor {
 
   bool get isLoaded => _session != null && _vocab.isNotEmpty;
 
-  /// 从 asset 加载模型与字典。可重复调用以热重载。
+  /// 加载模型与字典。可重复调用以热重载。
+  ///
+  /// 生产路径:传 [modelPath] / [dictPath](下载到本地后的文件路径,
+  /// 来自 OcrModelDownloader.localModelPath() / localDictPath())。
+  ///
+  /// ⚠️ 调试路径(不传文件路径)需要 asset 存在——2026-09-08 起 assets/models/
+  /// 已移除(模型挪到 CloudBase Storage),默认 asset 路径会抛 Asset not found。
+  /// 如需在开发机上跑 PoC 入口(main_ppocr_demo.dart),先跑一次生产版 App 让
+  /// OcrModelDownloader 把模型下载到本地,然后把 modelPath/dictPath 指过去,
+  /// 或把模型文件手动放回 assets/models/ 并在 pubspec.yaml 里临时声明。
   Future<void> load({
+    String? modelPath,
+    String? dictPath,
     String modelAsset = 'assets/models/inference.onnx',
     String dictAsset = 'assets/models/ppocrv6_dict.txt',
   }) async {
-    // 加载字典
-    final dictStr = await rootBundle.loadString(dictAsset);
+    // 加载字典(优先本地文件,fallback 到 asset)
+    final dictStr = dictPath != null
+        ? await File(dictPath).readAsString()
+        : await rootBundle.loadString(dictAsset);
     _vocab = [
       for (final line in dictStr.split('\n'))
         if (line.isNotEmpty) line.trim(),
     ];
     _vocabSize = _vocab.length;
     if (_vocabSize < 1000) {
-      throw StateError('字典加载异常：仅 $_vocabSize 行');
+      throw StateError('字典加载异常:仅 $_vocabSize 行');
     }
 
     // 加载模型并创建 session
@@ -94,7 +108,10 @@ class OcrPredictor {
       interOpNumThreads: 1,
       useArena: true,
     );
-    _session = await ort.createSessionFromAsset(modelAsset, options: options);
+    // 优先本地文件,fallback 到 asset
+    _session = modelPath != null
+        ? await ort.createSession(modelPath, options: options)
+        : await ort.createSessionFromAsset(modelAsset, options: options);
 
     // 诊断 2：模型输入/输出签名（包自报，与 Python onnx 签名对比）
     try {

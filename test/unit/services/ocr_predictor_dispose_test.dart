@@ -122,11 +122,25 @@ void main() {
     return base64Encode(byteData!.buffer.asUint8List());
   }
 
-  /// 加载 predictor。modelAsset 传字典文件（真实存在于 assets，~百 KB），
-  /// 避免单测解压 10MB 的 inference.onnx；mock createSession 不读文件内容。
+  /// 加载 predictor。
+  ///
+  /// 2026-09-08 起 assets/models/ 已移除(模型挪到 CloudBase Storage),
+  /// load() 走本地文件路径:用临时小文件模拟 dict(实际 dict 75KB 也太重,
+  /// 测试里 mock 了 createSession 不读文件内容,写个 ~1000 行假字典即可)。
+  File? modelFile;
+  File? dictFile;
+
   Future<OcrPredictor> loadPredictor() async {
+    final tmpDir = await Directory.systemTemp.createTemp('ocr_predictor_test');
+    dictFile = File('${tmpDir.path}/ppocrv6_dict.txt');
+    await dictFile!.writeAsString(
+      List.generate(2000, (i) => 'ch$i').join('\n'),
+    );
+    modelFile = File('${tmpDir.path}/inference.onnx');
+    await modelFile!.writeAsBytes(List.filled(16, 0));
+
     final ocr = OcrPredictor();
-    await ocr.load(modelAsset: 'assets/models/ppocrv6_dict.txt');
+    await ocr.load(modelPath: modelFile!.path, dictPath: dictFile!.path);
     return ocr;
   }
 
@@ -170,9 +184,9 @@ void main() {
     final ocr = await loadPredictor();
     expect(closeSessionCalls, 0);
 
-    await ocr.load(modelAsset: 'assets/models/ppocrv6_dict.txt');
+    await ocr.load(modelPath: modelFile!.path, dictPath: dictFile!.path);
     expect(closeSessionCalls, 1,
-        reason: 'P1 回归：二次 load 前必须 close 旧 session，'
+        reason: 'P1 回归:二次 load 前必须 close 旧 session,'
             '否则旧 OrtSession + model buffer 驻留 native sessions 注册表');
 
     await ocr.dispose();

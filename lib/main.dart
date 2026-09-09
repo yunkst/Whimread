@@ -11,6 +11,7 @@ import 'core/providers/theme_provider.dart';
 import 'core/providers/onboarding_providers.dart';
 import 'core/providers/ui_providers.dart';
 import 'core/providers/agent_scenario_provider.dart';
+import 'core/providers/ocr_providers.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_typography.dart';
 import 'utils/toast_utils.dart';
@@ -130,6 +131,23 @@ void main() async {
       container: container,
       child: const NovelReaderApp(),
     ));
+
+    // 首帧渲染后,后台启动 OCR 模型下载(不阻塞 UI,失败不影响 App 运行)
+    // 首启:用户首启 ~5-30 秒后模型本地就绪,期间触发 OCR 还原会 await 下载
+    // 后续:manifest sha256 命中本地缓存,直接跳过
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      container.read(ocrModelDownloaderProvider).ensureLocal().then(
+        (_) {},  // success: 不需要做事
+        onError: (e, st) {
+          LoggerService.instance.w(
+            'OCR 模型后台下载启动失败(不影响 App): $e',
+            stackTrace: st.toString(),
+            category: LogCategory.ai,
+            tags: ['ocr', 'model-download', 'startup-error'],
+          );
+        },
+      );
+    });
   }, (error, stackTrace) {
     _logGlobalError('async-unhandled', error, stackTrace,
         category: LogCategory.general);

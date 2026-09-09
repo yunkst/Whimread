@@ -125,6 +125,7 @@ dependencies:
   # 的直接修复，升级属版本试探，非定向补丁。
   flutter_onnxruntime: ^1.8.3
   image: ^4.3.0
+  file_picker: ^11.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -177,12 +178,11 @@ flutter:
         - asset: assets/fonts/NotoSansSC-Bold.ttf
           weight: 700
 
-  # PP-OCRv6 模型资源（inference.onnx + ppocrv6_dict.txt 已入库）。
-  # 注：tool/ocr_test_assets/ 下的测试图（chapter_full.png 等）被 .gitignore 排除、
-  # 不入库，故不在此声明——PoC 入口文件本机跑时本地提供即可。
-  assets:
-    - assets/models/inference.onnx
-    - assets/models/ppocrv6_dict.txt
+  # 注:PP-OCRv6 模型 (inference.onnx 21MB + ppocrv6_dict.txt 75KB) 已迁移到
+  # CloudBase Storage,启动后由 OcrModelDownloader 后台下载到 app 私有目录。
+  # 详见 lib/services/ocr_model_downloader.dart。模型不再随 APK 打包,APK arm64
+  # 从 97MB 缩到约 76MB(节省 22%)。tool/ocr_test_assets/ 下的测试图
+  # (chapter_full.png 等) 被 .gitignore 排除,不入库,本机 PoC 时本地提供即可。
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

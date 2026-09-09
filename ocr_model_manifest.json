@@ -1,0 +1,26 @@
+{
+  "model_version": "1.0.0",
+  "released_at": "2026-09-08T00:00:00Z",
+  "arch": {
+    "arm64-v8a": {
+      "url": "https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la/ocr-models/v1/inference.onnx",
+      "sha256": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+      "size": 21159378
+    },
+    "armeabi-v7a": {
+      "url": "https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la/ocr-models/v1/inference.onnx",
+      "sha256": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+      "size": 21159378
+    },
+    "x86_64": {
+      "url": "https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la/ocr-models/v1/inference.onnx",
+      "sha256": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+      "size": 21159378
+    }
+  },
+  "dict": {
+    "url": "https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la/ocr-models/v1/ppocrv6_dict.txt",
+    "sha256": "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
+    "size": 74947
+  }
+}
