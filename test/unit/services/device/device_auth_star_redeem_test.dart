@@ -54,7 +54,7 @@ void main() {
   });
 
   group('mapRedeemDioError', () {
-    DioException _err(int? status, dynamic data) => DioException(
+    DioException err(int? status, dynamic data) => DioException(
           requestOptions: RequestOptions(path: '/star/redeem'),
           response: status == null
               ? null
@@ -73,61 +73,69 @@ void main() {
     });
 
     test('NOT_STARRED → 中文提示去 Star', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         404,
-        {'error': 'NOT_STARRED', 'message': '未在项目 Star 列表中找到'},
+        {'code': 'NOT_STARRED', 'message': '未在项目 Star 列表中找到'},
       ));
       expect(e.code, 'NOT_STARRED');
       expect(e.message, contains('Star'));
     });
 
     test('ALREADY_REDEEMED → 中文提示已兑换', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         409,
-        {'error': 'ALREADY_REDEEMED', 'message': '已兑换过免费额度'},
+        {'code': 'ALREADY_REDEEMED', 'message': '已兑换过免费额度'},
       ));
       expect(e.code, 'ALREADY_REDEEMED');
       expect(e.message, contains('已兑换'));
     });
 
     test('INVALID_GITHUB_LOGIN → 提示格式说明', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         400,
-        {'error': 'INVALID_GITHUB_LOGIN', 'message': '用户名格式不正确'},
+        {'code': 'INVALID_GITHUB_LOGIN', 'message': '用户名格式不正确'},
       ));
       expect(e.code, 'INVALID_GITHUB_LOGIN');
       expect(e.message, contains('字母'));
     });
 
     test('STAR_REDEEM_RATE_LIMITED → 提示稍后再试', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         429,
-        {'error': 'STAR_REDEEM_RATE_LIMITED', 'message': 'too many'},
+        {'code': 'STAR_REDEEM_RATE_LIMITED', 'message': 'too many'},
       ));
       expect(e.code, 'STAR_REDEEM_RATE_LIMITED');
       expect(e.message, contains('稍后'));
     });
 
     test('GITHUB_CHECK_FAILED → 提示 GitHub 暂不可用', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         502,
-        {'error': 'GITHUB_CHECK_FAILED', 'message': '502'},
+        {'code': 'GITHUB_CHECK_FAILED', 'message': '502'},
       ));
       expect(e.code, 'GITHUB_CHECK_FAILED');
       expect(e.message, contains('GitHub'));
     });
 
+    test('错误体用 code 键(errors.js 规范)也能映射', () {
+      final e = DeviceAuthService.mapRedeemDioError(err(
+        400,
+        {'code': 'NOT_STARRED', 'message': '未检测到 Star'},
+      ));
+      expect(e.code, 'NOT_STARRED');
+    });
+
     test('未知 code → 用 HTTP_<status> 作为 code + 透传 message', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(
+      final e = DeviceAuthService.mapRedeemDioError(err(
         500,
-        {'error': 'INTERNAL_ERROR', 'message': '服务器爆炸'},
+        {'code': 'INTERNAL_ERROR', 'message': '服务器爆炸'},
       ));
       expect(e.code, 'INTERNAL_ERROR');
       expect(e.message, '服务器爆炸');
     });
 
     test('响应体不是 Map（异常网关返回）→ 用 HTTP_500 作为 code', () {
-      final e = DeviceAuthService.mapRedeemDioError(_err(500, 'html 页面'));
+      final e = DeviceAuthService.mapRedeemDioError(err(500, 'html 页面'));
       expect(e.code, 'HTTP_500');
       expect(e.message, contains('500'));
     });

@@ -328,7 +328,7 @@ class DeviceAuthService {
 
   /// 把兑换接口的 DioException 映射为带语义 code 的 [DeviceAuthException]。
   ///
-  /// 后端错误体统一为 `{"error": <code>, "message": <msg>, "details": {}}`；
+  /// 后端错误体统一为 `{"code": <code>, "message": <msg>}`（cloudfunctions/common/errors.js）；
   /// 网络层失败（无响应）映射为 NETWORK。
   @visibleForTesting
   static DeviceAuthException mapRedeemDioError(DioException e) {
@@ -337,7 +337,9 @@ class DeviceAuthService {
       return DeviceAuthException('NETWORK', '网络不可用，请检查网络后重试');
     }
     final data = resp.data;
-    final rawCode = data is Map ? data['error']?.toString() : null;
+    final rawCode = data is Map
+        ? (data['code'] ?? data['error'])?.toString()
+        : null;
     final message = data is Map ? data['message']?.toString() : null;
     switch (rawCode) {
       case 'NOT_STARRED':
