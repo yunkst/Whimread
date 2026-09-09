@@ -24,6 +24,7 @@ const { signDeviceJwt, verifyDeviceJwt } = require('./common/jwt');
 const { grantQuota, REGISTER_BONUS } = require('./common/quota');
 const logger = require('./common/logger');
 const { verifyAttestation } = require('./lib/attestation');
+const { checkStarred, isValidGithubLogin, rateLimitAllow } = require('./lib/github');
 
 const CHALLENGE_TTL_SEC = 120;
 
@@ -44,6 +45,9 @@ exports.main = async (event, context) => {
         }
         if (method === 'GET' && route === 'me') {
             return await handleMe(event, context);
+        }
+        if (method === 'POST' && route === 'redeem') {
+            return await handleRedeem(event, context);
         }
         return err(404, ErrorCodes.NOT_FOUND, `Unknown route: ${method} ${rawPath}`);
     } catch (e) {
@@ -176,4 +180,82 @@ async function handleMe(event, context) {
         status: data.status,
         attestation_verified: !!data.attestation_cert,
     });
+}
+
+/**
+ * POST /api/v1/devices/star/redeem(设备 JWT,规格 §6.2)
+ * 错误码与客户端 mapRedeemDioError 一一对应,勿改名。
+ */
+const STAR_REDEEM_AMOUNT = parseInt(process.env.STAR_REDEEM_AMOUNT || '50', 10);
+
+async function handleRedeem(event, context) {
+    let claims;
+    try {
+        claims = await verifyDeviceJwt(event.headers, context);
+    } catch (e) {
+        return err(401, e.code || ErrorCodes.JWT_INVALID, 'Invalid JWT');
+    }
+
+    const body = parseBody(event);
+    const login = String(body.github_login || '').trim();
+    if (!isValidGithubLogin(login)) {
+        return err(400, 'INVALID_GITHUB_LOGIN', 'GitHub 用户名格式不正确');
+    }
+    if (!rateLimitAllow(claims.sub)) {
+        return err(429, 'STAR_REDEEM_RATE_LIMITED', '兑换请求过于频繁');
+    }
+
+    const db = getDb(context);
+    const { data: device, error: devErr } = await db.from('devices')
+        .select('quota_balance, status')
+        .eq('android_id', claims.sub).single();
+    if (devErr || !device) return err(404, ErrorCodes.DEVICE_NOT_FOUND, 'Device not found');
+    if (device.status === 'banned') return err(403, ErrorCodes.DEVICE_BANNED, 'Device banned');
+
+    // 幂等:同一 GitHub 账号全库仅可兑一次(并发窗口由迁移里的
+    // uq_quota_changes_star_login 部分唯一索引兜底)
+    const { data: prev } = await db.raw(
+        `SELECT id FROM quota_changes
+         WHERE reason = 'star_redeem' AND metadata->>'github_login' = '${login.replace(/'/g, "''")}'
+         LIMIT 1`);
+    if (prev && prev.length > 0) {
+        return err(409, 'ALREADY_REDEEMED', '该 GitHub 账号已兑换过');
+    }
+
+    // GitHub 校验:失败/未 star 一律不发放(§9 降级路径)
+    const gh = await checkStarred(process.env.GITHUB_STAR_REPO, login, { token: process.env.GITHUB_TOKEN });
+    if (!gh.ok) {
+        logger.error(context, 'github check failed', { status: gh.status, error: gh.error });
+        return err(503, 'GITHUB_CHECK_FAILED', 'GitHub 校验暂不可用,请稍后重试');
+    }
+    if (!gh.starred) {
+        return err(400, 'NOT_STARRED', '未检测到 Star');
+    }
+
+    // 发额度(与 register_bonus 同模式:先更余额,再落审计流水)
+    const amount = STAR_REDEEM_AMOUNT;
+    const newBalance = device.quota_balance + amount;
+    const { error: updErr } = await db.from('devices')
+        .update({ quota_balance: newBalance, updated_at: new Date().toISOString() })
+        .eq('android_id', claims.sub);
+    if (updErr) return err(500, ErrorCodes.INTERNAL, 'Failed to grant quota');
+    const { error: auditErr } = await db.from('quota_changes').insert({
+        android_id: claims.sub,
+        change_amount: amount,
+        reason: 'star_redeem',
+        balance_after: newBalance,
+        metadata: JSON.stringify({ github_login: login }),
+    });
+    if (auditErr) {
+        // 并发同账号兑换触发 uq_quota_changes_star_login 部分唯一索引。
+        // ⚠️ db.js Builder 对错误是返回 {error} 而非 throw,必须判返回值
+        logger.error(context, 'redeem audit insert failed', { message: auditErr.message });
+        if (String(auditErr.message || '').includes('duplicate key')) {
+            return err(409, 'ALREADY_REDEEMED', '该 GitHub 账号已兑换过');
+        }
+        return err(500, ErrorCodes.INTERNAL, 'Failed to record redeem');
+    }
+
+    logger.info(context, 'star redeemed', { github_login: login, amount });
+    return ok({ granted: amount, quota_balance: newBalance, github_login: login, message: '兑换成功' });
 }
