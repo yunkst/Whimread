@@ -279,27 +279,5 @@ final bookshelfRepositoryProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BookshelfRepositoryRef = AutoDisposeProviderRef<IBookshelfRepository>;
-String _$bookshelfAssociationWriterHash() =>
-    r'09345db27ed53474c8e208719c8ef82a530bd5dc';
-
-/// 书架关联表写操作 Provider（仅 [BookshelfMutationNotifier] 用）。
-///
-/// Copied from [bookshelfAssociationWriter].
-@ProviderFor(bookshelfAssociationWriter)
-final bookshelfAssociationWriterProvider =
-    AutoDisposeProvider<IBookshelfAssociationWriter>.internal(
-  bookshelfAssociationWriter,
-  name: r'bookshelfAssociationWriterProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$bookshelfAssociationWriterHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef BookshelfAssociationWriterRef
-    = AutoDisposeProviderRef<IBookshelfAssociationWriter>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

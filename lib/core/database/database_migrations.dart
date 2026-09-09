@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 39;
+  static const int currentVersion = 41;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -809,6 +809,57 @@ class DatabaseMigrations {
         await _addColumnIfNotExists(db, 'site_scripts', 'chapter_content_ocr',
             'INTEGER NOT NULL DEFAULT 0');
         _log('迁移 v38 → v39: site_scripts 加 chapter_list_ocr / chapter_content_ocr 两列');
+        break;
+
+      // ========== 版本 40：site_scripts 加 bookshelf_js 列（网站书架提取脚本槽） ==========
+      // 在小说站"我的书架/收藏"页运行的第三个提取脚本槽：
+      // 返回 {novels:[{title,url}]}，url 为该站小说目录页路径，
+      // 供「导入网站书架」跳转/批量导入复用 chapter_list_js 链路。
+      case 40:
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'bookshelf_js', 'TEXT NOT NULL DEFAULT \'\'');
+        _log('迁移 v39 → v40: site_scripts 加 bookshelf_js 列');
+        break;
+
+      // ========== 版本 41：本地生图模型管理 ==========
+      // 新建 image_models 表（用户导入的本地 SD 模型 + 元数据）：
+      //   - name：用户自定义名字，全局唯一，agent 作为 create_images 的 modelName key
+      //   - description/tags：模型"特点"，自由文本 + 结构化标签，agent 据此选模型
+      //   - backend_type：'local_sd'（未来可扩展 'qnn'），create_images 路由到
+      //     对应 ImageGenerationBackend
+      //   - file_path/file_size：导入的 .gguf 模型文件（必填）
+      //   - preview_media_id：可选预览图，关联 media_items.media_id
+      //   - default_*：出图默认参数，agent 未显式指定时由后端采用
+      // name 唯一性由 repository 层 save/getByName 保证（SQLite 加 UNIQUE 索引）。
+      case 41:
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS image_models (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          tags TEXT NOT NULL DEFAULT '[]',
+          backend_type TEXT NOT NULL DEFAULT 'local_sd',
+          file_path TEXT NOT NULL DEFAULT '',
+          file_size INTEGER NOT NULL DEFAULT 0,
+          preview_media_id TEXT,
+          default_width INTEGER NOT NULL DEFAULT 512,
+          default_height INTEGER NOT NULL DEFAULT 512,
+          default_steps INTEGER NOT NULL DEFAULT 20,
+          default_cfg REAL NOT NULL DEFAULT 7.0,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
+        await db.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_image_models_name ON image_models(name)');
+        await _createIndexIfNotExists(
+            db, 'idx_image_models_sort', 'image_models', 'sort_order');
+        await _createIndexIfNotExists(
+            db, 'idx_image_models_enabled', 'image_models', 'is_enabled');
+        _log('迁移 v40 → v41: 新建 image_models 表（本地生图模型管理）');
         break;
     }
   }

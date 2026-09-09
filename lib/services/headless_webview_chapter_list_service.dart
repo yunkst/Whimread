@@ -20,7 +20,7 @@
 ///   → _isFetching → return FetchChapterListResult.busy()
 ///   → 有脚本 → WebViewPageLoader.loadPage(onLoadStop 等待)
 ///              → callAsyncJavaScript(chapter_list_js)
-///              → 解析 JSON {chapters}
+///              → 解析 JSON {chapters, cover_url?}
 ///              → 校验 chapters 非空
 ///              → return FetchChapterListResult.success(...)
 ///   → 页面加载超时 → return FetchChapterListResult.loadFailed()
@@ -123,7 +123,7 @@ class HeadlessWebViewChapterListService {
       // 3. 加载页面（onLoadStop 等待，超时抛 PageLoadFailedException）
       await _loadPage(novelUrl);
 
-      // 4. 执行提取脚本（返回 title + chapters + 可选 fontFamily）
+      // 4. 执行提取脚本（返回 title + coverUrl + chapters + 可选 fontFamily）
       final result = await _executeChapterListScript(
         _controller!,
         script.chapterListJs,
@@ -137,6 +137,7 @@ class HeadlessWebViewChapterListService {
       String title = result.title;
       String? fontFamily = result.fontFamily;
       List<Chapter> chapters = result.chapters;
+      final coverUrl = result.coverUrl;
 
       // 5. OCR 还原（目录脚本标记 chapter_list_ocr 时对 PUA 反爬文本走 PP-OCRv6）
       if (script.chapterListOcr) {
@@ -177,12 +178,12 @@ class HeadlessWebViewChapterListService {
       _recordSuccess(scriptId);
 
       LoggerService.instance.i(
-        'HeadlessWebViewChapterList: 获取成功 domain=$logDomain count=${chapters.length}',
+        'HeadlessWebViewChapterList: 获取成功 domain=$logDomain count=${chapters.length} coverUrl=$coverUrl',
         category: LogCategory.cache,
         tags: ['headless-webview', 'chapter-list', 'success'],
       );
 
-      return FetchChapterListResult.success(chapters);
+      return FetchChapterListResult.success(chapters, coverUrl: coverUrl);
     } on PageLoadFailedException {
       if (scriptId != null) _recordFailure(scriptId);
       LoggerService.instance.w(
@@ -302,12 +303,19 @@ class HeadlessWebViewChapterListService {
 
   /// 执行 chapter_list_js 提取脚本
   ///
-  /// 返回 record `(title, chapters, fontFamily)`：
+  /// 返回 record `(title, chapters, fontFamily, coverUrl)`：
   /// - title：脚本返回的顶层标题（可空，缺失时为空串；目前 service 出口不外传，
   ///   仅供 OCR 还原内部使用）
   /// - chapters：章节列表
   /// - fontFamily：脚本可选声明的反爬字体族名（OCR 还原时用），可空
-  Future<({String title, List<Chapter> chapters, String? fontFamily})?>
+  /// - coverUrl：脚本可选返回的封面图 URL（cover_url / coverUrl 兜底），可空
+  Future<
+          ({
+            String title,
+            List<Chapter> chapters,
+            String? fontFamily,
+            String? coverUrl
+          })?>
       _executeChapterListScript(
     InAppWebViewController controller,
     String scriptTemplate,
@@ -390,10 +398,18 @@ class HeadlessWebViewChapterListService {
         ?.trim();
     final fontFamily = (ff == null || ff.isEmpty) ? null : ff;
 
+    // 可选 coverUrl：snake/camel 兜底。空串视为未声明（脚本在拿不到封面时返回 ''）
+    final coverRaw =
+        data['cover_url'] as String? ?? data['coverUrl'] as String?;
+    final coverUrl = (coverRaw == null || coverRaw.trim().isEmpty)
+        ? null
+        : coverRaw.trim();
+
     return (
       title: title,
       chapters: chapters,
       fontFamily: fontFamily,
+      coverUrl: coverUrl,
     );
   }
 

@@ -6,6 +6,7 @@ library;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:riverpod/riverpod.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../../models/bookshelf.dart';
 import '../../models/novel.dart';
 import '../../core/providers/database_providers.dart';
 import '../../core/providers/service_providers.dart';
@@ -14,38 +15,58 @@ import '../../services/preferences_service.dart';
 
 part 'bookshelf_providers.g.dart';
 
-/// 当前选中的书架ID
+/// 当前选中的书架分类
 ///
-/// 默认值为 1（"全部小说"书架）
-/// 支持持久化保存用户选择，重启app后恢复上次打开的书架
+/// 三档系统分类（全部/原创/联网），由"小说来源"派生，用户不可调整。
+/// 支持持久化保存用户选择，重启 app 后恢复上次打开的书架：
+/// - 新键 `current_bookshelf_kind` 存 [BookshelfKind.name]
+/// - 旧键 `current_bookshelf_id`（int）存在时经 [Bookshelf.fromLegacyId] 兜底映射
 @riverpod
-class CurrentBookshelfId extends _$CurrentBookshelfId {
-  static const String _key = 'current_bookshelf_id';
+class CurrentBookshelfKind extends _$CurrentBookshelfKind {
+  static const String _newKey = 'current_bookshelf_kind';
+  static const String _legacyKey = 'current_bookshelf_id';
 
   @override
-  int build() {
-    // 异步加载已保存的书架ID
+  BookshelfKind build() {
+    // 异步加载已保存的书架分类
     // 使用ref.read访问PreferencesService以支持测试
     final prefsService = ref.watch(preferencesServiceProvider);
-    _loadSavedBookshelfId(prefsService);
+    _loadSavedKind(prefsService);
     // 立即返回默认值，避免阻塞UI渲染
-    return 1;
+    return BookshelfKind.all;
   }
 
-  /// 从SharedPreferences加载保存的书架ID
-  Future<void> _loadSavedBookshelfId(PreferencesService prefsService) async {
+  /// 从SharedPreferences加载保存的书架分类
+  Future<void> _loadSavedKind(PreferencesService prefsService) async {
     try {
-      final savedId = await prefsService.getInt(_key, defaultValue: 1);
+      // 优先读新键（字符串枚举名）
+      final savedName = await prefsService.getString(_newKey);
+      if (savedName.isNotEmpty) {
+        final kind = BookshelfKind.values.firstWhere(
+          (k) => k.name == savedName,
+          orElse: () => BookshelfKind.all,
+        );
+        LoggerService.instance.d(
+          '书架分类加载完成: $kind',
+          category: LogCategory.ui,
+          tags: ['provider', 'bookshelf', 'load'],
+        );
+        state = kind;
+        return;
+      }
+
+      // 兜底：读旧键（int 书架 ID），映射到新三档
+      final legacyId = await prefsService.getInt(_legacyKey, defaultValue: 1);
+      final kind = Bookshelf.fromLegacyId(legacyId).kind;
       LoggerService.instance.d(
-        '书架ID加载完成: $savedId',
+        '书架分类从旧 ID 兜底加载: legacyId=$legacyId -> $kind',
         category: LogCategory.ui,
         tags: ['provider', 'bookshelf', 'load'],
       );
-      // 更新状态为保存的值
-      state = savedId;
+      state = kind;
     } catch (e, st) {
       LoggerService.instance.e(
-        '加载书架ID失败: $e',
+        '加载书架分类失败: $e',
         stackTrace: st.toString(),
         category: LogCategory.ui,
         tags: ['provider', 'bookshelf', 'load'],
@@ -53,22 +74,22 @@ class CurrentBookshelfId extends _$CurrentBookshelfId {
     }
   }
 
-  /// 设置当前书架ID并持久化
-  void setBookshelfId(int bookshelfId) {
-    state = bookshelfId;
+  /// 设置当前书架分类并持久化
+  void setBookshelfKind(BookshelfKind kind) {
+    state = kind;
     // 保存到SharedPreferences（使用Provider以支持测试）
     final prefsService = ref.read(preferencesServiceProvider);
-    prefsService.setInt(_key, bookshelfId);
+    prefsService.setString(_newKey, kind.name);
   }
 }
 
 /// 书架小说列表
 ///
-/// 根据当前书架ID异步加载小说列表
+/// 根据当前书架分类异步加载小说列表（分类由 URL 前缀派生）
 @riverpod
 Future<List<Novel>> bookshelfNovels(Ref ref) async {
-  // 获取当前书架ID
-  final bookshelfId = ref.watch(currentBookshelfIdProvider);
+  // 获取当前书架分类
+  final kind = ref.watch(currentBookshelfKindProvider);
 
   // Web环境特殊处理
   if (kIsWeb) {
@@ -96,9 +117,9 @@ Future<List<Novel>> bookshelfNovels(Ref ref) async {
 
   // 从数据库加载小说列表
   try {
-    final novels = await bookshelfRepository.getNovelsByBookshelf(bookshelfId);
+    final novels = await bookshelfRepository.getNovelsByBookshelf(kind);
     LoggerService.instance.d(
-      '书架小说列表加载成功: bookshelfId=$bookshelfId, count=${novels.length}',
+      '书架小说列表加载成功: kind=$kind, count=${novels.length}',
       category: LogCategory.database,
       tags: ['provider', 'bookshelf', 'load'],
     );

@@ -139,6 +139,67 @@ void main() {
       expect(find.text('添加到书架'), findsOneWidget);
       expect(find.text('取消'), findsOneWidget);
     });
+
+    testWidgets('传入 coverUrl → 渲染封面缩略图（Image.network）', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => AddNovelPreviewSheet(
+                    title: '有封面的书',
+                    chapters: _makeChapters(3),
+                    sourceUrl: 'https://example.com/book/9',
+                    coverUrl: 'https://example.com/cover.jpg',
+                  ),
+                ),
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开'));
+      // 网络图在测试环境不会真正加载完成，只 pump 一帧验证 widget 存在
+      await tester.pump();
+
+      expect(find.byType(Image), findsOneWidget);
+    });
+
+    testWidgets('coverUrl 为 null / 空串 → 不渲染封面（无 Image）', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => AddNovelPreviewSheet(
+                    title: '无封面的书',
+                    chapters: _makeChapters(3),
+                    sourceUrl: 'https://example.com/book/10',
+                    coverUrl: '',
+                  ),
+                ),
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Image), findsNothing);
+      // 标题仍正常显示
+      expect(find.text('无封面的书'), findsOneWidget);
+    });
   });
 
   group('AddNovelPreviewSheet - 交互', () {

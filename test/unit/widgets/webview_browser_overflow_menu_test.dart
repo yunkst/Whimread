@@ -79,8 +79,21 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  /// 构造测试容器。
+  ///
+  /// `webviewCurrentUrlProvider` 默认值是 'https://so.com'（domain 非空），
+  /// 会让 WebViewBrowserScreen 挂载即触发 site_scripts 查库——sqflite 在
+  /// 无平台 channel 的测试环境下会留 pending Timer。本测试只关注溢出菜单，
+  /// 与 URL 无关，统一置空。
+  ProviderContainer _makeContainer() {
+    final container = ProviderContainer(overrides: [
+      webviewCurrentUrlProvider.overrideWith((ref) => ''),
+    ]);
+    return container;
+  }
+
   testWidgets('AppBar 含 more_vert 溢出按钮', (tester) async {
-    final container = ProviderContainer();
+    final container = _makeContainer();
     addTearDown(container.dispose);
 
     await tester.pumpWidget(
@@ -98,7 +111,7 @@ void main() {
   });
 
   testWidgets('点 ⋮ 弹出含桌面模式的菜单，点击翻转 provider', (tester) async {
-    final container = ProviderContainer();
+    final container = _makeContainer();
     addTearDown(container.dispose);
     await _waitForDesktopModeLoad(container);
 

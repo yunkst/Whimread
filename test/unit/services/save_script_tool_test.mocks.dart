@@ -209,6 +209,7 @@ class MockSiteScriptRepository extends _i1.Mock
     required String? scriptType,
     required String? scriptJs,
     required bool? ocr,
+    String? testUrl,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -219,6 +220,7 @@ class MockSiteScriptRepository extends _i1.Mock
             #scriptType: scriptType,
             #scriptJs: scriptJs,
             #ocr: ocr,
+            #testUrl: testUrl,
           },
         ),
         returnValue:

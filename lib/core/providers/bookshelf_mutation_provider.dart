@@ -1,23 +1,25 @@
 /// BookshelfMutationNotifier —— 书架写路径的统一收口。
 ///
-/// 所有改 `bookshelf` 表（或 `novel_bookshelves` 关联表）的写操作必须经此 Notifier。
+/// 所有改 `bookshelf` 表的写操作必须经此 Notifier。
 /// Notifier 内部统一执行"写库 → invalidate(bookshelfNovelsProvider)"，
 /// 调用方再也无需手记"写完 invalidate"，从根本上消除浏览器添加小说后书架不刷新
 /// 这一类架构缺陷。
-///
-/// 设计意图见 `docs/superpowers/specs/2026-07-28-bookshelf-mutation-notifier-design.md`。
 ///
 /// 关键约定：
 /// - **不持状态**（`build()` 返回 void）——这是写操作聚合，不是状态机
 /// - **`_wrap` 统一收口**——所有写方法都走它；失败不 invalidate（避免半真半假 UI）
 /// - **`toggleBookshelf` 双分支也走 `_wrap`**——避免任何路径绕开 invalidate
 /// - **`removeCoverMediaId` 是 `updateCoverMediaIdByUrl(_, null)` 的 convenience**
+///
+/// 新设计：书架按"小说来源"派生（全部/原创/联网），用户不可调整。
+/// 因此本 Notifier 不再暴露 moveToBookshelf / copyToBookshelf / addNovelToBookshelf
+/// ——分类由 URL 决定，无法手动改；addNovel/removeNovel/toggleBookshelf 仍保留，
+/// 因为加/移除整本小说到书架页仍是有意义的写操作。
 library;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../models/novel.dart';
-import '../../repositories/bookshelf_repository.dart';
 import '../../repositories/novel_repository.dart';
 import 'bookshelf_providers.dart';
 import 'database_providers.dart';
@@ -26,9 +28,9 @@ part 'bookshelf_mutation_provider.g.dart';
 
 /// 书架写操作聚合 Notifier（无状态）。
 ///
-/// 10 个公共方法：addNovel / removeNovel / toggleBookshelf /
+/// 8 个公共方法：addNovel / removeNovel / toggleBookshelf /
 /// updateTitle / updateCoverMediaId / removeCoverMediaId /
-/// updateReadProgress / moveToBookshelf / copyToBookshelf / createNovel。
+/// backfillCoverUrl / updateReadProgress / createNovel。
 @riverpod
 class BookshelfMutation extends _$BookshelfMutation {
   @override
@@ -72,6 +74,16 @@ class BookshelfMutation extends _$BookshelfMutation {
   Future<void> removeCoverMediaId(String novelUrl) =>
       _wrap(() => _writer.updateCoverMediaIdByUrl(novelUrl, null));
 
+  /// 回填小说封面图 URL（chapter_list_js 抓取的 cover_url）。
+  ///
+  /// coverUrl 为 null/空 → 直接跳过（保留原值），不写库不 invalidate。
+  /// 用于「添加小说」FAB 对已在书架的小说静默补封面。
+  Future<void> backfillCoverUrl(String novelUrl, String? coverUrl) async {
+    final cleaned = coverUrl?.trim();
+    if (cleaned == null || cleaned.isEmpty) return;
+    await _wrap(() => _writer.updateCoverUrlByUrl(novelUrl, cleaned));
+  }
+
   /// 更新阅读进度（最近阅读章节索引）。
   ///
   /// 内部走 `_writer.updateLastReadChapter`，与其他写方法一样经 [_wrap]：
@@ -83,27 +95,6 @@ class BookshelfMutation extends _$BookshelfMutation {
   /// 绕过 Notifier，写库成功但书架列表 Provider 无从得知，导致 UI 不刷新。
   Future<void> updateReadProgress(String novelUrl, int chapterIndex) =>
       _wrap(() => _writer.updateLastReadChapter(novelUrl, chapterIndex));
-
-  /// 把小说从一个书架分类移动到另一个。
-  Future<void> moveToBookshelf(
-    String novelUrl,
-    int fromBookshelfId,
-    int toBookshelfId,
-  ) =>
-      _wrap(() => _associationWriter.moveNovelToBookshelf(
-            novelUrl,
-            fromBookshelfId,
-            toBookshelfId,
-          ));
-
-  /// 把小说复制到指定书架分类（不影响原书架归属）。
-  ///
-  /// 与 [moveToBookshelf] 的差别：复制只向 `novel_bookshelves` 关联表追加一行，
-  /// 不删除原书架的关联。复制成功后 invalidate `bookshelfNovelsProvider`——
-  /// 若用户当前停留在目标书架，列表会立即显示这本小说；若停留在原书架，
-  /// 小说仍在原列表（复制不影响原书架行），invalidate 只是无副作用的重新查询。
-  Future<void> copyToBookshelf(String novelUrl, int toBookshelfId) =>
-      _wrap(() => _associationWriter.addNovelToBookshelf(novelUrl, toBookshelfId));
 
   /// 创建新小说（不依赖浏览器 URL，由 Agent 工具或独立入口调用）。
   ///
@@ -126,9 +117,6 @@ class BookshelfMutation extends _$BookshelfMutation {
   // ===== 内部 =====
 
   IBookshelfWriter get _writer => ref.read(bookshelfWriterProvider);
-
-  IBookshelfAssociationWriter get _associationWriter =>
-      ref.read(bookshelfAssociationWriterProvider);
 
   Future<bool> _isInBookshelf(String novelUrl) async {
     return ref.read(novelRepositoryProvider).isInBookshelf(novelUrl);

@@ -5,7 +5,7 @@
 /// 布局：
 ///   - 拖拽手柄
 ///   - "预览小说信息" 标题
-///   - 可编辑的小说标题（TextField）
+///   - 封面缩略图 + 可编辑的小说标题（TextField）双列行（无封面时仅标题）
 ///   - 来源 URL（灰色小字）
 ///   - "共 N 章" 副标题
 ///   - 前 10 章列表
@@ -26,11 +26,17 @@ class AddNovelPreviewSheet extends StatefulWidget {
   /// 来源页面 URL
   final String sourceUrl;
 
+  /// 提取到的封面图 URL（chapter_list_js 的 cover_url 字段）
+  ///
+  /// 为空/加载失败时不显示封面缩略图，布局退化为单列标题行。
+  final String? coverUrl;
+
   const AddNovelPreviewSheet({
     super.key,
     required this.title,
     required this.chapters,
     required this.sourceUrl,
+    this.coverUrl,
   });
 
   @override
@@ -40,6 +46,9 @@ class AddNovelPreviewSheet extends StatefulWidget {
 class _AddNovelPreviewSheetState extends State<AddNovelPreviewSheet> {
   late TextEditingController _titleController;
   static const int _maxPreviewChapters = 10;
+
+  bool get _hasCoverUrl =>
+      widget.coverUrl != null && widget.coverUrl!.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -90,18 +99,50 @@ class _AddNovelPreviewSheetState extends State<AddNovelPreviewSheet> {
             ),
           ),
 
-          // 小说标题（可编辑）
+          // 封面缩略图 + 标题（无封面时只显示标题框，占满整宽）
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: '小说标题',
-                border: OutlineInputBorder(),
-                isDense: true,
-                prefixIcon: Icon(Icons.title, size: 18),
-              ),
-              style: const TextStyle(fontSize: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_hasCoverUrl) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(
+                      widget.coverUrl!,
+                      width: 56,
+                      height: 75,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 56,
+                        height: 75,
+                        color: theme.colorScheme.surfaceContainerHighest,
+                      ),
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return Container(
+                          width: 56,
+                          height: 75,
+                          color: theme.colorScheme.surfaceContainerHighest,
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: TextField(
+                    controller: _titleController,
+                    decoration: const InputDecoration(
+                      labelText: '小说标题',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      prefixIcon: Icon(Icons.title, size: 18),
+                    ),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),

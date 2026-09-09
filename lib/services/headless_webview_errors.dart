@@ -6,6 +6,10 @@ library;
 
 import '../models/chapter.dart';
 import '../models/chapter_content_result.dart';
+import '../models/site_bookshelf_entry.dart';
+
+export '../models/site_bookshelf_entry.dart'
+    show SiteBookshelfEntry; // 便于调用方一处 import 拿到结果类型与条目模型
 
 // ===== 优先级枚举 =====
 
@@ -88,6 +92,74 @@ class FetchContentResult {
   ChapterContentResult get content => _success!;
 }
 
+// ===== 网站书架结果类型 =====
+
+/// 网站书架提取（bookshelf_js）的结果类型
+///
+/// 明确区分五种情况：
+/// - **成功**：携带 `List<SiteBookshelfEntry>`
+/// - **无脚本**：该域名没有 `bookshelf_js` 脚本，不可重试
+/// - **忙碌**：提取正在进行（互斥命中），可等待重试
+/// - **加载失败**：页面加载超时/错误（onLoadStop 未在时限内触发），可重试
+/// - **脚本失败**：脚本执行/解析/结果为空（含页面非书架页），可重新生成脚本
+class FetchSiteBookshelfResult {
+  final List<SiteBookshelfEntry>? _success;
+  final bool _noScript;
+  final bool _busy;
+  final bool _loadFailed;
+  final bool _failed;
+
+  const FetchSiteBookshelfResult._({
+    List<SiteBookshelfEntry>? success,
+    bool noScript = false,
+    bool busy = false,
+    bool loadFailed = false,
+    bool failed = false,
+  })  : _success = success,
+        _noScript = noScript,
+        _busy = busy,
+        _loadFailed = loadFailed,
+        _failed = failed;
+
+  /// 成功提取书架列表
+  factory FetchSiteBookshelfResult.success(List<SiteBookshelfEntry> entries) =>
+      FetchSiteBookshelfResult._(success: entries);
+
+  /// 该域名无 bookshelf_js 提取脚本
+  factory FetchSiteBookshelfResult.noScript() =>
+      const FetchSiteBookshelfResult._(noScript: true);
+
+  /// 提取正在进行（互斥命中）
+  factory FetchSiteBookshelfResult.busy() =>
+      const FetchSiteBookshelfResult._(busy: true);
+
+  /// 页面加载失败（onLoadStop 超时/错误），可重试
+  factory FetchSiteBookshelfResult.loadFailed() =>
+      const FetchSiteBookshelfResult._(loadFailed: true);
+
+  /// 脚本执行失败 / 解析失败 / 结果为空
+  factory FetchSiteBookshelfResult.failed() =>
+      const FetchSiteBookshelfResult._(failed: true);
+
+  /// 是否提取成功
+  bool get isSuccess => _success != null;
+
+  /// 是否无提取脚本
+  bool get isNoScript => _noScript;
+
+  /// 是否互斥命中
+  bool get isBusy => _busy;
+
+  /// 是否页面加载失败
+  bool get isLoadFailed => _loadFailed;
+
+  /// 是否脚本失败（含空结果）
+  bool get isFailed => _failed;
+
+  /// 提取成功结果（仅在 [isSuccess] 为 true 时有效）
+  List<SiteBookshelfEntry> get entries => _success!;
+}
+
 // ===== 异常类型 =====
 
 /// 当目标域名没有 AI Agent 生成的提取脚本时抛出的异常。
@@ -155,29 +227,41 @@ class PageLoadFailedException implements Exception {
 /// HeadlessWebView fetchChapterList 的结果类型
 ///
 /// 明确区分四种情况：
-/// - **成功**：携带 `List<Chapter>`
+/// - **成功**：携带 `List<Chapter>` 与可选封面图 URL（[coverUrl]）
 /// - **无脚本**：该域名没有 `chapter_list_js` 脚本，不可重试
 /// - **忙碌**：WebView 正忙（互斥命中），可等待重试
 /// - **加载失败**：页面加载超时/错误，可重试
 class FetchChapterListResult {
   final List<Chapter>? _success;
+
+  /// 脚本返回的封面图 URL（来自 chapter_list_js 的 cover_url / coverUrl 字段）
+  ///
+  /// 仅在 [isSuccess] 时可能非 null；运行时解析失败/未声明时为 null。
+  /// 由调用方按需写入 Novel.coverUrl（已存在的小说不覆盖原值）。
+  final String? _coverUrl;
+
   final bool _noScript;
   final bool _busy;
   final bool _loadFailed;
 
   const FetchChapterListResult._({
     List<Chapter>? success,
+    String? coverUrl,
     bool noScript = false,
     bool busy = false,
     bool loadFailed = false,
   })  : _success = success,
+        _coverUrl = coverUrl,
         _noScript = noScript,
         _busy = busy,
         _loadFailed = loadFailed;
 
-  /// 成功获取章节列表
-  factory FetchChapterListResult.success(List<Chapter> chapters) =>
-      FetchChapterListResult._(success: chapters);
+  /// 成功获取章节列表（[coverUrl] 可空：脚本未提取到封面时为 null）
+  factory FetchChapterListResult.success(
+    List<Chapter> chapters, {
+    String? coverUrl,
+  }) =>
+      FetchChapterListResult._(success: chapters, coverUrl: coverUrl);
 
   /// 该域名无 chapter_list_js 提取脚本
   factory FetchChapterListResult.noScript() =>
@@ -205,4 +289,9 @@ class FetchChapterListResult {
 
   /// 获取成功结果（仅在 [isSuccess] 为 true 时有效）
   List<Chapter> get chapters => _success!;
+
+  /// 脚本声明的封面图 URL（仅在 [isSuccess] 时有效；可能为 null）
+  ///
+  /// 由调用方按需回填到 Novel.coverUrl（已存在的小说不强制覆盖）。
+  String? get coverUrl => _coverUrl;
 }

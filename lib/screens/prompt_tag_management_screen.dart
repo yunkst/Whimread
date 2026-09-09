@@ -1,15 +1,15 @@
-/// 提示词标签管理页
+/// 写作技巧管理页（原「提示词标签」，对外统一称「写作技巧」）
 ///
 /// 职责：
 /// - 分类（PromptTagCategory）的增删改
-/// - 标签（PromptTag）的增删改、移动分类
-/// - 同名标签按 TagGroup 聚合展示，点击展开查看各 prompt
+/// - 技巧（PromptTag，内部沿用 tag 命名）的增删改、移动分类
+/// - 同名技巧按 TagGroup 聚合展示，点击展开查看各 prompt
 /// - 宽屏双栏 / 窄屏上下自适应布局
 ///
 /// 架构（2026-07-09 重构）：
 /// - 业务状态与数据 CRUD：[PromptTagManagementNotifier]
 /// - 分类列表 / Tab / Tag 内容区 / Tag 分组项：`widgets/`
-/// - 分类 / 标签编辑对话框：`dialogs/`
+/// - 分类 / 技巧编辑对话框：`dialogs/`
 /// - 本 Screen 仅作为编排层：watch 状态 → 渲染子组件；触发交互 → 回传 Notifier
 library;
 
@@ -40,14 +40,14 @@ class PromptTagManagementScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          '提示词标签管理',
+          '写作技巧管理',
           style: AppTypography.chapterTitle.copyWith(fontSize: 18),
         ),
         actions: [
           IconButton(
             onPressed: () => _addTag(context, state, notifier),
             icon: const Icon(Icons.add),
-            tooltip: '添加标签',
+            tooltip: '添加技巧',
           ),
         ],
       ),
@@ -198,7 +198,7 @@ class PromptTagManagementScreen extends ConsumerWidget {
     final confirmed = await ConfirmDialog.show(
       context,
       title: '确认删除',
-      message: '删除分类「${category.name}」将同时删除该分类下所有标签，确定吗？',
+      message: '删除分类「${category.name}」将同时删除该分类下所有技巧，确定吗？',
       confirmText: '删除',
       isDangerous: true,
     );
@@ -233,7 +233,7 @@ class PromptTagManagementScreen extends ConsumerWidget {
     if (result == null) return;
     await notifier.saveTag(result, autoExpand: true);
     if (context.mounted) {
-      ToastUtils.showSuccess('标签已添加');
+      ToastUtils.showSuccess('技巧已添加');
     }
   }
 
@@ -257,7 +257,7 @@ class PromptTagManagementScreen extends ConsumerWidget {
     if (result == null) return;
     await notifier.saveTag(result, autoExpand: true);
     if (context.mounted) {
-      ToastUtils.showSuccess('标签已添加');
+      ToastUtils.showSuccess('技巧已添加');
     }
   }
 
@@ -287,7 +287,7 @@ class PromptTagManagementScreen extends ConsumerWidget {
     if (result == null) return;
     await notifier.saveTag(result, originalCategoryId: tag.categoryId);
     if (context.mounted) {
-      ToastUtils.showSuccess('标签已更新');
+      ToastUtils.showSuccess('技巧已更新');
     }
   }
 
@@ -310,14 +310,14 @@ class PromptTagManagementScreen extends ConsumerWidget {
     final confirmed = await ConfirmDialog.show(
       context,
       title: '确认删除',
-      message: '确定要删除标签「${tag.name}」吗？',
+      message: '确定要删除技巧「${tag.name}」吗？',
       confirmText: '删除',
       isDangerous: true,
     );
     if (confirmed != true || tag.id == null) return;
     await notifier.deleteTag(tag);
     if (context.mounted) {
-      ToastUtils.showSuccess('标签已删除');
+      ToastUtils.showSuccess('技巧已删除');
     }
   }
 
@@ -329,14 +329,14 @@ class PromptTagManagementScreen extends ConsumerWidget {
     final confirmed = await ConfirmDialog.show(
       context,
       title: '确认删除',
-      message: '确定要删除所有名为「${group.name}」的标签（${group.count} 条）吗？',
+      message: '确定要删除所有名为「${group.name}」的技巧（${group.count} 条）吗？',
       confirmText: '删除',
       isDangerous: true,
     );
     if (confirmed != true) return;
     await notifier.deleteAllInGroup(group);
     if (context.mounted) {
-      ToastUtils.showSuccess('已删除全部同名标签');
+      ToastUtils.showSuccess('已删除全部同名技巧');
     }
   }
 }

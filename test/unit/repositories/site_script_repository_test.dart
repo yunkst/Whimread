@@ -545,6 +545,100 @@ void main() {
       expect(row.chapterContentJs, 'CONTENT_V1');
       expect(row.verified, 0);
     });
+
+    test('bookshelf 类型：domain 不存在自动 INSERT，ocr 列不受影响', () async {
+      final result = await repo.updateScriptPart(
+        domain: 'bs.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'BOOKSHELF_FIRST',
+        ocr: false,
+      );
+      expect(result.success, isTrue);
+      final row = await repo.getByDomain('bs.com');
+      expect(row, isNotNull);
+      expect(row!.bookshelfJs, 'BOOKSHELF_FIRST');
+      expect(row.chapterListJs, '', reason: '其它列应留空串占位');
+      expect(row.chapterContentJs, '');
+      expect(row.chapterListOcr, isFalse);
+      expect(row.chapterContentOcr, isFalse);
+      expect(row.hasBookshelfJs, isTrue);
+    });
+
+    test('bookshelf 类型更新已存在行：只写 bookshelf_js，不动 ocr 列与其它脚本', () async {
+      // 种子：list ocr=true，content ocr=false
+      await repo.updateScriptPart(
+        domain: 'mixed.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'LIST_SEED',
+        ocr: true,
+      );
+      await repo.updateScriptPart(
+        domain: 'mixed.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'CONTENT_SEED',
+        ocr: false,
+      );
+
+      // 保存 bookshelf（ocr 参数无论传什么都应被忽略）
+      final result = await repo.updateScriptPart(
+        domain: 'mixed.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'BOOKSHELF_NEW',
+        ocr: true, // 故意传 true，验证被忽略
+      );
+      expect(result.success, isTrue);
+
+      final row = await repo.getByDomain('mixed.com');
+      expect(row!.bookshelfJs, 'BOOKSHELF_NEW');
+      expect(row.chapterListJs, 'LIST_SEED', reason: 'bookshelf 写入不应覆盖其它脚本');
+      expect(row.chapterContentJs, 'CONTENT_SEED');
+      expect(row.chapterListOcr, isTrue, reason: 'bookshelf 不应触碰 list ocr 列');
+      expect(row.chapterContentOcr, isFalse);
+      expect(row.verified, 0);
+    });
+
+    test('传 testUrl → 写入 sample_url（刷新同步用它定位书架页）', () async {
+      await repo.updateScriptPart(
+        domain: 'u.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'BS_V1',
+        ocr: false,
+        testUrl: 'https://u.com/my/favorites',
+      );
+      final row = await repo.getByDomain('u.com');
+      expect(row!.sampleUrl, 'https://u.com/my/favorites');
+
+      // 二次保存更新 URL → sample_url 跟随更新
+      await repo.updateScriptPart(
+        domain: 'u.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'BS_V2',
+        ocr: false,
+        testUrl: 'https://u.com/fav2',
+      );
+      final row2 = await repo.getByDomain('u.com');
+      expect(row2!.sampleUrl, 'https://u.com/fav2');
+      expect(row2.bookshelfJs, 'BS_V2');
+    });
+
+    test('不传 testUrl → sample_url 保留历史值不动', () async {
+      await repo.updateScriptPart(
+        domain: 'keep.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'BS_V1',
+        ocr: false,
+        testUrl: 'https://keep.com/fav',
+      );
+      await repo.updateScriptPart(
+        domain: 'keep.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'LIST_V1',
+        ocr: false, // 不传 testUrl
+      );
+      final row = await repo.getByDomain('keep.com');
+      expect(row!.sampleUrl, 'https://keep.com/fav',
+          reason: '未传 testUrl 的保存不应清空已有 sample_url');
+    });
   });
 
   // ===== upsertByDomain 两列 ocr 参数（v39 拆列后） =====

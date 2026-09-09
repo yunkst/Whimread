@@ -27,6 +27,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/agent_launcher_providers.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/chapter_mutation_provider.dart';
+import '../core/providers/script_presence_provider.dart';
 import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/providers/database_providers.dart';
@@ -52,16 +53,26 @@ class WebViewAddNovelFab extends ConsumerStatefulWidget {
 class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
   bool _isExtracting = false;
 
+  /// 有缓存 chapter_list_js 脚本时的高亮金色（快速提取可用）
+  static const Color _cachedScriptGold = Color(0xFFD4AF37);
+
   @override
   Widget build(BuildContext context) {
     final showButton = ref.watch(webviewHasAddNovelButtonProvider);
     if (!showButton) return const SizedBox.shrink();
 
+    // 金色 = 当前域名已有缓存 chapter_list_js 脚本，点击即可本地快速提取；
+    // 默认色 = 无脚本，点击降级 Agent 现场生成。
+    final hasCachedScript =
+        ref.watch(webviewHasCachedChapterListScriptProvider);
+
     return FloatingActionButton.small(
       heroTag: 'add_novel_fab',
       onPressed: _isExtracting ? null : () => _handleAddNovel(context),
-      tooltip: '添加小说',
-      backgroundColor: context.appColors.agentAccent,
+      tooltip: hasCachedScript ? '添加小说（快速提取）' : '添加小说',
+      backgroundColor: hasCachedScript
+          ? _cachedScriptGold
+          : context.appColors.agentAccent,
       foregroundColor: context.appColors.agentOnBrand,
       elevation: 4,
       child: _isExtracting
@@ -184,6 +195,10 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
 
       final extractedTitle =
           (data['title'] as String?)?.trim() ?? '';
+      // 封面图 URL（cover_url / coverUrl 兜底），可空
+      final extractedCoverUrl =
+          ((data['cover_url'] as String? ?? data['coverUrl'] as String?) ?? '')
+              .trim();
       final chaptersRaw = data['chapters'] as List<dynamic>?;
 
       if (extractedTitle.isEmpty || chaptersRaw == null || chaptersRaw.isEmpty) {
@@ -226,8 +241,9 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
       final alreadyInBookshelf = await novelRepo.isInBookshelf(currentUrl);
 
       if (alreadyInBookshelf) {
-        // 已存在：静默更新章节后直接跳转
+        // 已存在：静默更新章节 + 封面回填后直接跳转
         await _saveChapters(currentUrl, chapters);
+        await _backfillCoverUrl(currentUrl, extractedCoverUrl);
         _markScriptUsed(script.id);
         _toast('章节已更新');
         if (mounted) {
@@ -255,6 +271,8 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
           title: extractedTitle,
           chapters: chapters,
           sourceUrl: currentUrl,
+          coverUrl:
+              extractedCoverUrl.isEmpty ? null : extractedCoverUrl,
         ),
       );
 
@@ -262,13 +280,14 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
 
       final finalTitle = (previewResult['title'] as String?) ?? extractedTitle;
 
-      // 8. 写入数据库
+      // 8. 写入数据库（封面 URL 一并落 bookshelf.coverUrl，书架封面直接展示）
       // 走 Notifier 收口：写库 + invalidate(bookshelfNovelsProvider)，
       // 浏览器添加小说后书架 UI 立即刷新（修这一类"写了但没刷干净"的根因）。
       await ref.read(bookshelfMutationProvider.notifier).addNovel(Novel(
         title: finalTitle,
         author: '',
         url: currentUrl,
+        coverUrl: extractedCoverUrl.isEmpty ? null : extractedCoverUrl,
       ));
       await _saveChapters(currentUrl, chapters);
       _markScriptUsed(script.id);
@@ -360,6 +379,25 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
           novelUrl,
           chapters,
         );
+  }
+
+  /// 已在书架时回填封面图 URL（本地此前未抓到封面 / 老版本脚本无封面时）
+  ///
+  /// 走 BookshelfMutationNotifier 收口（写库 + invalidate 书架列表）。
+  /// coverUrl 为空时 no-op。
+  Future<void> _backfillCoverUrl(String novelUrl, String coverUrl) async {
+    try {
+      await ref
+          .read(bookshelfMutationProvider.notifier)
+          .backfillCoverUrl(novelUrl, coverUrl);
+    } catch (e) {
+      // 封面回填失败不阻塞添加主流程
+      LoggerService.instance.w(
+        'FAB添加小说: 封面回填失败 url=$novelUrl error=$e',
+        category: LogCategory.ai,
+        tags: ['headless-webview', 'fab-add-novel', 'cover-backfill-failed'],
+      );
+    }
   }
 
   /// 标记脚本已使用（use_count + 1）

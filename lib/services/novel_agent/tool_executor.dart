@@ -131,7 +131,7 @@ class ToolExecutor with ToolExecutorHelpers {
         // ===== 小说封面 =====
         case 'set_novel_cover':
           return await _novelNav.setNovelCover(args, scenarioContext);
-        // ===== 提示标签 =====
+        // ===== 写作技巧 =====
         case 'list_prompt_tags':
           return await _promptTag.listPromptTags(args);
         case 'get_prompt_tag':
@@ -140,13 +140,11 @@ class ToolExecutor with ToolExecutorHelpers {
           return await _promptTag.savePromptTag(args);
         case 'delete_prompt_tag':
           return await _promptTag.deletePromptTag(args);
-        // ===== 文生图（ComfyUI）=====
+        // ===== 文生图（客户端本地引擎）=====
         case 'list_text2img_models':
           return await _media.listText2ImgModels(args);
         case 'create_images':
           return await _media.createImages(args);
-        case 'create_image_to_video':
-          return await _media.createImageToVideo(args);
         default:
           LoggerService.instance.w('未知工具: $toolName',
               category: LogCategory.ai, tags: ['agent', 'tool', toolName, 'unknown']);

@@ -149,4 +149,77 @@ void main() {
       expect(s.chapterContentOcr, isFalse);
     });
   });
+
+  group('SiteScript bookshelfJs 字段（v40 新增）', () {
+    test('fromMap 读 bookshelf_js 列', () {
+      final s = SiteScript.fromMap({
+        'id': '1',
+        'domain': 'a.com',
+        'url_pattern': '',
+        'chapter_list_js': '',
+        'chapter_content_js': '',
+        'sample_url': '',
+        'created_at': 0,
+        'last_used_at': 0,
+        'use_count': 0,
+        'verified': 0,
+        'bookshelf_js': 'const N=[...]; return JSON.stringify({novels:N});',
+      });
+      expect(s.bookshelfJs, contains('novels'));
+      expect(s.hasBookshelfJs, isTrue);
+    });
+
+    test('fromMap 缺 bookshelf_js → 默认空串 + hasBookshelfJs=false', () {
+      final s = SiteScript.fromMap({
+        'id': '1',
+        'domain': 'a.com',
+        'url_pattern': '',
+        'chapter_list_js': '',
+        'chapter_content_js': '',
+        'sample_url': '',
+        'created_at': 0,
+        'last_used_at': 0,
+        'use_count': 0,
+        'verified': 0,
+      });
+      expect(s.bookshelfJs, '');
+      expect(s.hasBookshelfJs, isFalse);
+    });
+
+    test('toMap 写 bookshelf_js（空串也写出）', () {
+      final s = SiteScript(
+        id: '1',
+        domain: 'a.com',
+        urlPattern: '',
+        chapterListJs: '',
+        chapterContentJs: '',
+        sampleUrl: '',
+        createdAt: 0,
+        lastUsedAt: 0,
+        useCount: 0,
+        verified: 0,
+        bookshelfJs: '',
+      );
+      expect(s.toMap()['bookshelf_js'], '');
+    });
+
+    test('copyWith 覆盖 bookshelfJs 而不影响其它字段', () {
+      final s0 = SiteScript(
+        id: '1',
+        domain: 'a.com',
+        urlPattern: '',
+        chapterListJs: 'list',
+        chapterContentJs: '',
+        sampleUrl: '',
+        createdAt: 0,
+        lastUsedAt: 0,
+        useCount: 0,
+        verified: 0,
+      );
+      final s1 = s0.copyWith(bookshelfJs: 'bs');
+      expect(s1.bookshelfJs, 'bs');
+      expect(s1.chapterListJs, 'list');
+      expect(s0.bookshelfJs, ''); // 不传保持原值
+    });
+  });
 }

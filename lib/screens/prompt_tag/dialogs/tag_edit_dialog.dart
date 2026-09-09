@@ -1,7 +1,7 @@
-/// 提示词标签编辑对话框
+/// 写作技巧编辑对话框
 ///
-/// 从 `prompt_tag_management_screen.dart` 拆出。负责标签的新增/编辑/移动分类，
-/// 以及"添加同名标签"场景（[presetName] 不为空时 name 只读）。
+/// 从 `prompt_tag_management_screen.dart` 拆出。负责技巧的新增/编辑/移动分类，
+/// 以及"添加同名技巧"场景（[presetName] 不为空时 name 只读）。
 /// 保存后返回 [PromptTag]。
 library;
 
@@ -71,7 +71,7 @@ class _TagEditDialogState extends State<TagEditDialog> {
     final hasPresetName = widget.presetName != null;
 
     return AlertDialog(
-      title: Text(isEditing ? '编辑标签' : '添加标签'),
+      title: Text(isEditing ? '编辑技巧' : '添加技巧'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -97,12 +97,12 @@ class _TagEditDialogState extends State<TagEditDialog> {
               },
             ),
             const SizedBox(height: 12),
-            // 标签名称
+            // 技巧名称
             TextField(
               controller: _nameController,
               readOnly: hasPresetName,
               decoration: InputDecoration(
-                labelText: '标签名称',
+                labelText: '技巧名称',
                 hintText: '如：赛博朋克、暗黑',
                 border: const OutlineInputBorder(),
                 filled: hasPresetName,
@@ -117,7 +117,7 @@ class _TagEditDialogState extends State<TagEditDialog> {
               controller: _reasonController,
               decoration: const InputDecoration(
                 labelText: '使用场景',
-                hintText: '简述何时该用这个标签（可选）',
+                hintText: '简述何时该用这个技巧（可选）',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -128,7 +128,7 @@ class _TagEditDialogState extends State<TagEditDialog> {
               maxLines: 5,
               decoration: const InputDecoration(
                 labelText: 'Prompt 文本',
-                hintText: '输入该标签对应的 prompt 内容',
+                hintText: '输入该技巧对应的 prompt 内容',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
@@ -165,7 +165,7 @@ class _TagEditDialogState extends State<TagEditDialog> {
 
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入标签名称')),
+        const SnackBar(content: Text('请输入技巧名称')),
       );
       return;
     }

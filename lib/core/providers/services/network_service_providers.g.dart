@@ -262,5 +262,43 @@ final headlessWebViewChapterListServiceProvider =
 // ignore: unused_element
 typedef HeadlessWebViewChapterListServiceRef
     = ProviderRef<HeadlessWebViewChapterListService>;
+String _$headlessWebViewBookshelfServiceHash() =>
+    r'aaf85e96a3303dac89a0deab4a89cfa9de67d008';
+
+/// HeadlessWebViewBookshelfService Provider
+///
+/// 提供无头 WebView 网站书架（bookshelf_js）提取服务实例。自管一个独立的
+/// HeadlessInAppWebView，与 HeadlessWebViewChapterListService 隔离。
+///
+/// 适用场景：书架屏「刷新网站书架」时，对每个有 bookshelf_js 的域名主动
+/// `loadUrl(sampleUrl)` → 跑脚本 → 拿到网站侧最新的小说列表，合并到本地书架。
+/// 登录态依赖 flutter_inappwebview 全局 CookieManager（Android/iOS 进程级
+/// 共享）；Web 平台则需重新登录。
+///
+/// **功能**:
+/// - 无脚本时返回 FetchSiteBookshelfResult.noScript()
+/// - 页面加载失败时返回 FetchSiteBookshelfResult.loadFailed()
+/// - 脚本健康度追踪：连续失败 3 次自动标记 unverified
+///
+/// **依赖**:
+/// - [siteScriptRepositoryProvider] - 站点脚本查询
+///
+/// Copied from [headlessWebViewBookshelfService].
+@ProviderFor(headlessWebViewBookshelfService)
+final headlessWebViewBookshelfServiceProvider =
+    Provider<HeadlessWebViewBookshelfService>.internal(
+  headlessWebViewBookshelfService,
+  name: r'headlessWebViewBookshelfServiceProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$headlessWebViewBookshelfServiceHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef HeadlessWebViewBookshelfServiceRef
+    = ProviderRef<HeadlessWebViewBookshelfService>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

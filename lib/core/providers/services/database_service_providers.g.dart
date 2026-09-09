@@ -6,7 +6,7 @@ part of 'database_service_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$chapterLoaderHash() => r'f324161e7dd8bc839455f25644e6915698005e8f';
+String _$chapterLoaderHash() => r'f93e00c59b9514eb4131cb629ebe450d036758e6';
 
 /// ChapterLoader Provider
 ///
@@ -93,7 +93,7 @@ final chapterActionHandlerProvider =
 // ignore: unused_element
 typedef ChapterActionHandlerRef = AutoDisposeProviderRef<ChapterActionHandler>;
 String _$chapterReorderControllerHash() =>
-    r'0675bc842f625c14d4dc47414d7727a5a31aab2a';
+    r'249361b83c5d41d55c804b593d0a43ea02e14625';
 
 /// ChapterReorderController Provider
 ///

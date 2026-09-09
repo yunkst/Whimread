@@ -1,12 +1,15 @@
-/// BookshelfMutationNotifier 单元测试（Task 3 + Task 1）
+/// BookshelfMutationNotifier 单元测试
 ///
 /// 收口所有书架表写路径的 Notifier 测试：
-/// - 10 个公共方法（addNovel / removeNovel / toggleBookshelf /
+/// - 9 个公共方法（addNovel / removeNovel / toggleBookshelf /
 ///   updateTitle / updateCoverMediaId / removeCoverMediaId /
-///   updateReadProgress / moveToBookshelf / copyToBookshelf / createNovel）
+///   backfillCoverUrl / updateReadProgress / createNovel）
 /// - 每次成功 → 对应 writer 方法被调一次 + `bookshelfNovelsProvider` 被 invalidate
 /// - writer 抛异常 → 异常向上抛 + **不** invalidate（避免半真半假 UI）
 /// - toggleBookshelf 双分支：isInBookshelf=true → remove / false → add
+///
+/// 新设计：不再有 moveToBookshelf / copyToBookshelf ——书架分类由 URL 派生，
+/// 不存在"把小说从 A 书架搬到 B 书架"的概念。
 ///
 /// 运行:
 ///   cd novel_app
@@ -23,21 +26,19 @@ import 'package:novel_app/core/providers/bookshelf_providers.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
 import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart';
 import 'package:novel_app/models/novel.dart';
-import 'package:novel_app/repositories/bookshelf_repository.dart';
 import 'package:novel_app/repositories/novel_repository.dart';
 
 import 'bookshelf_mutation_provider_test.mocks.dart';
 
-/// `IBookshelfWriter` / `IBookshelfAssociationWriter` 是 Repository 文件内部定义
-/// 的 abstract interface，Mockito `mockBuilder` 无法索引到（与"非公开导出"无关，
-/// 单纯是 generator 走 import 时扫不到）。手写最小 fake 用 verify 计数最直接。
+/// `IBookshelfWriter` 是 Repository 文件内部定义的 abstract interface，
+/// Mockito `mockBuilder` 无法索引到。手写最小 fake 用 verify 计数最直接。
 class _FakeBookshelfWriter implements IBookshelfWriter {
   int addToBookshelfCalls = 0;
   int removeFromBookshelfCalls = 0;
   int updateTitleCalls = 0;
   int updateCoverMediaIdByUrlCalls = 0;
+  int updateCoverUrlByUrlCalls = 0;
   int updateLastReadChapterCalls = 0;
-  int moveToBookshelfCalls = 0;
   int createNovelCalls = 0;
   int nextInsertId = 1;
 
@@ -45,6 +46,7 @@ class _FakeBookshelfWriter implements IBookshelfWriter {
   String? lastRemovedUrl;
   ({String url, String title})? lastTitleUpdate;
   ({String url, String? mediaId})? lastCoverUpdate;
+  ({String url, String? coverUrl})? lastCoverUrlUpdate;
   ({String url, int chapterIndex})? lastProgressUpdate;
   Novel? createdNovel;
 
@@ -101,6 +103,18 @@ class _FakeBookshelfWriter implements IBookshelfWriter {
   }
 
   @override
+  Future<int> updateCoverUrlByUrl(String novelUrl, String? coverUrl) async {
+    if (throwOnce != null) {
+      final e = throwOnce!;
+      throwOnce = null;
+      throw e;
+    }
+    updateCoverUrlByUrlCalls++;
+    lastCoverUrlUpdate = (url: novelUrl, coverUrl: coverUrl);
+    return 1;
+  }
+
+  @override
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) async {
     if (progressThrowOnce != null) {
       final e = progressThrowOnce!;
@@ -139,48 +153,9 @@ class _FakeBookshelfWriter implements IBookshelfWriter {
   }
 }
 
-class _FakeAssocWriter implements IBookshelfAssociationWriter {
-  int addCalls = 0;
-  int removeCalls = 0;
-  int moveCalls = 0;
-  Object? throwOnce;
-  Object? addThrowOnce;
-  ({String url, int bookshelfId})? lastAdd;
-
-  @override
-  Future<void> addNovelToBookshelf(String novelUrl, int bookshelfId) async {
-    if (addThrowOnce != null) {
-      final e = addThrowOnce!;
-      addThrowOnce = null;
-      throw e;
-    }
-    addCalls++;
-    lastAdd = (url: novelUrl, bookshelfId: bookshelfId);
-  }
-
-  @override
-  Future<bool> removeNovelFromBookshelf(
-      String novelUrl, int bookshelfId) async {
-    removeCalls++;
-    return true;
-  }
-
-  @override
-  Future<void> moveNovelToBookshelf(
-      String novelUrl, int fromBookshelfId, int toBookshelfId) async {
-    if (throwOnce != null) {
-      final e = throwOnce!;
-      throwOnce = null;
-      throw e;
-    }
-    moveCalls++;
-  }
-}
-
 @GenerateMocks([INovelRepository])
 void main() {
   late _FakeBookshelfWriter fakeWriter;
-  late _FakeAssocWriter fakeAssocWriter;
   late MockINovelRepository mockNovelRepo;
   late ProviderContainer container;
 
@@ -189,7 +164,6 @@ void main() {
 
   setUp(() {
     fakeWriter = _FakeBookshelfWriter();
-    fakeAssocWriter = _FakeAssocWriter();
     mockNovelRepo = MockINovelRepository();
 
     // 默认 stubs
@@ -198,8 +172,6 @@ void main() {
     container = ProviderContainer(
       overrides: [
         bookshelfWriterProvider.overrideWithValue(fakeWriter),
-        bookshelfAssociationWriterProvider
-            .overrideWithValue(fakeAssocWriter),
         novelRepositoryProvider.overrideWithValue(mockNovelRepo),
         // 旁路掉真正的 DB 加载：用计数器 Provider 替换。
         // 注意：必须用 `container.listen` 保持订阅活着，否则 AutoDispose
@@ -449,7 +421,61 @@ void main() {
   });
 
   // ============================================================
-  // updateReadProgress —— Task 1 新增
+  // backfillCoverUrl —— cover_url 抓取回填（空值 no-op）
+  // ============================================================
+  group('backfillCoverUrl', () {
+    test('非空 coverUrl → 调 writer.updateCoverUrlByUrl + invalidate', () async {
+      final before = novelsReloadCount;
+
+      await container
+          .read(bookshelfMutationProvider.notifier)
+          .backfillCoverUrl('u1', 'https://a.com/cover.jpg');
+
+      await container.read(bookshelfNovelsProvider.future);
+
+      expect(fakeWriter.updateCoverUrlByUrlCalls, 1);
+      expect(fakeWriter.lastCoverUrlUpdate?.url, 'u1');
+      expect(fakeWriter.lastCoverUrlUpdate?.coverUrl, 'https://a.com/cover.jpg');
+      expect(novelsReloadCount, greaterThan(before));
+    });
+
+    test('null / 空串 / 纯空白 → no-op（不写库不 invalidate）', () async {
+      final before = novelsReloadCount;
+
+      await container
+          .read(bookshelfMutationProvider.notifier)
+          .backfillCoverUrl('u1', null);
+      await container
+          .read(bookshelfMutationProvider.notifier)
+          .backfillCoverUrl('u1', '');
+      await container
+          .read(bookshelfMutationProvider.notifier)
+          .backfillCoverUrl('u1', '   ');
+
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fakeWriter.updateCoverUrlByUrlCalls, 0);
+      expect(novelsReloadCount, equals(before));
+    });
+
+    test('writer 抛异常 → 上抛 + 不 invalidate', () async {
+      fakeWriter.throwOnce = StateError('db error');
+
+      final before = novelsReloadCount;
+
+      await expectLater(
+        container
+            .read(bookshelfMutationProvider.notifier)
+            .backfillCoverUrl('u1', 'https://a.com/c.jpg'),
+        throwsA(isA<StateError>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(novelsReloadCount, equals(before));
+    });
+  });
+
+  // ============================================================
+  // updateReadProgress
   // 修"阅读完返回书架看不到进度更新" bug 的核心收口点。
   // ============================================================
   group('updateReadProgress', () {
@@ -484,75 +510,6 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(novelsReloadCount, equals(before),
           reason: '失败路径必须不 invalidate，避免半真半假 UI');
-    });
-  });
-
-  // ============================================================
-  // moveToBookshelf —— 走 association writer
-  // ============================================================
-  group('moveToBookshelf', () {
-    test('调 assocWriter.moveNovelToBookshelf + invalidate', () async {
-      final before = novelsReloadCount;
-
-      await container
-          .read(bookshelfMutationProvider.notifier)
-          .moveToBookshelf('u1', 2, 3);
-
-      await container.read(bookshelfNovelsProvider.future);
-
-      expect(fakeAssocWriter.moveCalls, 1);
-      expect(novelsReloadCount, greaterThan(before));
-    });
-
-    test('writer 抛异常 → 上抛 + 不 invalidate', () async {
-      fakeAssocWriter.throwOnce = StateError('db error');
-
-      final before = novelsReloadCount;
-
-      await expectLater(
-        container
-            .read(bookshelfMutationProvider.notifier)
-            .moveToBookshelf('u1', 2, 3),
-        throwsA(isA<StateError>()),
-      );
-      await Future<void>.delayed(Duration.zero);
-      expect(novelsReloadCount, equals(before));
-    });
-  });
-
-  // ============================================================
-  // copyToBookshelf —— 走 association writer.addNovelToBookshelf
-  // （Task 4 reviewer 建议 deferred 补的 2 个 case）
-  // ============================================================
-  group('copyToBookshelf', () {
-    test('调 assocWriter.addNovelToBookshelf + invalidate', () async {
-      final before = novelsReloadCount;
-
-      await container
-          .read(bookshelfMutationProvider.notifier)
-          .copyToBookshelf('u1', 7);
-
-      await container.read(bookshelfNovelsProvider.future);
-
-      expect(fakeAssocWriter.addCalls, 1);
-      expect(fakeAssocWriter.lastAdd?.url, 'u1');
-      expect(fakeAssocWriter.lastAdd?.bookshelfId, 7);
-      expect(novelsReloadCount, greaterThan(before));
-    });
-
-    test('writer 抛异常 → 上抛 + 不 invalidate', () async {
-      fakeAssocWriter.addThrowOnce = StateError('db error');
-
-      final before = novelsReloadCount;
-
-      await expectLater(
-        container
-            .read(bookshelfMutationProvider.notifier)
-            .copyToBookshelf('u1', 7),
-        throwsA(isA<StateError>()),
-      );
-      await Future<void>.delayed(Duration.zero);
-      expect(novelsReloadCount, equals(before));
     });
   });
 

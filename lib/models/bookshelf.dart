@@ -1,123 +1,98 @@
-/// 书架模型（分类功能）
+/// 书架分类（按"小说来源"派生）
 ///
-/// 重要：不要与数据库表混淆！
+/// ## 设计变更
 ///
-/// 正确的理解：
-/// - Bookshelf 类（本类）：表示书架分类，如"我的收藏"、"玄幻小说"
-/// - bookshelf 表：数据库物理表，存储的是小说数据（历史遗留命名）
-/// - novels 视图：bookshelf表的别名视图，提供更清晰的语义
-/// - bookshelves 表：数据库表，存储书架分类（复数形式）
+/// 旧设计：用户在 UI 中增删改书架（`bookshelves` + `novel_bookshelves` 多对多）。
+/// 新设计：书架仅由"小说来源"派生，三档系统固定——
 ///
-/// 命名对照：
-/// Bookshelf 模型 = 书架分类功能（id, name, icon, color）
-/// bookshelf 表 = 存储小说元数据（命名不当）
-/// novels 视图 = bookshelf表的别名（语义清晰）
-/// bookshelves 表 = 存储书架分类（正确命名）
-/// novel_bookshelves 表 = 小说与书架的多对多关系
+/// - [BookshelfKind.all]：全部小说（不过滤 URL）。
+/// - [BookshelfKind.original]：原创（`custom://` 前缀，AI Agent/手动创建）。
+/// - [BookshelfKind.online]：联网（其它 URL，浏览器/书源抓取加入）。
 ///
-/// 推荐用法：
-/// getNovels() - 获取所有小说（语义清晰）
-/// getBookshelf() - 获取所有小说（命名有误导性）
+/// 用户不再调整书架分类；不再支持新建/重命名/删除书架，
+/// 也不再支持把小说从 A 书架"移动"到 B 书架（分类由 URL 决定，无法手动改）。
 ///
+/// ## 数据表
+///
+/// 旧的 `bookshelves` / `novel_bookshelves` 数据表保留在 schema 中以避免破坏性
+/// migration（其内残留数据无副作用，运行时不再读写）。如未来确认无用户依赖，
+/// 可在下个 schema 大版本里 DROP。
 class Bookshelf {
-  /// 书架唯一ID
-  final int id;
+  /// 书架唯一 ID（内存枚举值，不对应数据库主键）。
+  ///
+  /// 用稳定的小整数以兼容旧 `currentBookshelfIdProvider` 的 SharedPreferences
+  /// 持久化键 `current_bookshelf_id`——升级时若读到旧值（1/2/任意），
+  /// 走 [BookshelfKind.fromLegacyId] 兜底映射到新三档。
+  final BookshelfKind kind;
 
-  /// 书架名称
+  /// 书架显示名
   final String name;
 
-  /// 创建时间（Unix时间戳）
-  final int createdAt;
-
-  /// 排序字段，用于自定义书架显示顺序
-  final int sortOrder;
-
-  /// 书架图标（可选）
-  final String? icon;
-
-  /// 书架颜色（可选，ARGB格式整数）
-  final int? color;
-
-  /// 是否为系统书架
-  ///
-  /// 系统书架包括：
-  /// - ID=1: "全部小说" - 显示所有小说，不可删除
-  /// - ID=2: "我的收藏" - 默认收藏书架，不可删除
-  ///
-  /// 用户创建的书架：isSystem=false，可以编辑和删除
-  final bool isSystem;
-
   const Bookshelf({
-    required this.id,
+    required this.kind,
     required this.name,
-    required this.createdAt,
-    this.sortOrder = 0,
-    this.icon,
-    this.color,
-    this.isSystem = false,
   });
 
-  /// 从JSON创建Bookshelf实例
-  factory Bookshelf.fromJson(Map<String, dynamic> json) {
-    return Bookshelf(
-      id: json['id'] as int,
-      name: json['name'] as String,
-      createdAt: json['created_at'] as int,
-      sortOrder: json['sort_order'] as int? ?? 0,
-      icon: json['icon'] as String?,
-      color: json['color'] as int?,
-      isSystem: (json['is_system'] as int? ?? 0) == 1,
-    );
+  /// 三个系统书架的固定列表（顺序即 Tab 顺序）。
+  static const List<Bookshelf> systemShelves = [
+    Bookshelf(kind: BookshelfKind.all, name: '全部'),
+    Bookshelf(kind: BookshelfKind.original, name: '原创'),
+    Bookshelf(kind: BookshelfKind.online, name: '联网'),
+  ];
+
+  /// 通过 [BookshelfKind] 查找对应书架，找不到时回退到"全部"。
+  static Bookshelf byKind(BookshelfKind kind) {
+    for (final b in systemShelves) {
+      if (b.kind == kind) return b;
+    }
+    return systemShelves.first;
   }
 
-  /// 转换为JSON
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'created_at': createdAt,
-      'sort_order': sortOrder,
-      'icon': icon,
-      'color': color,
-      'is_system': isSystem ? 1 : 0,
-    };
+  /// 通过旧 [Bookshelf.id]（数据库主键）反查书架。
+  ///
+  /// 用于兼容 SharedPreferences 中持久化的旧 `current_bookshelf_id`：
+  /// - 1 -> 全部（旧"全部小说"虚拟书架）
+  /// - 2 -> 我的收藏（旧默认书架）—— 旧数据集中放非原创书，回退到"全部"
+  /// - 其它（用户自定义）-> 全部（自定义书架已下线，无法精确还原）
+  static Bookshelf fromLegacyId(int legacyId) {
+    switch (legacyId) {
+      case 1:
+        return systemShelves[0]; // 全部
+      case 2:
+        return systemShelves[0]; // 我的收藏 -> 全部（最安全的兜底）
+      default:
+        return systemShelves[0];
+    }
   }
 
-  /// 创建副本，可选择性地修改某些字段
-  Bookshelf copyWith({
-    int? id,
-    String? name,
-    int? createdAt,
-    int? sortOrder,
-    String? icon,
-    int? color,
-    bool? isSystem,
-  }) {
+  Bookshelf copyWith({BookshelfKind? kind, String? name}) {
     return Bookshelf(
-      id: id ?? this.id,
+      kind: kind ?? this.kind,
       name: name ?? this.name,
-      createdAt: createdAt ?? this.createdAt,
-      sortOrder: sortOrder ?? this.sortOrder,
-      icon: icon ?? this.icon,
-      color: color ?? this.color,
-      isSystem: isSystem ?? this.isSystem,
     );
   }
 
   @override
-  String toString() {
-    return 'Bookshelf(id: $id, name: $name, isSystem: $isSystem)';
-  }
+  String toString() => 'Bookshelf(kind: $kind, name: $name)';
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is Bookshelf &&
-        other.id == id &&
-        other.name == name &&
-        other.isSystem == isSystem;
+    return other is Bookshelf && other.kind == kind;
   }
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => kind.hashCode;
+}
+
+/// 书架分类（按来源派生）
+enum BookshelfKind {
+  /// 全部小说（不过滤 URL）
+  all,
+
+  /// 原创（`custom://` 前缀，由 Agent 工具或独立入口创建的小说）
+  original,
+
+  /// 联网（其它 URL，浏览器加入或书源抓取）
+  online,
 }

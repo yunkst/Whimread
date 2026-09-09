@@ -93,6 +93,17 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
       ) as bool);
 
   @override
+  set authHeaderProvider(
+          _i6.Future<Map<String, String>> Function()? _authHeaderProvider) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #authHeaderProvider,
+          _authHeaderProvider,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i6.Future<void> init() => (super.noSuchMethod(
         Invocation.method(
           #init,
@@ -112,27 +123,11 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
       ) as _i6.Future<String?>);
 
   @override
-  _i6.Future<String?> getToken() => (super.noSuchMethod(
-        Invocation.method(
-          #getToken,
-          [],
-        ),
-        returnValue: _i6.Future<String?>.value(),
-      ) as _i6.Future<String?>);
-
-  @override
-  _i6.Future<void> setConfig({
-    required String? host,
-    String? token,
-  }) =>
-      (super.noSuchMethod(
+  _i6.Future<void> setConfig({required String? host}) => (super.noSuchMethod(
         Invocation.method(
           #setConfig,
           [],
-          {
-            #host: host,
-            #token: token,
-          },
+          {#host: host},
         ),
         returnValue: _i6.Future<void>.value(),
         returnValueForMissingStub: _i6.Future<void>.value(),
@@ -371,51 +366,6 @@ class MockIChapterRepository extends _i1.Mock
       );
 
   @override
-  _i6.Future<int> cacheChapter(
-    String? novelUrl,
-    _i11.Chapter? chapter,
-    String? content,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #cacheChapter,
-          [
-            novelUrl,
-            chapter,
-            content,
-          ],
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
-
-  @override
-  _i6.Future<int> updateChapterContent(
-    String? chapterUrl,
-    String? content, {
-    String? source = 'edit',
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #updateChapterContent,
-          [
-            chapterUrl,
-            content,
-          ],
-          {#source: source},
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
-
-  @override
-  _i6.Future<int> deleteChapterCache(String? chapterUrl) => (super.noSuchMethod(
-        Invocation.method(
-          #deleteChapterCache,
-          [chapterUrl],
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
-
-  @override
   _i6.Future<String?> getCachedChapter(String? chapterUrl) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -436,32 +386,6 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i6.Future<List<_i11.Chapter>>);
 
   @override
-  _i6.Future<int> deleteCachedChapters(String? novelUrl) => (super.noSuchMethod(
-        Invocation.method(
-          #deleteCachedChapters,
-          [novelUrl],
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
-
-  @override
-  _i6.Future<void> cacheNovelChapters(
-    String? novelUrl,
-    List<_i11.Chapter>? chapters,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #cacheNovelChapters,
-          [
-            novelUrl,
-            chapters,
-          ],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
-
-  @override
   _i6.Future<List<_i11.Chapter>> getCachedNovelChapters(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -470,90 +394,6 @@ class MockIChapterRepository extends _i1.Mock
         ),
         returnValue: _i6.Future<List<_i11.Chapter>>.value(<_i11.Chapter>[]),
       ) as _i6.Future<List<_i11.Chapter>>);
-
-  @override
-  _i6.Future<int> createCustomChapter(
-    String? novelUrl,
-    String? title,
-    String? content, [
-    int? index,
-  ]) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #createCustomChapter,
-          [
-            novelUrl,
-            title,
-            content,
-            index,
-          ],
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
-
-  @override
-  _i6.Future<void> updateCustomChapter(
-    String? chapterUrl,
-    String? title,
-    String? content,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #updateCustomChapter,
-          [
-            chapterUrl,
-            title,
-            content,
-          ],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
-
-  @override
-  _i6.Future<void> deleteCustomChapter(String? chapterUrl) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #deleteCustomChapter,
-          [chapterUrl],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
-
-  @override
-  _i6.Future<void> shiftChapterIndicesFrom(
-    String? novelUrl,
-    int? fromIndex,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #shiftChapterIndicesFrom,
-          [
-            novelUrl,
-            fromIndex,
-          ],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
-
-  @override
-  _i6.Future<void> markChapterAsRead(
-    String? novelUrl,
-    String? chapterUrl,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #markChapterAsRead,
-          [
-            novelUrl,
-            chapterUrl,
-          ],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
 
   @override
   _i6.Future<int> getCachedChaptersCount(String? novelUrl) =>
@@ -574,23 +414,6 @@ class MockIChapterRepository extends _i1.Mock
         ),
         returnValue: _i6.Future<int>.value(0),
       ) as _i6.Future<int>);
-
-  @override
-  _i6.Future<void> updateChaptersOrder(
-    String? novelUrl,
-    List<_i11.Chapter>? chapters,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #updateChaptersOrder,
-          [
-            novelUrl,
-            chapters,
-          ],
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
 
   @override
   _i6.Future<List<_i12.ChapterSearchResult>> searchInCachedContent(
@@ -633,22 +456,6 @@ class MockIChapterRepository extends _i1.Mock
         ),
         returnValue: _i6.Future<bool>.value(false),
       ) as _i6.Future<bool>);
-
-  @override
-  _i6.Future<int> updateChapterContentById(
-    int? id,
-    String? content,
-  ) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #updateChapterContentById,
-          [
-            id,
-            content,
-          ],
-        ),
-        returnValue: _i6.Future<int>.value(0),
-      ) as _i6.Future<int>);
 
   @override
   _i6.Future<int?> getChapterIdByUrl(String? url) => (super.noSuchMethod(

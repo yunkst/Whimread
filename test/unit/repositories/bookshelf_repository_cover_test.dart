@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common/sqflite.dart';
 
+import 'package:novel_app/models/bookshelf.dart';
 import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/repositories/novel_repository.dart';
 import 'package:novel_app/repositories/bookshelf_repository.dart';
@@ -27,13 +28,14 @@ void main() {
     await db.close();
   });
 
-  test('全部小说书架(id=1)返回的 Novel 带 coverMediaId', () async {
+  test('全部书架返回的 Novel 带 coverMediaId', () async {
     final id = await novelRepo.addToBookshelf(
       Novel(title: '书1', author: '作者', url: 'custom://b1'),
     );
     await novelRepo.updateCoverMediaIdById(id, 'cover-media-1');
 
-    final novels = await bookshelfRepo.getNovelsByBookshelf(1);
+    final novels =
+        await bookshelfRepo.getNovelsByBookshelf(BookshelfKind.all);
     final target = novels.firstWhere((n) => n.url == 'custom://b1');
 
     expect(target.coverMediaId, 'cover-media-1');

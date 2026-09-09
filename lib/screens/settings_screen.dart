@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/native_crash_reporter.dart' show kGitHubRepo;
 import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
+import 'image_model_management_screen.dart';
 import 'log_report_settings_screen.dart';
 import 'log_viewer_screen.dart';
 import '../widgets/common/library_app_bar.dart';
@@ -155,14 +156,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             children: [
               ListTile(
                 leading: Icon(Icons.label_outline, color: appColors.agentAccent),
-                title: const Text('提示词标签管理'),
-                subtitle: const Text('管理 AI 写作的标签分类和 Prompt 文本'),
+                title: const Text('写作技巧管理'),
+                subtitle: const Text('管理 AI 写作的技巧分类和 Prompt 文本'),
                 trailing: const Icon(Icons.arrow_forward_ios),
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => const PromptTagManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.image_outlined, color: appColors.agentAccent),
+                title: const Text('生图模型管理'),
+                subtitle: const Text('导入本地 SD 模型供 Agent 出图'),
+                trailing: const Icon(Icons.arrow_forward_ios),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ImageModelManagementScreen(),
                     ),
                   );
                 },

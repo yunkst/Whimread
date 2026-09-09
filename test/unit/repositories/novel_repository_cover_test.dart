@@ -86,4 +86,59 @@ void main() {
     );
     expect(affected, 0);
   });
+
+  // ========== updateCoverUrlByUrl（chapter_list_js 封面回填用） ==========
+
+  test('updateCoverUrlByUrl 写入封面 URL 后可读回', () async {
+    final id = await seedNovel('custom://c1');
+    final affected = await repo.updateCoverUrlByUrl(
+      'custom://c1',
+      'https://a.com/cover.jpg',
+    );
+    expect(affected, 1);
+
+    final novel = await repo.getNovelByUrl('custom://c1');
+    expect(novel?.coverUrl, 'https://a.com/cover.jpg');
+    final byId = await repo.getNovelById(id);
+    expect(byId?.coverUrl, 'https://a.com/cover.jpg');
+  });
+
+  test('updateCoverUrlByUrl 传入 null / 空串 / 空白 → 不写入保留原值', () async {
+    await seedNovel('custom://c2');
+    await repo.updateCoverUrlByUrl('custom://c2', 'https://a.com/keep.jpg');
+
+    expect(await repo.updateCoverUrlByUrl('custom://c2', null), 0);
+    expect(await repo.updateCoverUrlByUrl('custom://c2', ''), 0);
+    expect(await repo.updateCoverUrlByUrl('custom://c2', '   '), 0);
+
+    final novel = await repo.getNovelByUrl('custom://c2');
+    expect(novel?.coverUrl, 'https://a.com/keep.jpg',
+        reason: '空值必须保留原封面，避免误清空');
+  });
+
+  test('updateCoverUrlByUrl 会 trim 首尾空白', () async {
+    await seedNovel('custom://c3');
+    await repo.updateCoverUrlByUrl('custom://c3', '  https://a.com/x.jpg  ');
+
+    final novel = await repo.getNovelByUrl('custom://c3');
+    expect(novel?.coverUrl, 'https://a.com/x.jpg');
+  });
+
+  test('updateCoverUrlByUrl 不影响 coverMediaId', () async {
+    final id = await seedNovel('custom://c4');
+    await repo.updateCoverMediaIdById(id, 'media-c4');
+    await repo.updateCoverUrlByUrl('custom://c4', 'https://a.com/c4.jpg');
+
+    final novel = await repo.getNovelByUrl('custom://c4');
+    expect(novel?.coverUrl, 'https://a.com/c4.jpg');
+    expect(novel?.coverMediaId, 'media-c4');
+  });
+
+  test('updateCoverUrlByUrl 不存在的 url 返回 0', () async {
+    final affected = await repo.updateCoverUrlByUrl(
+      'custom://not-exist',
+      'https://a.com/x.jpg',
+    );
+    expect(affected, 0);
+  });
 }

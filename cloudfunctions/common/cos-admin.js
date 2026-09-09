@@ -218,19 +218,152 @@ function signPutUrl({ bucket, key, expiresSec = 1800 }) {
 }
 
 /**
- * 拼公开读 URL(tcb.qcloud.la CDN 域名,bucket 需开公有读)
+ * CloudBase Storage 上传封装(走 cos-nodejs-sdk-v5 官方 SDK)
  *
- * 实测(2026-09-08):tcb.qcloud.la 匿名 200;cos.myqcloud.com 直链本地网络不通
+ * 背景:
+ *   1. @cloudbase/node-sdk 的 storage 模块在 Event Function 内不通(与 rdb() 同样问题)
+ *   2. 自己实现 COS XML API 签名反复 SignatureDoesNotMatch(可能是 STS token
+ *      大小写/编码细节,不值得一一排查)
+ *   3. 官方 cos-nodejs-sdk-v5 SDK 在 Event Function 内验证可用(diag 探针:
+ *      putObject HTTP 200 + etag 返回,STS 临时凭据 + XCosSecurityToken 全自动处理)
+ *
+ * 设计:
+ *   init  → initiateMultipartUpload(拿 uploadId)
+ *   chunk → uploadPart(5MB 分片,≤ SCF event 6MB 限制)
+ *   finalize → completeMultipartUpload(COS 合并分片)
+ *   整个流程 CI 侧只需要 X-API-TOKEN,零腾讯云密钥。
+ *
+ * 依赖:cos-nodejs-sdk-v5(在 common/package.json,由 sync-common.mjs 合并进每个函数)
+ */
+
+'use strict';
+
+const COS = require('cos-nodejs-sdk-v5');
+
+function buildClient() {
+    const secretId = process.env.TENCENTCLOUD_SECRETID;
+    const secretKey = process.env.TENCENTCLOUD_SECRETKEY;
+    const sessionToken = process.env.TENCENTCLOUD_SESSIONTOKEN;
+    if (!secretId || !secretKey) {
+        const e = new Error('Missing TENCENTCLOUD_SECRETID/SECRETKEY (SCF runtime creds)');
+        e.code = 'NO_CREDS';
+        throw e;
+    }
+    return new COS({
+        SecretId: secretId,
+        SecretKey: secretKey,
+        XCosSecurityToken: sessionToken || undefined,
+    });
+}
+
+function getRegion() {
+    return process.env.TENCENTCLOUD_REGION || 'ap-shanghai';
+}
+
+/**
+ * 拼公开读 URL(tcb.qcloud.la CDN 域名,bucket 需开公有读)
  */
 function publicUrl(bucket, key) {
     return `https://${bucket}.tcb.qcloud.la/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+/**
+ * 发起 MultipartUpload,返回 UploadId
+ */
+function initiateMultipartUpload({ bucket, key, contentType = 'application/octet-stream' }) {
+    return new Promise((resolve, reject) => {
+        const client = buildClient();
+        client.multipartInit({
+            Bucket: bucket,
+            Region: getRegion(),
+            Key: key,
+            ContentType: contentType,
+        }, (err, data) => {
+            if (err) return reject(wrapCosError('multipartInit', err));
+            resolve(data.UploadId);
+        });
+    });
+}
+
+/**
+ * 上传单个分片,返回 ETag(带引号)
+ * SDK 方法名是 multipartUpload,不是 multipartUploadPart
+ */
+function uploadPart({ bucket, key, uploadId, partNumber, body }) {
+    return new Promise((resolve, reject) => {
+        const client = buildClient();
+        client.multipartUpload({
+            Bucket: bucket,
+            Region: getRegion(),
+            Key: key,
+            UploadId: uploadId,
+            PartNumber: partNumber,
+            Body: body,
+        }, (err, data) => {
+            if (err) return reject(wrapCosError(`multipartUpload ${partNumber}`, err));
+            resolve(data.ETag);
+        });
+    });
+}
+
+/**
+ * 完成 MultipartUpload,parts 按分片号升序
+ */
+function completeMultipartUpload({ bucket, key, uploadId, parts }) {
+    return new Promise((resolve, reject) => {
+        const client = buildClient();
+        const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+        client.multipartComplete({
+            Bucket: bucket,
+            Region: getRegion(),
+            Key: key,
+            UploadId: uploadId,
+            Parts: sorted.map((p) => ({
+                PartNumber: p.partNumber,
+                ETag: p.etag,
+            })),
+        }, (err, data) => {
+            if (err) return reject(wrapCosError('multipartComplete', err));
+            resolve({ location: data.Location });
+        });
+    });
+}
+
+/**
+ * 简单对象上传(小文件用,不加分片)
+ */
+function putObject({ bucket, key, body, contentType = 'application/octet-stream' }) {
+    return new Promise((resolve, reject) => {
+        const client = buildClient();
+        client.putObject({
+            Bucket: bucket,
+            Region: getRegion(),
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+        }, (err, data) => {
+            if (err) return reject(wrapCosError('putObject', err));
+            resolve({
+                key,
+                url: publicUrl(bucket, key),
+                size: body.length,
+                etag: data.ETag,
+            });
+        });
+    });
+}
+
+function wrapCosError(op, err) {
+    const e = new Error(`COS ${op} failed: ${err.message || String(err)}`);
+    e.code = err.code || 'COS_API_FAILED';
+    e.httpStatus = err.statusCode;
+    return e;
+}
+
 module.exports = {
-    signPutUrl,
-    publicUrl,
+    initiateMultipartUpload,
+    uploadPart,
+    completeMultipartUpload,
     putObject,
-    // 暴露给单测
-    _tc3SignCos: tc3SignCos,
-    _sha256hex: sha256hex,
+    publicUrl,
 };

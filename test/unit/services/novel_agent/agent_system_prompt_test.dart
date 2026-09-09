@@ -142,7 +142,8 @@ void main() {
       expect(prompt, contains('## 工作原则'));
       expect(prompt, contains('1. 选定目标'));
       expect(prompt, contains('5. 修改小说封面'));
-      expect(prompt, contains('6. 修改操作完成后向用户汇报'));
+      expect(prompt, contains('6. 生图选模型'));
+      expect(prompt, contains('7. 修改操作完成后向用户汇报'));
     });
 
     test('memories 非空时渲染编号列表', () {

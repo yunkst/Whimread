@@ -6,6 +6,7 @@
   "private": true,
   "dependencies": {
     "@cloudbase/node-sdk": "^3.16.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "cos-nodejs-sdk-v5": "^2.14.0"
   }
 }

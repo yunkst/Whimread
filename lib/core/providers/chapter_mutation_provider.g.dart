@@ -6,7 +6,7 @@ part of 'chapter_mutation_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$chapterMutationHash() => r'5884144308ae2429f50a890c1c7fca623f2601d9';
+String _$chapterMutationHash() => r'4050e25d363f739c56b8dfbf85811f2fa15665c3';
 
 /// 章节写操作聚合 Notifier（无状态）。
 ///

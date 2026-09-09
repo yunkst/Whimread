@@ -21,6 +21,7 @@ import 'package:dio/io.dart';
 import 'dart:io';
 import '../../../services/api_service_wrapper.dart';
 import '../../../services/preload_service.dart';
+import '../../../services/headless_webview_bookshelf_service.dart';
 import '../../../services/headless_webview_content_service.dart';
 import '../../../services/headless_webview_chapter_list_service.dart';
 import '../../../repositories/chapter_repository.dart';
@@ -289,4 +290,27 @@ HeadlessWebViewContentService headlessWebViewContentService(Ref ref) {
 HeadlessWebViewChapterListService headlessWebViewChapterListService(Ref ref) {
   final scriptRepo = ref.watch(siteScriptRepositoryProvider);
   return HeadlessWebViewChapterListService(scriptRepo: scriptRepo, ref: ref);
+}
+
+/// HeadlessWebViewBookshelfService Provider
+///
+/// 提供无头 WebView 网站书架（bookshelf_js）提取服务实例。自管一个独立的
+/// HeadlessInAppWebView，与 HeadlessWebViewChapterListService 隔离。
+///
+/// 适用场景：书架屏「刷新网站书架」时，对每个有 bookshelf_js 的域名主动
+/// `loadUrl(sampleUrl)` → 跑脚本 → 拿到网站侧最新的小说列表，合并到本地书架。
+/// 登录态依赖 flutter_inappwebview 全局 CookieManager（Android/iOS 进程级
+/// 共享）；Web 平台则需重新登录。
+///
+/// **功能**:
+/// - 无脚本时返回 FetchSiteBookshelfResult.noScript()
+/// - 页面加载失败时返回 FetchSiteBookshelfResult.loadFailed()
+/// - 脚本健康度追踪：连续失败 3 次自动标记 unverified
+///
+/// **依赖**:
+/// - [siteScriptRepositoryProvider] - 站点脚本查询
+@Riverpod(keepAlive: true)
+HeadlessWebViewBookshelfService headlessWebViewBookshelfService(Ref ref) {
+  final scriptRepo = ref.watch(siteScriptRepositoryProvider);
+  return HeadlessWebViewBookshelfService(scriptRepo: scriptRepo);
 }

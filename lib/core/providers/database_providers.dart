@@ -138,12 +138,6 @@ IBookshelfRepository bookshelfRepository(Ref ref) {
   return BookshelfRepository(dbConnection: dbConnection);
 }
 
-/// 书架关联表写操作 Provider（仅 [BookshelfMutationNotifier] 用）。
-@riverpod
-IBookshelfAssociationWriter bookshelfAssociationWriter(Ref ref) {
-  return ref.watch(bookshelfRepositoryProvider) as BookshelfRepository;
-}
-
 /// SiteScriptRepository Provider
 ///
 /// 站点提取脚本的持久化操作

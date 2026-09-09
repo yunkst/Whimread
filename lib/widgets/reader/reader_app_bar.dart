@@ -128,6 +128,16 @@ class ReaderAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
             const PopupMenuItem(
+              value: 'theme_mode',
+              child: Row(
+                children: [
+                  Icon(Icons.contrast, size: 18),
+                  SizedBox(width: 12),
+                  Text('主题模式'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
               value: 'reader_settings',
               child: Row(
                 children: [

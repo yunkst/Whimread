@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/toast_utils.dart';
 import '../models/novel.dart';
-import '../models/bookshelf.dart';
 import '../services/logger_service.dart';
 import '../services/image_picker_service.dart';
 import '../services/media/media_proxy.dart';
@@ -22,7 +21,10 @@ import '../core/providers/bookshelf_providers.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/database_providers.dart';
 import '../core/providers/service_providers.dart';
+import '../core/providers/webview_providers.dart';
 import '../dialogs/novel_edit_dialog.dart';
+import '../models/site_script.dart';
+import '../widgets/site_bookshelf_refresh_sheet.dart';
 
 class BookshelfScreen extends ConsumerStatefulWidget {
   const BookshelfScreen({super.key});
@@ -32,9 +34,17 @@ class BookshelfScreen extends ConsumerStatefulWidget {
 }
 
 class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
-  /// 书架切换回调
-  void _onBookshelfChanged(int bookshelfId) {
-    ref.read(currentBookshelfIdProvider.notifier).setBookshelfId(bookshelfId);
+  /// 弹出「刷新网站书架」域名选择 sheet
+  ///
+  /// 仅传入有 bookshelf_js 缓存脚本的域名（按钮可见性已保证非空，但保险起见
+  /// 再过滤一次；空列表直接 return 不弹空 sheet）。
+  void _showRefreshSheet(BuildContext context) {
+    final scripts =
+        ref.read(siteScriptListProvider).valueOrNull ?? const <SiteScript>[];
+    final candidates =
+        scripts.where((s) => s.hasBookshelfJs).toList(growable: false);
+    if (candidates.isEmpty) return;
+    showSiteBookshelfRefreshSheet(context, candidates);
   }
 
   Future<void> _removeFromBookshelf(Novel novel) async {
@@ -269,156 +279,11 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
     }
   }
 
-  /// 显示书架选择对话框
+  /// 显示小说操作菜单（编辑/封面/移除）
   ///
-  /// [novel] 要操作的小说
-  /// [mode] 操作模式：'move' / 'copy' / 'join'
-  ///   - 'move': 从当前书架移动到目标书架(仅非全部小说书架下入口)
-  ///   - 'copy': 复制到目标书架(保留原书架归属)
-  ///   - 'join': 全部小说书架下的合并入口,等价 'copy'(add-only,
-  ///     书仍留在全部小说——虚拟书架无关联可删)
-  Future<void> _showBookshelfSelectionDialog(
-    Novel novel,
-    String mode,
-  ) async {
-    // "加入书架"(全部小说书架下的合并入口)与"复制到书架"语义等价,
-    // 仅标题文案不同。
-    final isJoin = mode == 'join';
-    final isMove = mode == 'move';
-
-    // 使用Repository获取书架列表
-    final bookshelfRepository = ref.read(bookshelfRepositoryProvider);
-    final bookshelves = await bookshelfRepository.getBookshelves();
-
-    // 获取当前书架ID
-    final currentBookshelfId = ref.read(currentBookshelfIdProvider);
-
-    // 过滤掉当前书架和"全部小说"书架
-    final availableBookshelves = bookshelves
-        .where((b) => b.id != currentBookshelfId && b.id != 1)
-        .toList();
-
-    if (availableBookshelves.isEmpty) {
-      if (mounted) {
-        ToastUtils.showWarning('没有可用的目标书架', context: context);
-      }
-      return;
-    }
-
-    if (!mounted) return;
-
-    final selectedBookshelf = await showDialog<Bookshelf>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(
-              isMove
-                  ? Icons.drive_file_move_outline
-                  : Icons.bookmark_add_outlined,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              isMove
-                  ? '移动到书架'
-                  : (isJoin ? '加入书架' : '复制到书架'),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: availableBookshelves.length,
-            itemBuilder: (context, index) {
-              final bookshelf = availableBookshelves[index];
-              return ListTile(
-                leading: Icon(
-                  bookshelf.isSystem ? Icons.folder_shared : Icons.folder,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                title: Text(bookshelf.name),
-                subtitle: Text(bookshelf.isSystem ? '系统书架' : '自定义书架'),
-                onTap: () => Navigator.pop(context, bookshelf),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
-
-    if (selectedBookshelf != null && mounted) {
-      if (isMove) {
-        await _moveNovelToBookshelf(novel, selectedBookshelf.id);
-      } else {
-        // 'join' 和 'copy' 都走 copyToBookshelf:add-only,不影响原书架归属
-        await _copyNovelToBookshelf(novel, selectedBookshelf.id);
-      }
-    }
-  }
-
-  /// 移动小说到指定书架
-  Future<void> _moveNovelToBookshelf(Novel novel, int toBookshelfId) async {
-    try {
-      // 获取当前书架ID
-      final currentBookshelfId = ref.read(currentBookshelfIdProvider);
-
-      // 写路径经 BookshelfMutationNotifier，自动 invalidate bookshelfNovelsProvider
-      await ref
-          .read(bookshelfMutationProvider.notifier)
-          .moveToBookshelf(novel.url, currentBookshelfId, toBookshelfId);
-
-      if (mounted) {
-        ToastUtils.showSuccess('已移动到目标书架', context: context);
-      }
-    } catch (e, stackTrace) {
-      if (!mounted) return;
-      ErrorHelper.showErrorWithLog(
-        context,
-        '移动失败',
-        stackTrace: stackTrace,
-        category: LogCategory.database,
-        tags: ['bookshelf', 'move', 'failed'],
-      );
-    }
-  }
-
-  /// 复制小说到指定书架
-  Future<void> _copyNovelToBookshelf(Novel novel, int toBookshelfId) async {
-    try {
-      // 写路径经 BookshelfMutationNotifier，自动 invalidate bookshelfNovelsProvider
-      await ref
-          .read(bookshelfMutationProvider.notifier)
-          .copyToBookshelf(novel.url, toBookshelfId);
-
-      if (mounted) {
-        ToastUtils.showSuccess('已复制到目标书架', context: context);
-        // 不主动刷新当前书架：复制只追加关联表行，原书架列表不变；
-        // Notifier 内部 invalidate 是无副作用的重新查询，目标书架视图切换时会自动刷新。
-      }
-    } catch (e, stackTrace) {
-      if (!mounted) return;
-      ErrorHelper.showErrorWithLog(
-        context,
-        '复制失败',
-        stackTrace: stackTrace,
-        category: LogCategory.database,
-        tags: ['bookshelf', 'copy', 'failed'],
-      );
-    }
-  }
-
-  /// 显示小说操作菜单（编辑/移动/复制/移除）
+  /// 新设计：书架分类由"小说来源"派生（URL 前缀），
+  /// 不再提供"移动到书架/复制到书架/加入书架"等分类调整入口。
   void _showNovelMenu(Novel novel) {
-    final currentBookshelfId = ref.read(currentBookshelfIdProvider);
-    final isAllNovelsBookshelf = currentBookshelfId == 1;
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -451,36 +316,6 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
                   _editNovelTitle(novel);
                 },
               ),
-              if (isAllNovelsBookshelf)
-                ListTile(
-                  leading: Icon(Icons.bookmark_add_outlined,
-                      color: colors.warning),
-                  title: const Text('加入书架'),
-                  onTap: () {
-                    Navigator.pop(sheetCtx);
-                    _showBookshelfSelectionDialog(novel, 'join');
-                  },
-                )
-              else ...[
-                ListTile(
-                  leading: Icon(Icons.drive_file_move_outline,
-                      color: colors.warning),
-                  title: const Text('移动到书架'),
-                  onTap: () {
-                    Navigator.pop(sheetCtx);
-                    _showBookshelfSelectionDialog(novel, 'move');
-                  },
-                ),
-                ListTile(
-                  leading:
-                      Icon(Icons.copy_all_outlined, color: colors.success),
-                  title: const Text('复制到书架'),
-                  onTap: () {
-                    Navigator.pop(sheetCtx);
-                    _showBookshelfSelectionDialog(novel, 'copy');
-                  },
-                ),
-              ],
               ListTile(
                 leading: Icon(Icons.image_outlined, color: colors.info),
                 title: const Text('设置封面'),
@@ -516,7 +351,6 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currentBookshelfId = ref.watch(currentBookshelfIdProvider);
     final bookshelfAsync = ref.watch(bookshelfNovelsProvider);
     final cacheStats = ref.watch(bookshelfCacheStatsProvider).valueOrNull;
     final colors = context.appColors;
@@ -560,16 +394,31 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
               ToastUtils.showInfo('在浏览器中搜索并加入书架', context: context);
             },
           ),
+          // 刷新网站书架：仅当任一域名有 bookshelf_js 缓存脚本时显示
+          // （脚本存在性感知由 siteScriptListProvider 同步加载所有 SiteScript，
+          // 此处仅读取 .valueOrNull 避免在 widget build 阶段主动 await DB，
+          // 减少 widget 测试的 pending-Timer 风险）。
+          Consumer(
+            builder: (context, ref, _) {
+              final scripts =
+                  ref.watch(siteScriptListProvider).valueOrNull ?? const [];
+              final hasBookshelfScript =
+                  scripts.any((SiteScript s) => s.hasBookshelfJs);
+              if (!hasBookshelfScript) return const SizedBox.shrink();
+              return IconButton(
+                icon: const Icon(Icons.cloud_sync_outlined),
+                tooltip: '刷新网站书架',
+                onPressed: () => _showRefreshSheet(context),
+              );
+            },
+          ),
           const SizedBox(width: 4),
         ],
       ),
       body: Column(
         children: [
-          // 书架选择器（沿用现有组件，已自带样式）
-          BookshelfSelector(
-            currentBookshelfId: currentBookshelfId,
-            onBookshelfChanged: _onBookshelfChanged,
-          ),
+          // 书架分类切换（顶部 TabBar，单步直达）
+          const BookshelfTabBar(),
           // 书架内容
           Expanded(
             child: bookshelfAsync.when(

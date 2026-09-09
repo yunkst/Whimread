@@ -1,7 +1,8 @@
 /// 站点提取脚本数据模型
 ///
 /// 对应 site_scripts 表的字段。
-/// 每个 domain 有一条记录，包含目录提取脚本和内容提取脚本。
+/// 每个 domain 有一条记录，包含目录提取脚本、内容提取脚本与（v40 起）
+/// 网站书架提取脚本（用于提取"我的书架/收藏"页的小说列表）。
 class SiteScript {
   final String id;
   final String domain;
@@ -23,9 +24,15 @@ class SiteScript {
 
   /// 正文提取脚本是否需要 OCR 后处理（字体反爬）。
   ///
-  /// v39 拆列后独立标记。多数普通站点两列均为 false；字体反爬站点（如番茄）
+  /// v39 拆列后独立标记。多数普通目录点两列均为 false；字体反爬站点（如番茄）
   /// 一般 content_ocr=true、list_ocr=false。
   final bool chapterContentOcr;
+
+  /// 网站书架提取脚本（v40 起）。
+  ///
+  /// 在小说站「我的书架/收藏」页运行，返回 `{novels:[{title,url}]}`。
+  /// 空字符串表示该域名未配置书架脚本。
+  final String bookshelfJs;
 
   const SiteScript({
     required this.id,
@@ -40,6 +47,7 @@ class SiteScript {
     required this.verified,
     this.chapterListOcr = false,
     this.chapterContentOcr = false,
+    this.bookshelfJs = '',
   });
 
   /// 从数据库 Map 构造
@@ -57,6 +65,7 @@ class SiteScript {
       verified: (map['verified'] as int?) ?? 0,
       chapterListOcr: (map['chapter_list_ocr'] as int?) == 1,
       chapterContentOcr: (map['chapter_content_ocr'] as int?) == 1,
+      bookshelfJs: (map['bookshelf_js'] as String?) ?? '',
       // 注：旧 'ocr' 列 v39 起不再读取，保留在 DB 仅作历史兼容。
     );
   }
@@ -76,6 +85,7 @@ class SiteScript {
       'verified': verified,
       'chapter_list_ocr': chapterListOcr ? 1 : 0,
       'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+      'bookshelf_js': bookshelfJs,
     };
   }
 
@@ -84,6 +94,9 @@ class SiteScript {
 
   /// 是否有内容脚本
   bool get hasChapterContentJs => chapterContentJs.isNotEmpty;
+
+  /// 是否有网站书架脚本
+  bool get hasBookshelfJs => bookshelfJs.isNotEmpty;
 
   /// 是否已验证
   bool get isVerified => verified == 1;
@@ -106,6 +119,7 @@ class SiteScript {
     int? verified,
     bool? chapterListOcr,
     bool? chapterContentOcr,
+    String? bookshelfJs,
   }) {
     return SiteScript(
       id: id ?? this.id,
@@ -120,6 +134,7 @@ class SiteScript {
       verified: verified ?? this.verified,
       chapterListOcr: chapterListOcr ?? this.chapterListOcr,
       chapterContentOcr: chapterContentOcr ?? this.chapterContentOcr,
+      bookshelfJs: bookshelfJs ?? this.bookshelfJs,
     );
   }
 }

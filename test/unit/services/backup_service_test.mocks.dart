@@ -72,6 +72,17 @@ class MockApiServiceWrapper extends _i1.Mock implements _i4.ApiServiceWrapper {
       ) as bool);
 
   @override
+  set authHeaderProvider(
+          _i5.Future<Map<String, String>> Function()? _authHeaderProvider) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #authHeaderProvider,
+          _authHeaderProvider,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i5.Future<void> init() => (super.noSuchMethod(
         Invocation.method(
           #init,
@@ -91,27 +102,11 @@ class MockApiServiceWrapper extends _i1.Mock implements _i4.ApiServiceWrapper {
       ) as _i5.Future<String?>);
 
   @override
-  _i5.Future<String?> getToken() => (super.noSuchMethod(
-        Invocation.method(
-          #getToken,
-          [],
-        ),
-        returnValue: _i5.Future<String?>.value(),
-      ) as _i5.Future<String?>);
-
-  @override
-  _i5.Future<void> setConfig({
-    required String? host,
-    String? token,
-  }) =>
-      (super.noSuchMethod(
+  _i5.Future<void> setConfig({required String? host}) => (super.noSuchMethod(
         Invocation.method(
           #setConfig,
           [],
-          {
-            #host: host,
-            #token: token,
-          },
+          {#host: host},
         ),
         returnValue: _i5.Future<void>.value(),
         returnValueForMissingStub: _i5.Future<void>.value(),

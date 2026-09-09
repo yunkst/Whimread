@@ -6,11 +6,11 @@ part of 'bookshelf_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$bookshelfNovelsHash() => r'd4006a1ed2ae5573901a27423c067cddb1a3dedb';
+String _$bookshelfNovelsHash() => r'a396a77f5a51312a193460a0a4f965239970fd31';
 
 /// 书架小说列表
 ///
-/// 根据当前书架ID异步加载小说列表
+/// 根据当前书架分类异步加载小说列表（分类由 URL 前缀派生）
 ///
 /// Copied from [bookshelfNovels].
 @ProviderFor(bookshelfNovels)
@@ -51,27 +51,29 @@ final bookshelfCacheStatsProvider =
 // ignore: unused_element
 typedef BookshelfCacheStatsRef
     = AutoDisposeFutureProviderRef<Map<String, CacheStats>>;
-String _$currentBookshelfIdHash() =>
-    r'bb284e432c14f971582d32838b8eb1e617bac264';
+String _$currentBookshelfKindHash() =>
+    r'b7f2093e35e972bab9144637e6fbd2fa7a984342';
 
-/// 当前选中的书架ID
+/// 当前选中的书架分类
 ///
-/// 默认值为 1（"全部小说"书架）
-/// 支持持久化保存用户选择，重启app后恢复上次打开的书架
+/// 三档系统分类（全部/原创/联网），由"小说来源"派生，用户不可调整。
+/// 支持持久化保存用户选择，重启 app 后恢复上次打开的书架：
+/// - 新键 `current_bookshelf_kind` 存 [BookshelfKind.name]
+/// - 旧键 `current_bookshelf_id`（int）存在时经 [Bookshelf.fromLegacyId] 兜底映射
 ///
-/// Copied from [CurrentBookshelfId].
-@ProviderFor(CurrentBookshelfId)
-final currentBookshelfIdProvider =
-    AutoDisposeNotifierProvider<CurrentBookshelfId, int>.internal(
-  CurrentBookshelfId.new,
-  name: r'currentBookshelfIdProvider',
+/// Copied from [CurrentBookshelfKind].
+@ProviderFor(CurrentBookshelfKind)
+final currentBookshelfKindProvider =
+    AutoDisposeNotifierProvider<CurrentBookshelfKind, BookshelfKind>.internal(
+  CurrentBookshelfKind.new,
+  name: r'currentBookshelfKindProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
       ? null
-      : _$currentBookshelfIdHash,
+      : _$currentBookshelfKindHash,
   dependencies: null,
   allTransitiveDependencies: null,
 );
 
-typedef _$CurrentBookshelfId = AutoDisposeNotifier<int>;
+typedef _$CurrentBookshelfKind = AutoDisposeNotifier<BookshelfKind>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

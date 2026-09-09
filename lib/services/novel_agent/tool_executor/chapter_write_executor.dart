@@ -255,7 +255,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
   /// AI 重写整章正文（原 update_chapter_content 的 LLM 全文重写逻辑）。
   ///
   /// 与 [updateChapterContent] 的字符串替换不同，本方法把整章原文 + 修改要求 +
-  /// 人物卡 + 写作标签拼成提示词，流式调用 LLM 重新生成整章正文后入库。
+  /// 人物卡 + 写作技巧拼成提示词，流式调用 LLM 重新生成整章正文后入库。
   /// 适合大范围重写、风格转换、结构调整；想精确改某段用 update_chapter_content。
   Future<String> rewriteChapterContent(
     Map<String, dynamic> args,
@@ -414,10 +414,10 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     return raw.trim();
   }
 
-  /// 拼装 LLM 上下文片段：人物卡 + 写作标签。
+  /// 拼装 LLM 上下文片段：人物卡 + 写作技巧。
   ///
   /// 人物卡按名字在当前小说里查找（避免暴露/误传真实 ID）；
-  /// 写作标签按名匹配，每个标签随机抽一条 prompt。
+  /// 写作技巧按名匹配，每个技巧随机抽一条 prompt。
   Future<List<String>> _buildContextParts(
     String novelUrl,
     List<String> characterNames,
@@ -425,7 +425,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
   ) async {
     final parts = <String>[];
 
-    // 人物卡与写作标签两路查询互不依赖：先并发启动，再各自 await 收集
+    // 人物卡与写作技巧两路查询互不依赖：先并发启动，再各自 await 收集
     final charactersFuture = characterNames.isEmpty
         ? Future<List<Character>>.value(const [])
         : ref.read(characterRepositoryProvider).getCharacters(novelUrl);
@@ -444,17 +444,17 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       }
     }
 
-    // 写作标签（每个标签随机抽一条 prompt）
+    // 写作技巧（每个技巧随机抽一条 prompt）
     final allTags = await tagsFuture;
     if (tagNames.isNotEmpty) {
-      final buffer = StringBuffer('【写作标签参考】\n');
+      final buffer = StringBuffer('【写作技巧参考】\n');
       for (final name in tagNames) {
         final matched = allTags.where((t) => t.name == name).toList();
         if (matched.isEmpty) continue;
         matched.shuffle();
         buffer.writeln('- $name：${matched.first.promptText}');
       }
-      if (buffer.length > '【写作标签参考】\n'.length) {
+      if (buffer.length > '【写作技巧参考】\n'.length) {
         parts.add(buffer.toString());
       }
     }
@@ -522,7 +522,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
 
   /// 调用 LLM 重写章节
   ///
-  /// 组合「原文 + 修改要求 + 人物卡 + 标签 prompt」为提示词，
+  /// 组合「原文 + 修改要求 + 人物卡 + 技巧 prompt」为提示词，
   /// 流式调用 LLM，返回新正文或错误。
   Future<_RewriteResult> _rewriteChapter({
     required String novelUrl,
@@ -575,7 +575,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
 
   /// 调用 LLM 创作新章节
   ///
-  /// 组合「前一章正文（可选）+ 创作要求 + 人物卡 + 标签 prompt」为提示词（无原文），
+  /// 组合「前一章正文（可选）+ 创作要求 + 人物卡 + 技巧 prompt」为提示词（无原文），
   /// 流式调用 LLM，返回新正文或错误。
   Future<_RewriteResult> _generateChapter({
     required String novelUrl,

@@ -41,12 +41,17 @@ class AgentSystemPrompt {
         '（1-based 顺序号），不是 URL 或数据库 ID。');
     buffer.writeln('4. 创建新小说：用户要求"新建一本小说"时，直接调用 create_novel '
         '（只需 title，可选 description），系统会自动切换为当前工作小说。');
-    buffer.writeln('5. 修改小说封面：先用 create_images（图片）或 '
-        'create_image_to_video（视频）生成媒体，从返回结果里选最合适的一张，'
-        '把它的 mediaId 传给 set_novel_cover。封面接受图片或视频，'
+    buffer.writeln('5. 修改小说封面：先用 create_images 生成图片，'
+        '从返回结果里选最合适的一张，把它的 mediaId 传给 set_novel_cover。'
         '封面图本身不需要包含书名文字（书名会在书架标题区独立展示）。'
         '如需恢复默认占位封面，调 set_novel_cover 时 mediaId 传 null。');
-    buffer.writeln('6. 修改操作完成后向用户汇报。');
+    buffer.writeln('6. 生图选模型：用户要生成图片时，先调用 list_text2img_models '
+        '查看可用模型，根据每项的 description 和 tags 挑选与用户需求最匹配的'
+        '（用户提到"古风""写实""赛博朋克""人物特写"等风格/题材关键词时，'
+        '优先匹配 tags 含这些关键词的模型），把它的 name 作为 create_images 的 '
+        'modelName。不要凭空编造模型名；列表为空时引导用户到'
+        '「设置 → 生图模型管理」导入模型。');
+    buffer.writeln('7. 修改操作完成后向用户汇报。');
     buffer.writeln();
 
     // 注入经验记忆（编号 [N] 形式，供 patch_memory 工具用编号定位）

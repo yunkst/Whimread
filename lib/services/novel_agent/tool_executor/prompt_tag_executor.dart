@@ -1,4 +1,4 @@
-/// 提示标签子执行器 — list_prompt_tags / get_prompt_tag / save_prompt_tag /
+/// 写作技巧子执行器 — list_prompt_tags / get_prompt_tag / save_prompt_tag /
 /// delete_prompt_tag
 library;
 
@@ -51,7 +51,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
       categories = allCategories;
     }
 
-    // 按分类获取标签
+    // 按分类获取技巧
     final result = <Map<String, dynamic>>[];
     for (final category in categories) {
       final tags = await tagRepo.getByCategory(category.id!);
@@ -72,7 +72,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     final totalTags =
         result.fold<int>(0, (sum, c) => sum + (c['tagCount'] as int));
     LoggerService.instance.i(
-        '列出提示标签: ${categories.length} 个分类, $totalTags 个标签',
+        '列出写作技巧: ${categories.length} 个分类, $totalTags 个技巧',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'list_prompt_tags']);
     return jsonEncode({
@@ -95,7 +95,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
       );
       return jsonEncode({
         'error': 'missing_arg',
-        'message': '需要提供 id 或 name 来查看标签详情',
+        'message': '需要提供 id 或 name 来查看技巧详情',
       });
     }
 
@@ -118,12 +118,12 @@ class PromptTagExecutor with ToolExecutorHelpers {
         );
         return jsonEncode(guidanceError(
           'tag_not_found',
-          '标签 ID $id 不存在。请先调用 list_prompt_tags 查看所有标签。',
+          '技巧 ID $id 不存在。请先调用 list_prompt_tags 查看所有写作技巧。',
           suggestedTool: 'list_prompt_tags',
         ));
       }
       final t = tags.first;
-      LoggerService.instance.i('查看提示标签详情: "${t.name}" (id=$id)',
+      LoggerService.instance.i('查看写作技巧详情: "${t.name}" (id=$id)',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'get_prompt_tag']);
       return jsonEncode({
@@ -148,7 +148,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
       return jsonEncode(<String, dynamic>{
         ...guidanceError(
           'tag_not_found',
-          '没有名为 "$name" 的标签。',
+          '没有名为 "$name" 的写作技巧。',
           suggestedTool: 'list_prompt_tags',
         ),
         if (suggestedNames.isNotEmpty) 'suggested_names': suggestedNames,
@@ -156,7 +156,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     }
     if (matched.length == 1) {
       final t = matched.first;
-      LoggerService.instance.i('查看提示标签详情: "${t.name}" (by name)',
+      LoggerService.instance.i('查看写作技巧详情: "${t.name}" (by name)',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'get_prompt_tag']);
       return jsonEncode({
@@ -165,19 +165,19 @@ class PromptTagExecutor with ToolExecutorHelpers {
       });
     }
     LoggerService.instance.i(
-        '查看提示标签: name="$name" 命中 ${matched.length} 个',
+        '"查看写作技巧: name="$name" 命中 ${matched.length} 个',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'get_prompt_tag']);
     return jsonEncode({
       'success': true,
-      'message': '找到 ${matched.length} 个名为 "$name" 的标签，请用 id 精确查看',
+      'message': '找到 ${matched.length} 个名为 "$name" 的写作技巧，请用 id 精确查看',
       'tags': matched
           .map((t) => _tagDetail(t, categoryNameById[t.categoryId]))
           .toList(),
     });
   }
 
-  /// 构造标签详情（含完整 promptText）
+  /// 构造技巧详情（含完整 promptText）
   Map<String, dynamic> _tagDetail(PromptTag t, String? categoryName) => {
         'id': t.id,
         'name': t.name,
@@ -224,7 +224,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     final categoryId = category.id!;
 
     if (id != null) {
-      // 更新已有标签
+      // 更新已有技巧
       final existingTags = await tagRepo.getByIds([id]);
       if (existingTags.isEmpty) {
         LoggerService.instance.d(
@@ -234,7 +234,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
         );
         return jsonEncode(guidanceError(
           'tag_not_found',
-          '标签 ID $id 不存在。请先调用 list_prompt_tags 查看所有标签。',
+          '技巧 ID $id 不存在。请先调用 list_prompt_tags 查看所有写作技巧。',
           suggestedTool: 'list_prompt_tags',
           suggestedArgs: const <String, dynamic>{},
         ));
@@ -249,17 +249,17 @@ class PromptTagExecutor with ToolExecutorHelpers {
       );
       await tagRepo.save(updated);
 
-      LoggerService.instance.i('更新提示标签: "$name" (id=$id)',
+      LoggerService.instance.i('更新写作技巧: "$name" (id=$id)',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'save_prompt_tag']);
       return jsonEncode({
         'success': true,
-        'message': '标签 "$name" 已更新',
+        'message': '技巧 "$name" 已更新',
         'tagId': id,
       });
     }
 
-    // 创建新标签
+    // 创建新技巧
     final sortOrder = await tagRepo.getNextSortOrder(categoryId);
     final now = DateTime.now();
     final newTag = PromptTag(
@@ -274,12 +274,12 @@ class PromptTagExecutor with ToolExecutorHelpers {
     final newId = await tagRepo.save(newTag);
 
     LoggerService.instance.i(
-        '创建提示标签: "$name" (id=$newId, category="${category.name}")',
+        '创建写作技巧: "$name" (id=$newId, category="${category.name}")',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'save_prompt_tag']);
     return jsonEncode({
       'success': true,
-      'message': '标签 "$name" 已创建（分类：${category.name}）',
+      'message': '技巧 "$name" 已创建（分类：${category.name}）',
       'tagId': newId,
     });
   }
@@ -291,7 +291,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
 
     final tagRepo = ref.read(promptTagRepositoryProvider);
 
-    // 确认标签存在
+    // 确认技巧存在
     final existingTags = await tagRepo.getByIds([id]);
     if (existingTags.isEmpty) {
       LoggerService.instance.d(
@@ -301,7 +301,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
       );
       return jsonEncode(guidanceError(
         'tag_not_found',
-        '标签 ID $id 不存在。请先调用 list_prompt_tags 查看所有标签。',
+        '技巧 ID $id 不存在。请先调用 list_prompt_tags 查看所有写作技巧。',
         suggestedTool: 'list_prompt_tags',
       ));
     }
@@ -310,12 +310,12 @@ class PromptTagExecutor with ToolExecutorHelpers {
     await tagRepo.delete(id);
 
     LoggerService.instance.i(
-        '删除提示标签: "${existing.name}" (id=$id)',
+        '删除写作技巧: "${existing.name}" (id=$id)',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'delete_prompt_tag']);
     return jsonEncode({
       'success': true,
-      'message': '标签 "${existing.name}" 已删除',
+      'message': '技巧 "${existing.name}" 已删除',
     });
   }
 

@@ -1,13 +1,13 @@
-/// ToolExecutor 文生图工具单元测试
+/// ToolExecutor 文生图工具单元测试（纯客户端本地引擎模式）
 ///
-/// 覆盖 list_text2img_models 与 create_images 两个工具：
-/// - 正常路径（模型列表、单图/多图提交、imageId 格式、modelName 透传）
-/// - count 边界 clamp 到 [1,4]
-/// - 缺 prompt 参数错误
-/// - backend 抛错时返回 backend_unavailable 引导
+/// 2026-09-09 ComfyUI 后端移除后 create_images / list_text2img_models 的行为：
+/// - list_text2img_models 读 image_models 表（用户管理的本地模型元数据）
+/// - create_images 统一分发到 LocalSdCppBackend：
+///     · 模型文件缺失/损坏 → generation_failed
+///     · 引擎未集成（阶段 A stub）→ engine_not_ready
+/// - modelName 不存在 / 模型停用 / 无模型时返回结构化错误
 ///
-/// 用 _FakeApiServiceWrapper（继承 ApiServiceWrapper，仅重写 4 个文生图方法）
-/// 通过 override apiServiceWrapperProvider 注入，不依赖真实网络。
+/// 本地模型数据通过真实 ImageModelRepository 写入 in-memory SQLite。
 ///
 /// 运行：
 ///   cd novel_app
@@ -15,93 +15,47 @@
 library;
 
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common/sqflite.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'package:novel_app/core/database/database_connection.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
+import 'package:novel_app/core/providers/image_model_providers.dart';
 import 'package:novel_app/core/providers/services/network_service_providers.dart';
+import 'package:novel_app/models/image_model.dart';
+import 'package:novel_app/repositories/image_model_repository.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
 import 'package:novel_app/services/novel_agent/tool_executor.dart';
 import '../../../helpers/test_database_setup.dart' as test_db;
-
-// ──────────────────────────────────────────────────────────────────────
-// Fake ApiServiceWrapper
-// ──────────────────────────────────────────────────────────────────────
-
-/// 仅重写 4 个文生图方法的假 ApiServiceWrapper。
-/// 测试用例通过修改字段控制返回值/抛异常。
-class _FakeApiServiceWrapper extends ApiServiceWrapper {
-  _FakeApiServiceWrapper();
-
-  // getText2ImgModels
-  List<Map<String, dynamic>>? modelsResult;
-  Object? modelsError;
-
-  // submitText2ImgTask
-  Object? submitError;
-  int _submitCount = 0;
-  String Function(int index)? taskIdFor;
-
-  // fetchText2ImgImage
-  (Uint8List?, int)? fetchResult;
-
-  @override
-  Future<List<Map<String, dynamic>>> getText2ImgModels() async {
-    if (modelsError != null) throw modelsError!;
-    return List<Map<String, dynamic>>.from(modelsResult ?? const []);
-  }
-
-  @override
-  Future<String> submitText2ImgTask({
-    required String prompt,
-    String? modelName,
-    String? negativePrompt,
-  }) async {
-    if (submitError != null) throw submitError!;
-    // 计数器无条件递增，保证并发提交时每张图拿到不同 index
-    final idx = _submitCount++;
-    final gen = taskIdFor;
-    if (gen != null) return gen(idx);
-    return 'fake-task-$idx';
-  }
-
-  @override
-  Future<(Uint8List?, int)> fetchText2ImgImage(String taskId) async {
-    return fetchResult ?? (null, 202);
-  }
-}
 
 // 用一个本地 Provider 让 ProviderContainer 暴露带 Ref 的 ToolExecutor
 final _toolExecutorProvider =
     Provider<ToolExecutor>((ref) => ToolExecutor(ref));
 
-// ──────────────────────────────────────────────────────────────────────
-// 测试主体
-// ──────────────────────────────────────────────────────────────────────
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late _FakeApiServiceWrapper fakeApi;
   late ProviderContainer container;
   late ToolExecutor executor;
   late Database db;
+  late ImageModelRepository repo;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     db = await test_db.TestDatabaseSetup.createInMemoryDatabase();
     final dbConnection = DatabaseConnection.forTesting(db);
-    fakeApi = _FakeApiServiceWrapper();
     container = ProviderContainer(overrides: [
-      apiServiceWrapperProvider.overrideWithValue(fakeApi),
+      // ApiServiceWrapper 仍需注入（ListTile 设置页等处间接依赖），但生图链路不再用它
+      apiServiceWrapperProvider.overrideWithValue(_UnusedApiServiceWrapper()),
       databaseConnectionProvider.overrideWithValue(dbConnection),
     ]);
     executor = container.read(_toolExecutorProvider);
+    repo = container.read(imageModelRepositoryProvider);
   });
 
   tearDown(() async {
@@ -112,225 +66,220 @@ void main() {
   Map<String, dynamic> decode(String raw) =>
       jsonDecode(raw) as Map<String, dynamic>;
 
+  Future<ImageModel> insertModel({
+    required String name,
+    String description = '',
+    List<String> tags = const [],
+    String filePath = '',
+    int fileSize = 0,
+    bool isEnabled = true,
+    bool isDefault = false,
+    int sortOrder = 0,
+  }) async {
+    final now = DateTime.now();
+    final model = ImageModel(
+      name: name,
+      description: description,
+      tags: tags,
+      filePath: filePath,
+      fileSize: fileSize,
+      isEnabled: isEnabled,
+      isDefault: isDefault,
+      sortOrder: sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final id = await repo.save(model);
+    return (await repo.getById(id))!;
+  }
+
+  /// 在临时目录写一个合法 gguf 文件（magic + ≥16 字节），返回路径
+  String writeValidGguf() {
+    final tmpDir = Directory.systemTemp.createTempSync('t2i_local_sd_');
+    addTearDown(() => tmpDir.deleteSync(recursive: true));
+    final ggufPath = p.join(tmpDir.path, 'fake.gguf');
+    File(ggufPath).writeAsBytesSync(
+        [0x47, 0x47, 0x55, 0x46, 0x03, 0x00, 0x00, 0x00] +
+            List<int>.filled(16, 0));
+    return ggufPath;
+  }
+
   // =========================================================================
   // list_text2img_models
   // =========================================================================
   group('list_text2img_models', () {
-    test('正常返回模型列表（title→name 映射已在 ApiServiceWrapper 完成）', () async {
-      fakeApi.modelsResult = [
-        {'name': '动漫风17.5', 'description': '...', 'isDefault': true},
-        {'name': '写实1', 'description': '...', 'isDefault': false},
-      ];
+    test('返回本地模型列表（name/description/tags/isDefault/promptSkill）', () async {
+      await insertModel(
+        name: '古风水墨',
+        description: '擅长中国古风水墨插画',
+        tags: const ['古风', '水墨'],
+        sortOrder: 0,
+      );
+      await insertModel(
+        name: '写实人像',
+        description: '擅长写实人脸',
+        tags: const ['写实'],
+        sortOrder: 1,
+      );
 
       final json = decode(await executor.execute('list_text2img_models', {}));
 
       expect(json['error'], isNull);
       expect(json['count'], 2);
       final models = (json['models'] as List).cast<Map<String, dynamic>>();
-      expect(models.first['name'], '动漫风17.5');
-      expect(models.first['isDefault'], true);
+      expect(models.first['name'], '古风水墨');
+      expect(models.first['description'], '擅长中国古风水墨插画');
+      expect(models.first['tags'], ['古风', '水墨']);
+      expect(models.first['backendType'], 'local_sd');
+      // promptSkill 由描述+标签拼出（含关键词）
+      expect(models.first['promptSkill'], contains('古风'));
     });
 
-    test('空列表时返回 count=0 且带提示 message', () async {
-      fakeApi.modelsResult = [];
+    test('isDefault / defaultModelName 标记正确', () async {
+      await insertModel(name: '甲', sortOrder: 0);
+      await insertModel(name: '乙', isDefault: true, sortOrder: 1);
 
       final json = decode(await executor.execute('list_text2img_models', {}));
 
-      expect(json['error'], isNull);
+      expect(json['defaultModelName'], '乙');
+      final models = (json['models'] as List).cast<Map<String, dynamic>>();
+      expect(
+        models.firstWhere((m) => m['name'] == '乙')['isDefault'],
+        true,
+      );
+    });
+
+    test('停用模型不出现在列表', () async {
+      await insertModel(name: '可见');
+      await insertModel(name: '不可见', isEnabled: false);
+
+      final json = decode(await executor.execute('list_text2img_models', {}));
+
+      final names =
+          (json['models'] as List).map((m) => m['name']).toList();
+      expect(names, ['可见']);
+    });
+
+    test('空列表时返回 count=0 且 message 引导去「生图模型管理」', () async {
+      final json = decode(await executor.execute('list_text2img_models', {}));
+
       expect(json['count'], 0);
       expect(json['models'], isEmpty);
-      expect(json['message'], isNotNull, reason: '空列表应附带引导提示');
-    });
-
-    test('backend 抛错时返回 backend_unavailable 引导', () async {
-      // 配置 host → 走 _kBackendUnreachableMsg 分支（异常细节透传 + 含进阶提示）
-      SharedPreferences.setMockInitialValues({'backend_host': 'http://test:3800'});
-      fakeApi.modelsError = Exception('connection refused');
-
-      final json = decode(await executor.execute('list_text2img_models', {}));
-
-      expect(json['error'], 'backend_unavailable');
-      expect(json['message'], contains('connection refused'));
-      expect(json['message'], contains('进阶功能'));
-      expect(json['message'], contains('设置 → 进阶服务 → 后端服务配置'));
+      final msg = json['message'] as String;
+      expect(msg, contains('生图模型管理'));
     });
   });
 
   // =========================================================================
-  // create_images
+  // create_images - 模型选择
   // =========================================================================
-  group('create_images - 正常路径', () {
-    test('单图（count 不传默认 1）', () async {
-      final json = decode(await executor.execute('create_images', {
-        'prompt': '1girl, anime style',
-      }));
+  group('create_images - 模型选择', () {
+    test('不传 modelName → 用默认模型（engine_not_ready 响应里带不出模型名，'
+        '用 list 验证默认选取路径走到了引擎）', () async {
+      await insertModel(name: '非默认', sortOrder: 0);
+      await insertModel(
+          name: '默认模型', isDefault: true, sortOrder: 1, filePath: writeValidGguf());
 
-      expect(json['success'], true);
-      expect(json['count'], 1);
-      final images = (json['images'] as List).cast<Map<String, dynamic>>();
-      expect(images.length, 1);
-      expect(images.first['prompt'], '1girl, anime style');
-      // mediaId 即后端 task_id（统一句柄，不再有独立 imageId）
-      expect(images.first['mediaId'], isA<String>());
-      expect(images.first['mediaId'], 'fake-task-0');
-    });
-
-    test('多图（count=3）每张 taskId 独立、imageId 后缀递增', () async {
-      fakeApi.taskIdFor = (i) => 'task-$i';
-
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'scene',
-        'count': 3,
-      }));
-
-      expect(json['count'], 3);
-      final images = (json['images'] as List).cast<Map<String, dynamic>>();
-      expect(images.length, 3);
-      // mediaId = 各任务独立 task_id
-      expect(images.map((i) => i['mediaId']).toList(),
-          ['task-0', 'task-1', 'task-2']);
-    });
-
-    test('modelName 透传到 images 元素', () async {
+      // 默认模型文件合法 → 引擎未集成错误（说明选择逻辑走通）
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
-        'modelName': '写实1',
       }));
 
-      final images = (json['images'] as List).cast<Map<String, dynamic>>();
-      expect(images.first['modelName'], '写实1');
+      expect(json['error'], 'engine_not_ready');
+    });
+
+    test('不传 modelName 且无默认 → 退回第一个启用模型', () async {
+      await insertModel(name: '第一个', sortOrder: 0, filePath: writeValidGguf());
+
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+      }));
+
+      expect(json['error'], 'engine_not_ready');
     });
   });
 
-  group('create_images - count 边界 clamp 到 [1,4]', () {
-    test('count=0 → 实际提交 1 张', () async {
+  // =========================================================================
+  // create_images - 本地引擎（阶段 A：stub）
+  // =========================================================================
+  group('create_images - 本地引擎', () {
+    test('模型文件不存在 → generation_failed', () async {
+      await insertModel(
+        name: '本地模型',
+        filePath: '/tmp/nonexistent_gguf_${DateTime.now().microsecondsSinceEpoch}.gguf',
+      );
+
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
-        'count': 0,
+        'modelName': '本地模型',
       }));
-      expect(json['count'], 1);
+
+      expect(json['error'], 'generation_failed');
+      expect(json['message'], contains('已丢失'));
     });
 
-    test('count=5 → clamp 到 4 张', () async {
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'p',
-        'count': 5,
-      }));
-      expect(json['count'], 4, reason: 'count 上限 4，防止 LLM 失控');
-    });
+    test('模型文件存在 + gguf 头合法 → engine_not_ready（阶段 A stub）', () async {
+      await insertModel(
+        name: '本地模型',
+        filePath: writeValidGguf(),
+        fileSize: 24,
+      );
 
-    test('count=-1 → clamp 到 1 张', () async {
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
-        'count': -1,
+        'modelName': '本地模型',
       }));
-      expect(json['count'], 1);
-    });
 
-    test('count=4 边界值合法', () async {
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'p',
-        'count': 4,
-      }));
-      expect(json['count'], 4);
+      expect(json['error'], 'engine_not_ready');
+      expect(json['message'], contains('尚未集成'));
     });
   });
 
-  group('create_images - 参数错误', () {
+  // =========================================================================
+  // create_images - 错误分支
+  // =========================================================================
+  group('create_images - 错误分支', () {
+    test('modelName 不存在 → model_not_found 且列出可用模型', () async {
+      await insertModel(name: '甲');
+
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+        'modelName': '不存在',
+      }));
+
+      expect(json['error'], 'model_not_found');
+      expect(json['message'], contains('甲'));
+    });
+
+    test('模型已停用 → model_disabled', () async {
+      await insertModel(name: '停用的', isEnabled: false);
+
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+        'modelName': '停用的',
+      }));
+
+      expect(json['error'], 'model_disabled');
+    });
+
+    test('无任何模型 → no_models_available 引导', () async {
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+      }));
+
+      expect(json['error'], 'no_models_available');
+      expect(json['message'], contains('生图模型管理'));
+    });
+
     test('缺 prompt 返回 missing_arg 错误', () async {
       final json = decode(await executor.execute('create_images', {}));
 
-      expect(json['success'], isNull);
       expect(json.containsKey('error'), true);
       expect(json['message'], contains('prompt'));
     });
-
-    test('prompt 为空字符串返回错误', () async {
-      final json = decode(await executor.execute('create_images', {
-        'prompt': '   ',
-      }));
-
-      expect(json.containsKey('error'), true);
-    });
-  });
-
-  group('create_images - backend 失败', () {
-    test('submit 抛错时返回 backend_unavailable', () async {
-      // 配置 host → 走 _kBackendUnreachableMsg 分支（异常细节透传 + 含进阶提示）
-      SharedPreferences.setMockInitialValues({'backend_host': 'http://test:3800'});
-      fakeApi.submitError = Exception('ComfyUI offline');
-
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'p',
-        'count': 2,
-      }));
-
-      expect(json['error'], 'backend_unavailable');
-      expect(json['message'], contains('ComfyUI offline'));
-      expect(json.containsKey('success'), false,
-          reason: '失败时不应伪装成功');
-      expect(json['message'], contains('进阶功能'));
-      expect(json['message'], contains('设置 → 进阶服务 → 后端服务配置'));
-    });
-  });
-
-  // =========================================================================
-  // 进阶功能文案（按 host 是否配置分两支）
-  // =========================================================================
-  group('create_images - 进阶功能文案', () {
-    test('backend 抛错且 host 未配置时，文案含"进阶功能"和配置路径', () async {
-      fakeApi.submitError = Exception('connection refused');
-      // 默认 SharedPreferences mock 为空 → getHost() 返回 null
-
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'p',
-      }));
-
-      expect(json['error'], 'backend_unavailable');
-      final msg = json['message'] as String;
-      expect(msg, contains('进阶功能'));
-      expect(msg, contains('设置 → 进阶服务 → 后端服务配置'));
-      expect(msg, contains('本地部署'));
-    });
-
-    test('backend 抛错且 host 已配置时，文案前缀带错误细节 + 同样含进阶提示', () async {
-      SharedPreferences.setMockInitialValues({'backend_host': 'http://my-host:3800'});
-      fakeApi.submitError = Exception('Connection timed out');
-
-      final json = decode(await executor.execute('create_images', {
-        'prompt': 'p',
-      }));
-
-      expect(json['error'], 'backend_unavailable');
-      final msg = json['message'] as String;
-      expect(msg, contains('Connection timed out'));
-      expect(msg, contains('进阶功能'));
-      expect(msg, contains('设置 → 进阶服务 → 后端服务配置'));
-    });
   });
 }
 
-/// 匹配形如 img_{任意数字}_N 的列表（用于多图 imageId 后缀断言）
-Matcher matchesImgIds(List<String> patterns) =>
-    _ImageIdListMatcher(patterns);
-
-class _ImageIdListMatcher extends Matcher {
-  final List<String> patterns;
-  _ImageIdListMatcher(this.patterns);
-
-  @override
-  bool matches(item, Map matchState) {
-    if (item is! List) return false;
-    if (item.length != patterns.length) return false;
-    for (var i = 0; i < patterns.length; i++) {
-      final regex =
-          RegExp('^${patterns[i].replaceAll('*', r'\d+')}\$');
-      if (!regex.hasMatch(item[i].toString())) return false;
-    }
-    return true;
-  }
-
-  @override
-  Description describe(Description description) =>
-      description.add('匹配 imageId 列表模式 $patterns');
-}
+/// 占位 wrapper：生图链路已不走 ApiServiceWrapper，但 ToolExecutor 依赖图里
+/// 部分 provider 仍会构造它，注入空实现避免触发真实网络初始化。
+class _UnusedApiServiceWrapper extends ApiServiceWrapper {}

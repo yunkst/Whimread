@@ -21,6 +21,12 @@ abstract interface class IBookshelfWriter {
   Future<int> updateTitle(String novelUrl, String newTitle);
   Future<int> updateCoverMediaIdByUrl(String novelUrl, String? mediaId);
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex);
+
+  /// 根据 URL 更新小说封面图 URL（来自 chapter_list_js 的 cover_url 字段）
+  ///
+  /// 已存在的小说无封面时由「添加小说」FAB 回填；不影响 coverMediaId。
+  /// coverUrl 为 null/空 → 不写入（保留原值）。返回受影响行数。
+  Future<int> updateCoverUrlByUrl(String novelUrl, String? coverUrl);
   Future<Novel> createNovel({
     required String title,
     required String author,
@@ -454,6 +460,38 @@ class NovelRepository extends BaseRepository
         stackTrace: stackTrace.toString(),
         category: LogCategory.database,
         tags: ['novel', 'cover', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 根据 URL 更新小说封面图 URL（chapter_list_js 抓取回填用）
+  ///
+  /// coverUrl 为 null/空 → 不写入（保留原值，避免误清空已有人工封面）。
+  /// 不影响 coverMediaId（与 AI 生成的封面媒体互不干扰）。
+  @override
+  Future<int> updateCoverUrlByUrl(String novelUrl, String? coverUrl) async {
+    if (isWebPlatform) {
+      return 0;
+    }
+    final cleaned = coverUrl?.trim();
+    if (cleaned == null || cleaned.isEmpty) {
+      return 0;
+    }
+    try {
+      final db = await database;
+      return await db.update(
+        'bookshelf',
+        {'coverUrl': cleaned},
+        where: 'url = ?',
+        whereArgs: [novelUrl],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '更新封面URL失败: url=$novelUrl - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['novel', 'cover-url', 'failed'],
       );
       rethrow;
     }

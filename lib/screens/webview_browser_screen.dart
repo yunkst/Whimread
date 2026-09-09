@@ -3,6 +3,9 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import '../core/providers/database_providers.dart';
+import '../core/providers/script_presence_provider.dart';
+import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../services/logger_service.dart';
@@ -10,6 +13,7 @@ import '../widgets/webview_address_bar.dart';
 import '../widgets/bookmark_panel.dart';
 import '../widgets/site_script_panel.dart';
 import '../widgets/webview_add_novel_button.dart';
+import '../widgets/webview_import_bookshelf_button.dart';
 
 /// 浏览器主屏幕
 ///
@@ -102,6 +106,38 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
             .applyDesktopMode(next.value);
       }
     });
+
+// 脚本存在性感知：domain 变化时 fire-and-forget 查一次库，写回同步缓存，
+    // 让 FAB 能在到达有缓存脚本的页面时立刻变金色。
+    // 注意：build 期**不主动**发起 DB 查询——初始态仅在缓存已有该 domain
+    // 结果时同步读取；真正的查询由 ref.listen 在 domain 变化时触发。
+    // widget 测试环境（sqflite 无平台 channel）若在 build 中直接查库会留下
+    // pending Timer，导致 "A Timer is still pending" 失败；测试侧应将
+    // `webviewCurrentUrlProvider` 置空（domain=null）或预置缓存。
+    void refreshFor(String? domain) {
+      if (domain == null) return;
+      if (ref.read(scriptPresenceByDomainProvider).containsKey(domain)) {
+        return;
+      }
+      refreshScriptPresence(
+        domain: domain,
+        fetch: (d) async =>
+            (await ref.read(siteScriptRepositoryProvider).getByDomain(d))
+                    ?.hasChapterListJs ??
+                false,
+        onResult: (d, has) {
+          ref.read(scriptPresenceByDomainProvider.notifier).put(d, has);
+        },
+      );
+    }
+
+    ref.listen<String?>(webviewCurrentDomainProvider, (prev, next) {
+      refreshFor(next);
+    });
+    // 处理「挂载时已停在某 domain」的初始态：缓存命中直接用；未命中走一次
+    // fire-and-forget 查询（真实 App 首屏即能变金；测试环境请把
+    // webviewCurrentUrlProvider 置空或预置 scriptPresenceByDomainProvider）
+    refreshFor(ref.read(webviewCurrentDomainProvider));
 
     return PopScope(
       // 仅在当前 Tab 可见时拦截系统返回手势；不可见时让返回键正常向上传递。
@@ -229,11 +265,20 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
                 ),
               ],
             ),
-            // 右下角「添加小说」悬浮按钮
+            // 右下角悬浮按钮：导入网站书架（v40+，仅在当前域名有 bookshelf_js 时显示）
+            // + 添加小说（叠加在上方，间距 12）
             const Positioned(
               right: 16,
               bottom: 16,
-              child: WebViewAddNovelFab(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  WebViewImportBookshelfFab(),
+                  SizedBox(height: 12),
+                  WebViewAddNovelFab(),
+                ],
+              ),
             ),
           ],
         ),

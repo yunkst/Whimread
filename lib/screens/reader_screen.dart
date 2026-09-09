@@ -32,6 +32,7 @@ import '../services/api_service_wrapper.dart';
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../mixins/reader/auto_scroll_mixin.dart';
 import '../widgets/reader_settings_dialog.dart'; // 阅读设置合并对话框（字体大小/文字亮度/滚动速度）
+import '../widgets/theme_mode_dialog.dart'; // 主题模式选择对话框（亮色/暗色/跟随系统）
 import '../widgets/reader_action_buttons.dart'; // 新增导入
 import '../widgets/reader/reader_app_bar.dart'; // ReaderAppBar组件
 import '../widgets/reader/reader_bottom_bar.dart'; // ReaderBottomBar组件
@@ -445,6 +446,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       case 'reader_settings':
         _showReaderSettingsDialog();
         break;
+      case 'theme_mode':
+        _showThemeModeDialog();
+        break;
       case 'font_size':
       case 'scroll_speed':
         // 兼容旧菜单项，统一跳转合并的阅读设置对话框
@@ -460,6 +464,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         _createSnapshot();
         break;
     }
+  }
+
+  // 显示主题模式选择对话框（应用全局生效并持久化）
+  void _showThemeModeDialog() {
+    ThemeModeDialog.show(context, ref);
   }
 
   // 显示版本历史面板

@@ -80,11 +80,11 @@ class TagGroupItem extends StatelessWidget {
                 itemBuilder: (context) => [
                   const PopupMenuItem(
                       value: 'add_same_name',
-                      child: Text('添加同名标签')),
+                      child: Text('添加同名技巧')),
                   if (group.count > 1)
                     const PopupMenuItem(
                         value: 'delete_all',
-                        child: Text('删除全部同名标签')),
+                        child: Text('删除全部同名技巧')),
                 ],
               ),
             ],

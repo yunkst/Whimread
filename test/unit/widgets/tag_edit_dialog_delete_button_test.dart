@@ -1,6 +1,6 @@
 /// TagEditDialog 编辑模式「删除」按钮 widget 测试。
 ///
-/// 需求：编辑标签时，编辑对话框 actions 区应出现「删除」按钮（红色文字），
+/// 需求：编辑技巧时，编辑对话框 actions 区应出现「删除」按钮（红色文字），
 /// 点击后调用 onDeleteRequested 回调，由外层 Screen 负责二次确认 + 删库。
 /// 添加模式（tag == null）不应出现删除按钮。
 ///
@@ -63,8 +63,8 @@ void main() {
       ),
     );
 
-    // 标题应为「编辑标签」
-    expect(find.text('编辑标签'), findsOneWidget);
+    // 标题应为「编辑技巧」
+    expect(find.text('编辑技巧'), findsOneWidget);
     // 含「删除」按钮
     final deleteBtn = find.widgetWithText(TextButton, '删除');
     expect(deleteBtn, findsOneWidget,
@@ -93,8 +93,8 @@ void main() {
       ),
     );
 
-    // 标题应为「添加标签」
-    expect(find.text('添加标签'), findsOneWidget);
+    // 标题应为「添加技巧」
+    expect(find.text('添加技巧'), findsOneWidget);
     // 不应含「删除」按钮
     expect(find.widgetWithText(TextButton, '删除'), findsNothing,
         reason: '添加模式下不应出现「删除」按钮');

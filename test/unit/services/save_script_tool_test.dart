@@ -51,9 +51,10 @@ void main() {
         'font_family': fontFamily,
       };
 
-  /// 构造一个 chapter_list 用的合法 jsResult
+  /// 构造一个 chapter_list 用的合法 jsResult（含 cover_url 必填字段）
   Map<String, dynamic> listResult({String title = '书名'}) => {
         'title': title,
+        'cover_url': 'https://a.com/cover.jpg',
         'chapters': [
           {'title': '第一章 起始', 'url': 'https://a.com/c1'},
           {'title': '第二章 发展', 'url': 'https://a.com/c2'},
@@ -132,6 +133,173 @@ void main() {
       );
       expect(result['success'], false);
       expect(result['reason'], 'chapter_missing_field');
+    });
+
+    test('chapter_list 缺 cover_url 字段 → cover_url_missing', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'chapter_list',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {
+          'title': '书',
+          'chapters': [
+            {'title': '第一章', 'url': 'https://a.com/c1'},
+          ],
+          // 故意不写 cover_url
+        },
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'cover_url_missing');
+      // diagnostic + suggestion 提示如何修
+      expect(result['suggestion'], contains('og:image'));
+      verifyNever(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      ));
+    });
+
+    test('chapter_list coverUrl(camelCase) 也通过校验（snake/camel 兜底）', () async {
+      final repo = MockSiteScriptRepository();
+      when(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      )).thenAnswer((_) async => (success: true, id: 'site_cv', reason: null));
+
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'chapter_list',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {
+          'title': '书',
+          'coverUrl': 'https://a.com/cover.jpg', // camelCase 兜底
+          'chapters': [
+            {'title': '第一章', 'url': 'https://a.com/c1'},
+          ],
+        },
+        repo: repo,
+      );
+      expect(result['success'], true);
+    });
+
+    test('chapter_list cover_url 为空串（确实无封面）→ 落库通过', () async {
+      final repo = MockSiteScriptRepository();
+      when(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      )).thenAnswer((_) async => (success: true, id: 'site_empty_cv', reason: null));
+
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'chapter_list',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {
+          'title': '书',
+          'cover_url': '', // 空串：确实无封面
+          'chapters': [
+            {'title': '第一章', 'url': 'https://a.com/c1'},
+          ],
+        },
+        repo: repo,
+      );
+      expect(result['success'], true);
+    });
+
+    test('bookshelf novels 非空 + 字段齐全 → 落库通过', () async {
+      final repo = MockSiteScriptRepository();
+      when(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      )).thenAnswer((_) async => (success: true, id: 'site_bs_ok', reason: null));
+
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        ocr: false, // bookshelf 强制 ocr=false
+        scriptJs: 'js',
+        jsResult: {
+          'novels': [
+            {'title': '斗破苍穹', 'url': 'https://a.com/book/1/'},
+            {'title': '凡人修仙传', 'url': 'https://a.com/book/2/'},
+          ],
+        },
+        repo: repo,
+      );
+      expect(result['success'], true);
+      expect(result['domain'], 'a.com');
+      expect(result['script_type'], 'bookshelf');
+      expect(result['ocr'], false);
+      verify(repo.updateScriptPart(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        scriptJs: 'js',
+        ocr: false,
+      )).called(1);
+    });
+
+    test('bookshelf 缺 novels 字段 → novels_empty', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {'title': '无 novels 字段'},
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'novels_empty');
+      verifyNever(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      ));
+    });
+
+    test('bookshelf novels 空数组 → novels_empty', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {'novels': []},
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'novels_empty');
+    });
+
+    test('bookshelf 某项缺 title 或 url → novel_missing_field', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {
+          'novels': [
+            {'title': '正常', 'url': 'https://a.com/1'},
+            {'title': '缺 url'}, // 没 url 字段
+          ],
+        },
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'novel_missing_field');
     });
 
     test('jsResult 非 Map → invalid_structure', () async {
@@ -262,6 +430,7 @@ void main() {
         scriptJs: 'js',
         jsResult: {
           'title': '书名',
+          'cover_url': 'https://a.com/cover.jpg',
           'chapters': [
             {'title': '第一章 起始', 'url': 'https://a.com/c1'},
             {'title': '第二章 发展', 'url': 'https://a.com/c2'},
@@ -291,6 +460,7 @@ void main() {
         scriptJs: 'js',
         jsResult: {
           'title': '书名\u{E001}',
+          'cover_url': 'https://a.com/cover.jpg',
           'chapters': [
             {'title': '第一章 起始', 'url': 'https://a.com/c1'},
           ],
@@ -321,6 +491,7 @@ void main() {
         scriptJs: 'js',
         jsResult: {
           'title': '书名${String.fromCharCode(0xF0000)}',
+          'cover_url': 'https://a.com/cover.jpg',
           'chapters': [
             {'title': '第一\u{D800}章', 'url': 'https://a.com/c1'},
           ],

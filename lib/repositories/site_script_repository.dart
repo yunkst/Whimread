@@ -291,21 +291,25 @@ class SiteScriptRepository extends BaseRepository {
 
   /// 增量更新某域名某类型脚本（save_script 分次保存用）。
   ///
-  /// - [scriptType] 为 `'chapter_list'` 或 `'chapter_content'`，决定更新哪列。
+  /// - [scriptType] 为 `'chapter_list'` / `'chapter_content'` / `'bookshelf'`，
+  ///   决定更新哪列。
   /// - v39 拆列后，[ocr] 写到与 [scriptType] 匹配的列（chapter_list_ocr /
-  ///   chapter_content_ocr），两者独立，互不覆盖。
+  ///   chapter_content_ocr），两者独立，互不覆盖；`bookshelf` 类型不适用 OCR
+  ///   （书架页无字体反爬需求），[ocr] 被忽略、不动两个 ocr 列。
+  /// - [testUrl] 非 null 时写入 `sample_url`（脚本最近一次验证通过的页面
+  ///   URL）。bookshelf 类型依赖此值定位「我的书架」页做刷新同步。
   /// - **若 domain 不存在会自动 INSERT** 一条新记录：本次 [scriptType] 列写
-  ///   [scriptJs] + 对应 ocr 列，另一段（list/content）留空串、ocr 为 0；
-  ///   `verified=0` 标识尚未完成另一半。这样无论 agent 第一次调的是
-  ///   `chapter_list` 还是 `chapter_content`，都能直接落库。
-  /// - 已存在的行：更新对应列 + ocr + last_used_at，verified 重置为 0。
-  /// - url_pattern / sample_url 不写（save_script 不再产出该字段，DB 列保留
-  ///   历史值不动；新记录时给空串占位）。
+  ///   [scriptJs] + 对应 ocr 列（bookshelf 无 ocr 列），其余列留空串、ocr 为 0；
+  ///   `verified=0` 标识尚未完成其余类型。这样无论 agent 第一次调的是哪种
+  ///   script_type，都能直接落库。
+  /// - 已存在的行：更新对应列（+ ocr，bookshelf 除外）+ last_used_at，
+  ///   verified 重置为 0。
   Future<({bool success, String? id, String? reason})> updateScriptPart({
     required String domain,
     required String scriptType,
     required String scriptJs,
     required bool ocr,
+    String? testUrl,
   }) async {
     try {
       final db = await database;
@@ -320,18 +324,22 @@ class SiteScriptRepository extends BaseRepository {
       );
 
       if (existing.isEmpty) {
-        // 首次保存：INSERT 一条新记录，本次列写脚本 + ocr，另一列填空串占位。
-        // 另一半由后续 save_script 调同样的方法补齐，无需前置工具。
+        // 首次保存：INSERT 一条新记录，本次列写脚本 + ocr，其余列填空串占位。
+        // 其余类型由后续 save_script 调同样的方法补齐，无需前置工具。
         final insertId = _newScriptId();
         await db.insert('site_scripts', {
           'id': insertId,
           'domain': domain,
           'url_pattern': '',
-          'chapter_list_js': scriptType == 'chapter_list' ? scriptJs : '',
-          'chapter_content_js': scriptType == 'chapter_content' ? scriptJs : '',
+          'chapter_list_js':
+              scriptType == 'chapter_list' ? scriptJs : '',
+          'chapter_content_js':
+              scriptType == 'chapter_content' ? scriptJs : '',
+          'bookshelf_js': scriptType == 'bookshelf' ? scriptJs : '',
           'chapter_list_ocr': scriptType == 'chapter_list' ? (ocr ? 1 : 0) : 0,
-          'chapter_content_ocr': scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
-          'sample_url': '',
+          'chapter_content_ocr':
+              scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
+          'sample_url': testUrl ?? '',
           'created_at': now,
           'last_used_at': now,
           'use_count': 0,
@@ -345,19 +353,24 @@ class SiteScriptRepository extends BaseRepository {
         return (success: true, id: insertId, reason: null);
       }
 
-      // 已存在：UPDATE 对应列 + 对应 ocr 列 + last_used_at，verified 重置为 0。
+      // 已存在：UPDATE 对应列（+ 对应 ocr 列，bookshelf 除外）+ last_used_at，
+      // verified 重置为 0。
       final id = existing.first['id'] as String;
-      final Map<String, Object?> updateValues = scriptType == 'chapter_list'
-          ? {
-              'chapter_list_js': scriptJs,
-              'chapter_list_ocr': ocr ? 1 : 0,
-            }
-          : {
-              'chapter_content_js': scriptJs,
-              'chapter_content_ocr': ocr ? 1 : 0,
-            };
+      final Map<String, Object?> updateValues = switch (scriptType) {
+        'chapter_list' => {
+            'chapter_list_js': scriptJs,
+            'chapter_list_ocr': ocr ? 1 : 0,
+          },
+        'chapter_content' => {
+            'chapter_content_js': scriptJs,
+            'chapter_content_ocr': ocr ? 1 : 0,
+          },
+        // bookshelf：无 ocr 列，只写脚本
+        _ => {'bookshelf_js': scriptJs},
+      };
       updateValues['last_used_at'] = DateTime.now().millisecondsSinceEpoch;
       updateValues['verified'] = 0;
+      if (testUrl != null) updateValues['sample_url'] = testUrl;
       await db.update(
         'site_scripts',
         updateValues,

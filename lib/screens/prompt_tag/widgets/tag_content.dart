@@ -3,7 +3,7 @@
 /// 从 `prompt_tag_management_screen.dart` 拆出。负责三种状态展示：
 /// - 未选中分类：提示「请选择左侧分类」
 /// - 加载中：菊花
-/// - 列表为空：提示「该分类下暂无标签」
+/// - 列表为空：提示「该分类下暂无技巧」
 /// - 正常：TagGroup 列表（每个 group 走 [TagGroupItem]）
 library;
 
@@ -69,7 +69,7 @@ class TagContent extends StatelessWidget {
                     .withValues(alpha: 0.2)),
             const SizedBox(height: 16),
             Text(
-              '该分类下暂无标签',
+              '该分类下暂无技巧',
               style: AppTypography.bodyProse.copyWith(
                 fontSize: 15,
                 color: context.appColors.inkSoft,
@@ -77,7 +77,7 @@ class TagContent extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '点击右上角 + 添加标签',
+              '点击右上角 + 添加技巧',
               style: AppTypography.metaItalic.copyWith(
                 color: context.appColors.inkSoft,
               ),

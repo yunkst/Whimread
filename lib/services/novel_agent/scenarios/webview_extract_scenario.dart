@@ -136,9 +136,11 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln('## JS 脚本规范');
     buf.writeln('- 脚本是 async IIFE: (async function() { ... return JSON.stringify(result); })()');
     buf.writeln('- 首行必须声明 `const PAGE_URL = \'{{URL}}\';`，禁止 window.location.href');
-    buf.writeln('- 目录返回: { "title": "...", "chapters": [{ "title": "...", "url": "..." }] }');
+    buf.writeln('- 目录返回: { "title": "...", "cover_url": "...", "chapters": [{ "title": "...", "url": "..." }] }');
     buf.writeln('- chapters 必须按章节顺序从小到大排列（第一章 → 最新章），不要倒序');
+    buf.writeln('- cover_url（必填字段，缺失会拒绝落库）：优先 <meta property="og:image" content="...">，其次目录页书籍封面 <img> 的 src / data-src；取绝对 URL（相对路径用 new URL(src, PAGE_URL).href 补全）；确实无封面时返回空串 ""');
     buf.writeln('- 内容返回: { "title": "...", "content": "..." }，content 中段落之间必须用 \\n 分隔');
+    buf.writeln('- 书架脚本（可选，仅在「我的书架/收藏」页运行；用户要求生成时才做）返回: { "novels": [{ "title": "...", "url": "..." }] }。url 应为该站小说目录页绝对路径，便于应用跳转后复用 chapter_list_js。保存用 save_script(script_type="bookshelf", test_url=<书架页>, ocr=false)。');
     buf.writeln('- 翻页: 检测下一页 → 点击 → await new Promise(r => setTimeout(r, 1000)) → 继续');
     buf.writeln('- 只使用标准 DOM API（querySelector, innerText），不依赖 jQuery/Vue/React');
     buf.writeln('- 跳过广告段落（含本章未完、一秒记住等）');
@@ -150,7 +152,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln();
     buf.writeln('### 阶段一：目录提取（落库后才能进阶段二）');
     buf.writeln('1. 当前已在目录页（chapter_list）：get_page_info 确认页面类型');
-    buf.writeln('2. execute_js(script=...) 反复调试，确认返回 {title, chapters:[{title,url}]} 且 chapters 非空');
+    buf.writeln('2. execute_js(script=...) 反复调试，确认返回 {title, cover_url, chapters:[{title,url}]} 且 chapters 非空、cover_url 字段存在（允许空串）');
     buf.writeln('3. 拿到 __meta.run_id 后立刻调用：');
     buf.writeln('   save_script(domain, run_id, script_type="chapter_list", test_url=<目录页>, ocr=<true|false>)');
     buf.writeln('4. save_script 返回 success=true 才能进入阶段二；返回 success=false 则按 diagnostic/suggestion 修 JS，重新 execute_js，再 save_script');
@@ -1070,9 +1072,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   Future<String> _getCachedScript(Map<String, dynamic> args) async {
     final domain = args['domain'] as String?;
     final rawScriptType = args['script_type'] as String?;
-    // 仅接受 chapter_list / chapter_content，其它值（null/乱填）走全查兜底
+    // 仅接受 chapter_list / chapter_content / bookshelf，其它值（null/乱填）走全查兜底
     final scriptType = (rawScriptType == 'chapter_list' ||
-            rawScriptType == 'chapter_content')
+            rawScriptType == 'chapter_content' ||
+            rawScriptType == 'bookshelf')
         ? rawScriptType
         : null;
     final url = _currentUrl;
@@ -1117,17 +1120,18 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     }
 
     if (results.isEmpty) {
-      // 整域名无记录：双类型都列在 missing
+      // 整域名无记录：所有类型都列在 missing
       return jsonEncode({
         'found': false,
         'domain': effectiveDomain,
         if (scriptType != null) 'script_type': scriptType,
         'present': <String>[],
-        'missing': scriptType == 'chapter_list'
-            ? <String>['chapter_list']
-            : scriptType == 'chapter_content'
-                ? <String>['chapter_content']
-                : <String>['chapter_list', 'chapter_content'],
+        'missing': switch (scriptType) {
+          'chapter_list' => <String>['chapter_list'],
+          'chapter_content' => <String>['chapter_content'],
+          'bookshelf' => <String>['bookshelf'],
+          _ => <String>['chapter_list', 'chapter_content', 'bookshelf'],
+        },
         'message': scriptType == null
             ? '该域名无缓存脚本，需要新生成提取脚本'
             : '该域名 $scriptType 脚本缺失',
@@ -1141,52 +1145,39 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final row = results.first;
     final listJs = (row['chapter_list_js'] as String? ?? '').trim();
     final contentJs = (row['chapter_content_js'] as String? ?? '').trim();
+    final bookshelfJs = (row['bookshelf_js'] as String? ?? '').trim();
     final dbId = row['id'] as String;
 
     final hasList = listJs.isNotEmpty;
     final hasContent = contentJs.isNotEmpty;
+    final hasBookshelf = bookshelfJs.isNotEmpty;
     final present = <String>[
       if (hasList) 'chapter_list',
       if (hasContent) 'chapter_content',
+      if (hasBookshelf) 'bookshelf',
     ];
     final missing = <String>[
       if (!hasList) 'chapter_list',
       if (!hasContent) 'chapter_content',
+      if (!hasBookshelf) 'bookshelf',
     ];
 
     // 单查模式：只处理请求的那一种，未命中走 found=false 分支
-    if (scriptType == 'chapter_list' && !hasList) {
+    if (scriptType != null && !present.contains(scriptType)) {
       LoggerService.instance.i(
-        '查询缓存脚本: domain=$effectiveDomain, type=chapter_list, missing',
+        '查询缓存脚本: domain=$effectiveDomain, type=$scriptType, missing',
         category: LogCategory.ai,
         tags: ['agent', 'webview-extract', 'get_cached_script', 'missing'],
       );
       return jsonEncode({
         'found': false,
         'domain': effectiveDomain,
-        'script_type': 'chapter_list',
+        'script_type': scriptType,
         'present': present,
-        'missing': <String>['chapter_list'],
-        'message': '该域名 chapter_list 脚本缺失',
+        'missing': <String>[scriptType],
+        'message': '该域名 $scriptType 脚本缺失',
         'suggestion':
-            '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=chapter_list, test_url=..., ocr=...) 保存',
-      });
-    }
-    if (scriptType == 'chapter_content' && !hasContent) {
-      LoggerService.instance.i(
-        '查询缓存脚本: domain=$effectiveDomain, type=chapter_content, missing',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'get_cached_script', 'missing'],
-      );
-      return jsonEncode({
-        'found': false,
-        'domain': effectiveDomain,
-        'script_type': 'chapter_content',
-        'present': present,
-        'missing': <String>['chapter_content'],
-        'message': '该域名 chapter_content 脚本缺失',
-        'suggestion':
-            '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=chapter_content, test_url=..., ocr=...) 保存',
+            '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=$scriptType, test_url=..., ocr=...) 保存',
       });
     }
 
@@ -1194,6 +1185,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     // 单查模式：只注册请求的那一种；全查模式：注册所有非空的，空项保持 null
     final String? listRunId;
     final String? contentRunId;
+    final String? bookshelfRunId;
     if (scriptType == 'chapter_list') {
       listRunId = _runStore.put(
         script: listJs,
@@ -1203,6 +1195,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         domain: effectiveDomain,
       );
       contentRunId = null;
+      bookshelfRunId = null;
     } else if (scriptType == 'chapter_content') {
       contentRunId = _runStore.put(
         script: contentJs,
@@ -1212,6 +1205,17 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         domain: effectiveDomain,
       );
       listRunId = null;
+      bookshelfRunId = null;
+    } else if (scriptType == 'bookshelf') {
+      bookshelfRunId = _runStore.put(
+        script: bookshelfJs,
+        success: true,
+        source: RunEntrySource.database,
+        rawId: dbId,
+        domain: effectiveDomain,
+      );
+      listRunId = null;
+      contentRunId = null;
     } else {
       // 全查模式：只注册非空项，空项保持 null
       listRunId = hasList
@@ -1232,10 +1236,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
               domain: effectiveDomain,
             )
           : null;
+      bookshelfRunId = hasBookshelf
+          ? _runStore.put(
+              script: bookshelfJs,
+              success: true,
+              source: RunEntrySource.database,
+              rawId: dbId,
+              domain: effectiveDomain,
+            )
+          : null;
     }
 
     LoggerService.instance.i(
-      '查询缓存脚本: domain=$effectiveDomain, present=$present, missing=$missing, list=$listRunId, content=$contentRunId',
+      '查询缓存脚本: domain=$effectiveDomain, present=$present, missing=$missing, list=$listRunId, content=$contentRunId, bookshelf=$bookshelfRunId',
       category: LogCategory.ai,
       tags: ['agent', 'webview-extract', 'get_cached_script'],
     );
@@ -1247,6 +1260,9 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     }
     if (hasContent && contentRunId != null) {
       hintParts.add('execute_js(run_id=$contentRunId) 重跑内容脚本');
+    }
+    if (hasBookshelf && bookshelfRunId != null) {
+      hintParts.add('execute_js(run_id=$bookshelfRunId) 重跑书架脚本');
     }
     final String message;
     if (missing.isEmpty) {
@@ -1262,7 +1278,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     }
 
     return jsonEncode({
-      // found 表示「有可用脚本可执行」，两段都空（异常数据）算作无
+      // found 表示「有可用脚本可执行」，全部为空（异常数据）算作无
       'found': present.isNotEmpty,
       'domain': effectiveDomain,
       if (scriptType != null) 'script_type': scriptType,
@@ -1271,6 +1287,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       'id': dbId,
       'list_run_id': listRunId,
       'content_run_id': contentRunId,
+      'bookshelf_run_id': bookshelfRunId,
       'use_count': row['use_count'],
       'verified': row['verified'],
       'url_pattern': row['url_pattern'],
@@ -1335,13 +1352,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       if (err != null) return err; // 参数错误直接返回（错误 JSON 已构造好）
     }
 
-    if (scriptType != 'chapter_list' && scriptType != 'chapter_content') {
+    if (scriptType != 'chapter_list' &&
+        scriptType != 'chapter_content' &&
+        scriptType != 'bookshelf') {
       return jsonEncode({
         'error': 'invalid_script_type',
-        'message': 'script_type 必须是 chapter_list 或 chapter_content',
+        'message': 'script_type 必须是 chapter_list、chapter_content 或 bookshelf',
         'received': scriptType,
       });
     }
+
+    // bookshelf（网站书架脚本）不适用 OCR：书架页提取的是标题+链接，
+    // 无字体反爬还原需求。强制按 ocr=false 走验证与落库。
+    final effectiveOcr = scriptType == 'bookshelf' ? false : ocr;
 
     // 取脚本
     final entry = _runStore.get(runId);
@@ -1411,8 +1434,9 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
       final jsResult = jsonDecode(jsonStr);
 
-      // 构造 OcrRestoreService（ocr=true 时通过 _webviewController 渲染 PUA）
-      final OcrRestoreService? restoreService = ocr
+      // 构造 OcrRestoreService（ocr=true 时通过 _webviewController 渲染 PUA；
+      // bookshelf 已强制 effectiveOcr=false）
+      final OcrRestoreService? restoreService = effectiveOcr
           ? OcrRestoreService(
               _ref,
               (cp, ff) => _renderPuaViaController(controller, cp, ff),
@@ -1421,18 +1445,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
       // 委托静态校验 + 落库（可单测）
       LoggerService.instance.i(
-        'save_script: 开始 validateAndPersistScript domain=$domain scriptType=$scriptType ocr=$ocr',
+        'save_script: 开始 validateAndPersistScript domain=$domain scriptType=$scriptType ocr=$effectiveOcr',
         category: LogCategory.ai,
         tags: ['agent', 'webview-extract', 'save_script', 'validate-begin'],
       );
       final outcome = await validateAndPersistScript(
         domain: domain,
         scriptType: scriptType,
-        ocr: ocr,
+        ocr: effectiveOcr,
         scriptJs: scriptJs,
         jsResult: jsResult,
         repo: _ref.read(siteScriptRepositoryProvider),
         restoreService: restoreService,
+        testUrl: testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
       );
 
       if (outcome['success'] == true) {
@@ -1606,6 +1631,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     required dynamic jsResult,
     required SiteScriptRepository repo,
     OcrRestoreService? restoreService,
+    String? testUrl,
   }) async {
     // 1. 结构校验
     final structErr = _validateScriptResult(jsResult, scriptType, ocr);
@@ -1672,6 +1698,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       scriptType: scriptType,
       scriptJs: scriptJs,
       ocr: ocr,
+      testUrl: testUrl,
     );
     if (!saveResult.success) {
       // 防御性兜底：updateScriptPart 现在不再返回 domain_not_found（domain 不存在
@@ -1697,8 +1724,11 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
   /// 结构校验：返回 null 表示通过，否则返回含 reason/diagnostic/suggestion 的 map。
   ///
-  /// chapter_list 校验：`chapters` 必须是非空 List，每项 title/url 非空。
+  /// chapter_list 校验：`chapters` 必须是非空 List，每项 title/url 非空；
+  /// `cover_url`（或 coverUrl）字段必须存在（String，允许空串），缺失视为
+  /// 脚本未按要求提供封面图，拒绝落库（reason=cover_url_missing）。
   /// chapter_content 校验：`content` 长度 >= 50；ocr=true 时 `font_family` 非空。
+  /// bookshelf 校验：`novels` 必须是非空 List，每项 title/url 非空。OCR 不适用。
   static Map<String, dynamic>? _validateScriptResult(
     dynamic data,
     String scriptType,
@@ -1729,6 +1759,44 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
             'reason': 'chapter_missing_field',
             'diagnostic': '某 chapter 缺少 title 或 url',
             'suggestion': '每个 chapter 必须有非空 title 和 url',
+          };
+        }
+      }
+      // cover_url / coverUrl（snake/camel 兜底）。缺 key 直接拒（避免脚本忘记
+      // 提供封面图），空串允许（目录页确实无封面时返回 ''）。两种异常输入
+      // （null/非字符串）按缺 key 处理，确保返回 JSON 结构可控。
+      final coverRaw = data['cover_url'] ?? data['coverUrl'];
+      if (coverRaw is! String) {
+        return {
+          'reason': 'cover_url_missing',
+          'diagnostic': '脚本返回缺少 cover_url 字段（应返回封面图 URL 或空串）',
+          'suggestion': '在脚本末尾加 cover_url 提取：'
+              'const og = document.querySelector(\'meta[property="og:image"]\'); '
+              'const cover = og?.content || document.querySelector(\'.book-img, #bookImg, .cover img\')?.src || \'\'; '
+              'const coverUrl = cover ? new URL(cover, PAGE_URL).href : \'\'; '
+              '返回 {title, cover_url: coverUrl, chapters:[...]}',
+        };
+      }
+      return null;
+    }
+
+    if (scriptType == 'bookshelf') {
+      final novels = data['novels'];
+      if (novels is! List || novels.isEmpty) {
+        return {
+          'reason': 'novels_empty',
+          'diagnostic': 'novels 为空或非数组',
+          'suggestion': '确认当前页面是「我的书架/收藏」页，检查书架列表选择器是否匹配',
+        };
+      }
+      for (final n in novels) {
+        if (n is! Map ||
+            ((n['title'] as String?) ?? '').isEmpty ||
+            ((n['url'] as String?) ?? '').isEmpty) {
+          return {
+            'reason': 'novel_missing_field',
+            'diagnostic': '某 novel 缺少 title 或 url',
+            'suggestion': '每个 novel 必须有非空 title 和 url（小说目录页路径）',
           };
         }
       }
@@ -1828,14 +1896,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     return text.runes.any(isPua);
   }
 
-  /// 从 jsResult 提取 OCR 模式需要扫描 PUA 的目标文本。
+/// 从 jsResult 提取 OCR 模式需要扫描 PUA 的目标文本。
   ///
   /// - chapter_content: 直接取 content
   /// - chapter_list: 拼接 title + 所有 chapters[].title（小说名 + 章名里也可能含 PUA）
+  /// - bookshelf: 无 PUA 需求，返回空串（bookshelf 在 _saveScript 已强制 ocr=false，
+  ///   此处仅为防御兜底：万一有人手动构造调用时返回空字符串，闸会拒落库）
   static String _extractOcrTargetText(dynamic jsResult, String scriptType) {
     if (jsResult is! Map) return '';
     if (scriptType == 'chapter_content') {
       return ((jsResult['content'] as String?) ?? '');
+    }
+    if (scriptType == 'bookshelf') {
+      return '';
     }
     final title = (jsResult['title'] as String?) ?? '';
     final chapters = jsResult['chapters'];
@@ -2195,10 +2268,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           },
           'script_type': {
             'type': 'string',
-            'enum': ['chapter_list', 'chapter_content'],
+            'enum': ['chapter_list', 'chapter_content', 'bookshelf'],
             'description':
                 '【可选】只查询并返回指定类型的脚本。'
-                '不传=按旧语义同时查询两种类型（list_run_id + content_run_id 一次性返回）。'
+                '不传=按旧语义同时查询所有类型（一次性返回各自 run_id）。'
                 'Agent 补缺失时推荐传值：上次结果 missing 列表里的某一项。',
           },
         },
@@ -2230,9 +2303,12 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           },
           'script_type': {
             'type': 'string',
-            'enum': ['chapter_list', 'chapter_content'],
-            'description': '保存的脚本类型。chapter_list 返回 {title, chapters:[{title,url}]}；'
-                'chapter_content 返回 {title, content, font_family}（OCR 模式需 font_family）。',
+            'enum': ['chapter_list', 'chapter_content', 'bookshelf'],
+            'description': '保存的脚本类型。chapter_list 返回 {title, cover_url, chapters:[{title,url}]}'
+              '（cover_url 字段必填，缺失会被拒绝落库；允许空串表示确实无封面）；'
+              'chapter_content 返回 {title, content, font_family}（OCR 模式需 font_family）；'
+              'bookshelf 返回 {novels:[{title,url}]}，提取「我的书架/收藏」页的小说列表，'
+              'url 为该站小说目录页绝对路径（bookshelf 不适用 OCR，ocr 固定传 false）。',
           },
           'test_url': {
             'type': 'string',

@@ -8,7 +8,7 @@
 /// - 角色定位使用 `name`（list_characters 返回的名字），不暴露真实 characterId
 /// - 章节写入分两类：
 ///   - create_chapter / rewrite_chapter 走 LLM 生成流程：组合「修改/创作要求 +
-///     人物卡 + 写作标签 + AI 作家设定」为提示词，调用 LLM 产出整章正文后入库；
+///     人物卡 + 写作技巧 + AI 作家设定」为提示词，调用 LLM 产出整章正文后入库；
 ///     只回传元信息，并在聊天窗口渲染跳转入口。
 ///   - update_chapter_content 走精确字符串替换（oldString→newString，复用 9 重容错
 ///     匹配器），不调 LLM；适合错别字、段落替换、对话润色等局部修改。
@@ -45,15 +45,14 @@ class AgentTools {
     _getOutline,
     // ===== 小说封面 =====
     _setNovelCover,
-    // ===== 提示标签 =====
+    // ===== 写作技巧 =====
     _listPromptTags,
     _getPromptTag,
     _savePromptTag,
     _deletePromptTag,
-    // ===== 文生图/图生视频（ComfyUI）=====
+    // ===== 文生图（客户端本地引擎）=====
     _listText2ImgModels,
     _createImages,
-    _createImageToVideo,
     // ===== 子 Agent =====
     _dispatchSubagent,
   ];
@@ -240,7 +239,7 @@ class AgentTools {
       'name': 'create_chapter',
       'description':
           '在指定位置创建新章节，由 AI 生成正文内容。\n'
-          '本工具会根据「创作要求」、「人物卡」和「写作标签」组合成提示词调用 LLM 生成正文，'
+          '本工具会根据「创作要求」、「人物卡」和「写作技巧」组合成提示词调用 LLM 生成正文，'
           '然后插入到指定位置（原有章节自动后移）。\n'
           'position 来自 list_chapters 返回的 position 字段（1-based）；'
           '若 position = N+1（N 为当前章节数），则追加到末尾。\n'
@@ -277,8 +276,8 @@ class AgentTools {
             'type': 'array',
             'items': {'type': 'string'},
             'description':
-                '要应用的写作标签名称列表（如 ["赛博朋克","暗黑"]）。'
-                '系统会从每个标签随机抽取一条 prompt 文本拼入提示词。不传则不注入标签。',
+                '要应用的写作技巧名称列表（如 ["赛博朋克","暗黑"]）。'
+                '系统会从每个技巧随机抽取一条 prompt 文本拼入提示词。不传则不注入技巧。',
           },
         },
         'required': ['position', 'instruction'],
@@ -335,7 +334,7 @@ class AgentTools {
       'name': 'rewrite_chapter',
       'description':
           'AI 重写指定章节的整章正文。\n'
-          '本工具不会直接覆盖——它会读取章节原文，结合「修改要求」、「人物卡」和「写作标签」'
+          '本工具不会直接覆盖——它会读取章节原文，结合「修改要求」、「人物卡」和「写作技巧」'
           '组合成提示词调用 LLM 重新生成整章正文，生成后自动保存并替换原内容。\n'
           '⚠️ 会覆盖原有内容；建议先用 read_chapter_content 了解当前内容。\n'
           'position 来自 list_chapters。生成完成后，聊天窗口会出现可点击的跳转入口。\n'
@@ -367,8 +366,8 @@ class AgentTools {
             'type': 'array',
             'items': {'type': 'string'},
             'description':
-                '要应用的写作标签名称列表（如 ["赛博朋克","暗黑"]）。'
-                '系统会从每个标签随机抽取一条 prompt 文本拼入提示词。不传则不注入标签。',
+                '要应用的写作技巧名称列表（如 ["赛博朋克","暗黑"]）。'
+                '系统会从每个技巧随机抽取一条 prompt 文本拼入提示词。不传则不注入技巧。',
           },
         },
         'required': ['position', 'rewriteInstruction'],
@@ -471,7 +470,7 @@ class AgentTools {
           },
           'avatarMediaId': {
             'type': 'string',
-            'description': '头像媒体资源ID（图像或视频），由 create_images / create_image_to_video 返回的 mediaId',
+            'description': '头像媒体资源ID（图像），由 create_images 返回的 mediaId',
           },
         },
         'required': ['name'],
@@ -605,16 +604,15 @@ class AgentTools {
     'type': 'function',
     'function': {
       'name': 'set_novel_cover',
-      'description': '设置当前小说的封面。先用 create_images（图片）或 '
-          'create_image_to_video（视频）生成媒体拿到 mediaId，再把 mediaId 传到这里。'
-          '封面接受图片或视频，展示时保持原比例裁剪（不拉伸变形），不会叠加书名文字。'
-          '如需清空封面回到默认占位图，mediaId 传 null。',
+      'description': '设置当前小说的封面。先用 create_images 生成图片拿到 mediaId，'
+          '再把 mediaId 传到这里。封面展示时保持原比例裁剪（不拉伸变形），'
+          '不会叠加书名文字。如需清空封面回到默认占位图，mediaId 传 null。',
       'parameters': {
         'type': 'object',
         'properties': {
           'mediaId': {
             'type': ['string', 'null'],
-            'description': '由 create_images / create_image_to_video 返回的 mediaId；'
+            'description': '由 create_images 返回的 mediaId；'
                 '传 null 表示清空封面',
           },
         },
@@ -697,27 +695,27 @@ class AgentTools {
     },
   };
 
-  // ===== 提示标签 =====
+  // ===== 写作技巧 =====
 
   static const _listPromptTags = {
     'type': 'function',
     'function': {
       'name': 'list_prompt_tags',
       'description':
-          '获取写作提示标签列表，支持按分类名筛选或获取全部。'
-          '标签按分类分组返回，每个标签仅包含 id、名称和使用场景'
+          '获取写作技巧列表，支持按分类名筛选或获取全部。'
+          '技巧按分类分组返回，每个技巧仅包含 id、名称和使用场景'
           '（不含提示词正文，以节省上下文）。\n'
-          '查看某个标签的完整提示词请用 get_prompt_tag。\n'
+          '查看某个技巧的完整提示词请用 get_prompt_tag。\n'
           '使用场景：\n'
-          '- 用户想查看或了解可用的写作技巧标签\n'
-          '- 需要为写作选择合适的标签风格\n'
-          '- 想了解某个分类下有哪些标签',
+          '- 用户想查看或了解可用的写作技巧\n'
+          '- 需要为写作选择合适的技巧风格\n'
+          '- 想了解某个分类下有哪些技巧',
       'parameters': {
         'type': 'object',
         'properties': {
           'categoryName': {
             'type': 'string',
-            'description': '分类名称筛选（如"风格"、"场景"、"人物"、"情节"）。不填则返回全部分类及其标签。',
+            'description': '分类名称筛选（如"风格"、"场景"、"人物"、"情节"）。不填则返回全部分类及其技巧。',
           },
         },
         'required': <String>[],
@@ -730,22 +728,22 @@ class AgentTools {
     'function': {
       'name': 'get_prompt_tag',
       'description':
-          '查看指定标签的完整提示词（promptText）。\n'
-          '- 传入 id 精确查看单个标签\n'
+          '查看指定技巧的完整提示词（promptText）。\n'
+          '- 传入 id 精确查看单个技巧\n'
           '- 传入 name 按名称查看（大小写无关精确匹配；同名存在多个时一并返回）\n'
           '使用场景：\n'
-          '- 已通过 list_prompt_tags 拿到标签 id 或名称，想查看完整提示词\n'
-          '- 引用或修改标签前确认其提示词内容',
+          '- 已通过 list_prompt_tags 拿到技巧 id 或名称，想查看完整提示词\n'
+          '- 引用或修改技巧前确认其提示词内容',
       'parameters': {
         'type': 'object',
         'properties': {
           'id': {
             'type': 'integer',
-            'description': '标签 ID（从 list_prompt_tags 获取）',
+            'description': '技巧 ID（从 list_prompt_tags 获取）',
           },
           'name': {
             'type': 'string',
-            'description': '标签名称（大小写无关精确匹配）',
+            'description': '技巧名称（大小写无关精确匹配）',
           },
         },
         'required': <String>[],
@@ -758,19 +756,19 @@ class AgentTools {
     'function': {
       'name': 'save_prompt_tag',
       'description':
-          '创建新标签或更新已有标签。\n'
-          '- 传入 id 表示更新已有标签（仅更新传入的字段）\n'
-          '- 不传 id 表示创建新标签（自动获取排序序号）\n'
+          '创建新技巧或更新已有技巧。\n'
+          '- 传入 id 表示更新已有技巧（仅更新传入的字段）\n'
+          '- 不传 id 表示创建新技巧（自动获取排序序号）\n'
           '- 通过分类名指定所属分类（如"风格"、"场景"、"人物"、"情节"）\n'
           '使用场景：\n'
-          '- 用户想创建新的写作技巧标签\n'
-          '- 用户想修改已有标签的提示词或使用场景描述',
+          '- 用户想创建新的写作技巧\n'
+          '- 用户想修改已有技巧的提示词或使用场景描述',
       'parameters': {
         'type': 'object',
         'properties': {
           'id': {
             'type': 'integer',
-            'description': '已有标签的 ID（从 list_prompt_tags 获取）。不传则创建新标签。',
+            'description': '已有技巧的 ID（从 list_prompt_tags 获取）。不传则创建新技巧。',
           },
           'categoryName': {
             'type': 'string',
@@ -778,15 +776,15 @@ class AgentTools {
           },
           'name': {
             'type': 'string',
-            'description': '标签名称',
+            'description': '技巧名称',
           },
           'reason': {
             'type': 'string',
-            'description': '使用场景描述（简短一句话，说明何时该用这个标签）',
+            'description': '使用场景描述（简短一句话，说明何时该用这个技巧）',
           },
           'promptText': {
             'type': 'string',
-            'description': '标签的完整提示词文本',
+            'description': '技巧的完整提示词文本',
           },
         },
         'required': ['categoryName', 'name', 'promptText'],
@@ -799,16 +797,16 @@ class AgentTools {
     'function': {
       'name': 'delete_prompt_tag',
       'description':
-          '删除指定的提示标签。\n'
+          '删除指定的写作技巧。\n'
           '使用场景：\n'
-          '- 用户想删除不再需要的写作技巧标签\n'
-          '- 用户想清理重复或错误的标签',
+          '- 用户想删除不再需要的写作技巧\n'
+          '- 用户想清理重复或错误的技巧',
       'parameters': {
         'type': 'object',
         'properties': {
           'id': {
             'type': 'integer',
-            'description': '要删除的标签 ID（从 list_prompt_tags 获取）',
+            'description': '要删除的技巧 ID（从 list_prompt_tags 获取）',
           },
         },
         'required': ['id'],
@@ -823,11 +821,18 @@ class AgentTools {
     'function': {
       'name': 'list_text2img_models',
       'description':
-          '获取可用的文生图工作流列表（动漫风/写实等不同画风）。'
-          '返回每个工作流的 name（作为 create_images 的 modelName 参数）、'
-          '描述、是否默认，以及 promptSkill（提示词写作技巧，含正向/负向提示词'
-          '的具体写法建议）。使用 create_images 前建议先调用本工具拿到 promptSkill，'
-          '据此撰写正向 prompt 和负向 prompt 会显著提升出图质量。',
+          '获取用户在本地管理的生图模型列表（用户在「设置 → 生图模型管理」'
+          '导入的本地 SD 模型）。'
+          '返回每项的 name（作为 create_images 的 modelName 参数）、'
+          'description（用户为该模型写的特点描述）、tags（结构化标签如'
+          '"古风/写实/赛博朋克"）、是否默认、promptSkill（描述+标签摘要，'
+          '是提示词写作技巧建议），以及 backendType（当前仅 local_sd）。'
+          '**你必须根据用户当前的需求语义，在 description/tags 中挑选最匹配的'
+          '模型，把它的 name 作为 create_images 的 modelName 参数；**'
+          '若用户提到风格/题材/用途关键词（"古风""写实""赛博朋克""人物特写"），'
+          '优先匹配 tags 里有这些关键词的模型。'
+          '如果返回的 models 数组为空，需要先引导用户去「设置 → 生图模型管理」'
+          '导入模型后再调用本工具。',
       'parameters': {
         'type': 'object',
         'properties': <String, dynamic>{},
@@ -841,14 +846,15 @@ class AgentTools {
     'function': {
       'name': 'create_images',
       'description':
-          '根据提示词生成图片（异步任务，后端 ComfyUI 执行）。\n'
-          '本工具会立即提交任务并返回，图片生成需要数十秒。'
-          '聊天窗口会出现图片画廊，自动轮询直到出图完成。\n'
+          '根据提示词生成图片（客户端本地引擎推理，端侧 sd.cpp 执行）。\n'
+          '生图耗时长（CPU 推理 512×512 约数十秒/张），请耐心等待；'
+          '聊天窗口会出现图片画廊展示结果。\n'
           '使用场景：\n'
           '- 用户想看某角色/场景的视觉化呈现\n'
           '- 为章节配插图\n'
           '- 探索人物外貌的具象化\n'
-          'modelName 来自 list_text2img_models 的 name 字段；不传则用默认画风。'
+          'modelName 必须是 list_text2img_models 返回的某个模型 name（按用户'
+          '需求语义挑最匹配 description/tags 的那个）；不传则使用默认模型。'
           '建议先调用 list_text2img_models 拿到 promptSkill，'
           '据此撰写 prompt 和 negativePrompt 会显著提升出图质量。',
       'parameters': {
@@ -858,7 +864,7 @@ class AgentTools {
             'type': 'string',
             'description':
                 '图片生成提示词（自然语言描述画面，建议含主体、服饰、场景、光影等）。'
-                '英文标签效果通常更好，可中英混合。'
+                '英文技巧名效果通常更好，可中英混合。'
                 '先调用 list_text2img_models 拿到 promptSkill 可获取针对性的写法建议。',
           },
           'negativePrompt': {
@@ -866,9 +872,7 @@ class AgentTools {
             'description':
                 '负向提示词（可选，避免生成你不想要的元素，例如 '
                 '"worst quality, extra fingers, blurry, watermark"）。'
-                '仅在所选 modelName 的工作流支持负向提示词（工作流 JSON 含独立负向 '
-                'CLIPTextEncode 节点并置入「负向提示词在这里替换」占位符）时生效；'
-                '未支持的工作流会静默忽略此参数。',
+                '本地引擎是否支持取决于该模型文件本身（多数 SD1.5/SDXL gguf 支持）。',
           },
           'count': {
             'type': 'integer',
@@ -877,8 +881,8 @@ class AgentTools {
           'modelName': {
             'type': 'string',
             'description':
-                '工作流名称（来自 list_text2img_models 的 name，如"动漫风17.5""写实1"）。'
-                '不传则使用后端默认工作流。',
+                '模型名称（来自 list_text2img_models 的 name）。'
+                '不传则使用默认模型（image_models.is_default=1 那条）。',
           },
         },
         'required': ['prompt'],
@@ -886,50 +890,7 @@ class AgentTools {
     },
   };
 
-  static const _createImageToVideo = {
-    'type': 'function',
-    'function': {
-      'name': 'create_image_to_video',
-      'description':
-          '根据一张图片 + 提示词生成短视频（异步任务，后端 ComfyUI 执行）。\n'
-          '本工具会立即提交任务并返回，视频生成耗时较长。'
-          '聊天窗口会出现视频，自动轮询直到生成完成。\n'
-          '使用场景：\n'
-          '- 让 create_images 生成的静态图片"动起来"\n'
-          '- 为某个画面制作动态效果\n'
-          'sourceMediaId 是输入图片的 mediaId（来自 create_images 返回的 mediaId，'
-          '或用户上传图片的 mediaId）。返回的 videos 数组里每个视频的 mediaId '
-          '即后端 task_id，UI 据此渲染并轮询取视频。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'prompt': {
-            'type': 'string',
-            'description':
-                '视频生成提示词（描述希望图片如何运动/变化，例如'
-                '"镜头缓慢推进，头发随风飘动，水面泛起涟漪"）。',
-          },
-          'sourceMediaId': {
-            'type': 'string',
-            'description':
-                '输入图片的 mediaId。来自 create_images 返回结果中的 mediaId，'
-                '或用户上传图片的 mediaId。',
-          },
-          'count': {
-            'type': 'integer',
-            'description': '生成视频个数（1-2，默认 1）。每个视频独立提交任务。',
-          },
-          'modelName': {
-            'type': 'string',
-            'description': '图生视频工作流名称（可选，不传则使用后端默认工作流）。',
-          },
-        },
-        'required': ['prompt', 'sourceMediaId'],
-      },
-    },
-  };
-
-  // ===== 子 Agent =====
+    // ===== 子 Agent =====
 
   static const _dispatchSubagent = {
     'type': 'function',
