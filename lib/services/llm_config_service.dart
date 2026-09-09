@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/build_config.dart';
 import '../core/providers/database_providers.dart';
+import '../core/providers/managed_model_provider.dart';
 import '../models/llm_config.dart' as app;
 import '../services/device/device_auth_service.dart';
 import '../services/dsl_engine/llm_provider.dart' as llm;
@@ -125,14 +126,16 @@ class LlmConfigService {
   Future<llm.LlmProvider?> buildManagedProvider(String scenarioId) async {
     if (!kHasBundledBackend) return null; // 未注入托管后端 → 走旧用户自配路径
     final token = await DeviceAuthService.instance.ensureRegistered();
-    // 用户选择的模型(可能为 null):拉一次目录 + 读选择,组合出真实请求字段。
-    // 失败(目录未知) → 直接信任本地选择;选择不存在于目录 → 落回 baseline。
-    final svc = ManagedModelService.instance;
-    final catalog = await svc.fetchCatalog();
-    final selectedId = await svc.getSelectedModelId();
-    final modelId = svc.resolveForRequest(
-      catalog: catalog,
-      selectedId: selectedId,
+    // 用户选择的模型:复用 managedModelProvider 的 5min 内存缓存,
+    // 避免每个 Agent 消息都触发一次 /v1/models 网络往返 + SharedPreferences 读。
+    // refresh() 内部走 isFresh 守卫;catalog 为 null 时 resolveForRequest
+    // 会回退到 state.selectedModelId → 网络失败时的本地兜底。
+    final notifier = _ref.read(managedModelProvider.notifier);
+    await notifier.refresh();
+    final modelState = _ref.read(managedModelProvider);
+    final modelId = ManagedModelService.instance.resolveForRequest(
+      catalog: modelState.catalog,
+      selectedId: modelState.selectedModelId,
     );
     return AiServiceFactory.buildLlmProvider(
       llm.LlmConfig(

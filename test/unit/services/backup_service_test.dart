@@ -121,8 +121,9 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       await SharedPreferences.getInstance();
 
-      // 使用 getDatabasesPath() 返回的实际路径（sqflite_ffi 内部目录）
-      // 这样 restoreBackup 和测试使用同一个目录
+      // 独立数据库目录：并发跑测试文件时不再与 backup_bundle_test
+      // 撞同名 novel_reader.db（CI 已放开 -j 1）
+      await useIsolatedDatabaseDir('backup_service_test');
       dbDir = await getDatabasesPath();
       dbPath = p.join(dbDir, 'novel_reader.db');
       tempPath = p.join(dbDir, 'novel_app_restore_temp.db');

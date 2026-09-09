@@ -21,6 +21,9 @@ class _FakeGithubService implements GithubReleaseService {
   GithubRelease? release;
   bool fetchCalled = false;
 
+  /// SHA256SUMS 解析结果（null = 无校验文件）
+  Map<String, String>? sha256Sums;
+
   @override
   Future<GithubRelease?> fetchLatestRelease({
     bool includePrerelease = false,
@@ -28,6 +31,10 @@ class _FakeGithubService implements GithubReleaseService {
     fetchCalled = true;
     return release;
   }
+
+  @override
+  Future<Map<String, String>?> fetchSha256Sums(GithubRelease release) async =>
+      sha256Sums;
 
   @override
   Future<bool> shouldCheck({bool forceCheck = false}) async => true;
@@ -123,6 +130,34 @@ void main() {
     expect(available.version.downloadUrl, contains('backend.example.com'));
     expect(available.version.changelog, '后端更新说明');
     expect(github.fetchCalled, isFalse);
+  });
+
+  test('AppVersion 携带 sha256：后端路径透传 manifest 字段', () async {
+    final github = _FakeGithubService()..release = _githubRelease('1.8.0');
+    final backend = _FakeBackendService()..release = _backendRelease('1.9.0');
+
+    final result = await (await _service(github, backend))
+        .checkForUpdateDetailed(forceCheck: true);
+
+    final available = result as AppUpdateAvailable;
+    expect(available.version.sha256, 'a' * 64,
+        reason: '后端 manifest 的 per-file sha256 必须传到下载校验');
+  });
+
+  test('AppVersion 携带 sha256：GitHub 路径按文件名查 SHA256SUMS', () async {
+    final github = _FakeGithubService()
+      ..release = _githubRelease('1.8.0')
+      ..sha256Sums = {'app-arm64-v8a-release.apk': 'b' * 64};
+    final backend = _FakeBackendService()
+      ..throwOnFetch =
+          AppUpdateCheckException('后端检查更新失败', cause: 'network_error');
+
+    final result = await (await _service(github, backend))
+        .checkForUpdateDetailed(forceCheck: true);
+
+    final available = result as AppUpdateAvailable;
+    expect(available.version.sha256, 'b' * 64,
+        reason: 'SHA256SUMS.txt 中所选 APK 的哈希必须传到下载校验');
   });
 
   test('后端失败时回退 GitHub', () async {

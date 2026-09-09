@@ -166,7 +166,7 @@ class OutlineExecutor with ToolExecutorHelpers {
     } on OutlineEditException catch (e) {
       final errorCode =
           e.reason == 'ambiguous' ? 'ambiguous_match' : 'not_found';
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '更新大纲失败: $errorCode, novelUrl=$novelUrl',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'update_outline', errorCode],

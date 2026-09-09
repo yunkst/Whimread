@@ -83,6 +83,18 @@ class MockApiServiceWrapper extends _i1.Mock implements _i4.ApiServiceWrapper {
       );
 
   @override
+  set unauthorizedRecoveryProvider(
+          _i5.Future<Map<String, String>?> Function()?
+              _unauthorizedRecoveryProvider) =>
+      super.noSuchMethod(
+        Invocation.setter(
+          #unauthorizedRecoveryProvider,
+          _unauthorizedRecoveryProvider,
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i5.Future<void> init() => (super.noSuchMethod(
         Invocation.method(
           #init,

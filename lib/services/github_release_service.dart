@@ -1,8 +1,8 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../models/github_release.dart';
 import 'logger_service.dart';
@@ -156,33 +156,64 @@ class GithubReleaseService {
         .setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
   }
 
+  /// 下载 release 附带的 SHA256SUMS.txt，解析为 文件名→哈希 映射。
+  ///
+  /// 发布流水线随 APK 一起上传 SHA256SUMS.txt（`sha256sum app-*.apk` 产物，
+  /// 行格式 `<hash>  <filename>`）。旧 release 可能没有该 asset；尽力而为，
+  /// 任何失败都返回 null（调用方跳过校验，不阻断更新流程）。
+  Future<Map<String, String>?> fetchSha256Sums(GithubRelease release) async {
+    try {
+      final GithubAsset sumsAsset;
+      final candidates = release.assets
+          .where((a) => a.name.toUpperCase() == 'SHA256SUMS.TXT')
+          .toList();
+      if (candidates.isEmpty) return null;
+      sumsAsset = candidates.first;
+
+      final response = await _dio.get<String>(
+        sumsAsset.browserDownloadUrl,
+        options: Options(responseType: ResponseType.plain),
+      );
+      final text = response.data;
+      if (text == null || text.isEmpty) return null;
+
+      final result = <String, String>{};
+      for (final line in text.split('\n')) {
+        final parts = line.trim().split(RegExp(r'\s+'));
+        if (parts.length >= 2 && parts.first.isNotEmpty) {
+          result[parts.last] = parts.first.toLowerCase();
+        }
+      }
+      return result;
+    } catch (e) {
+      LoggerService.instance.d(
+        '获取 SHA256SUMS 失败（跳过校验）: $e',
+        category: LogCategory.network,
+        tags: ['update', 'github', 'checksum'],
+      );
+      return null;
+    }
+  }
+
   /// 下载 APK 文件
   ///
   /// [downloadUrl] GitHub asset 的 browser_download_url（完整 URL）
   /// [fileName] 保存的文件名（如 novel_app_v1.7.7.apk）
+  /// [expectedSha256] 发布方提供的安装包 SHA256；提供则下载后校验，
+  /// 不匹配时删除文件并返回 false（写入应用私有目录，无需存储权限）
   /// [onProgress] 进度回调 0.0-1.0
   /// [onStatus] 状态文本回调
   Future<bool> downloadApk({
     required String downloadUrl,
     required String fileName,
+    String? expectedSha256,
     void Function(double progress)? onProgress,
     void Function(String status)? onStatus,
   }) async {
     try {
       onStatus?.call('准备下载...');
 
-      // 请求存储权限
-      final storageStatus = await Permission.storage.request();
-      if (!storageStatus.isGranted) {
-        final manageStatus =
-            await Permission.manageExternalStorage.request();
-        if (!manageStatus.isGranted) {
-          onStatus?.call('需要存储权限');
-          return false;
-        }
-      }
-
-      // 获取下载目录
+      // 获取下载目录（应用私有目录，Android 上无需任何存储权限）
       final directory = await getApplicationDocumentsDirectory();
       final updatesDir = Directory('${directory.path}/updates');
       if (!await updatesDir.exists()) {
@@ -218,6 +249,26 @@ class GithubReleaseService {
           }
         },
       );
+
+      onStatus?.call('校验安装包...');
+      if (expectedSha256 != null && expectedSha256.isNotEmpty) {
+        // 流式计算（APK 数十 MB，避免整文件读进内存）
+        final digest =
+            await sha256.bind(File(filePath).openRead()).first;
+        if (digest.toString().toLowerCase() !=
+            expectedSha256.toLowerCase()) {
+          try {
+            await File(filePath).delete();
+          } catch (_) {}
+          LoggerService.instance.e(
+            'APK SHA256 校验失败，已删除: expected=$expectedSha256 actual=$digest',
+            category: LogCategory.network,
+            tags: ['update', 'download', 'checksum', 'error'],
+          );
+          onStatus?.call('安装包校验失败，已放弃安装');
+          return false;
+        }
+      }
 
       onStatus?.call('下载完成');
       onProgress?.call(1.0);

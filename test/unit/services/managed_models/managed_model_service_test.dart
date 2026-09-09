@@ -172,6 +172,56 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('misconfig: 两个 model 都标 is_baseline=true → 校正后只剩 baselineId 一条',
+        () {
+      // 后端误标: flash 与 pro 都 is_baseline=true,但 baseline_model_id 指 flash
+      final c = ManagedModelCatalog.parse({
+        'baseline_model_id': 'flash',
+        'data': [
+          {
+            'id': 'flash',
+            'display_name': 'Flash',
+            'consumption_rate': 1,
+            'is_baseline': true,
+          },
+          {
+            'id': 'pro',
+            'display_name': 'Pro',
+            'consumption_rate': 5,
+            'is_baseline': true, // 误标
+          },
+        ],
+      });
+      expect(c.byId('flash')?.isBaseline, true);
+      expect(c.byId('pro')?.isBaseline, false); // 校正降级
+      expect(c.baselineModelId, 'flash');
+    });
+
+    test('misconfig: baseline_model_id 与任何 is_baseline=true 的 id 不一致 → 校正到 baselineModelId',
+        () {
+      // 后端误标: baseline_model_id='flash',但只有 pro 标 is_baseline=true
+      final c = ManagedModelCatalog.parse({
+        'baseline_model_id': 'flash',
+        'data': [
+          {
+            'id': 'flash',
+            'display_name': 'Flash',
+            'consumption_rate': 1,
+            'is_baseline': false, // 误标
+          },
+          {
+            'id': 'pro',
+            'display_name': 'Pro',
+            'consumption_rate': 5,
+            'is_baseline': true, // 误标
+          },
+        ],
+      });
+      expect(c.byId('flash')?.isBaseline, true); // 校正优先 baseline_model_id
+      expect(c.byId('pro')?.isBaseline, false);
+      expect(c.baselineModelId, 'flash');
+    });
   });
 
   group('ManagedModelCatalog.rateLabel(展示规则)', () {

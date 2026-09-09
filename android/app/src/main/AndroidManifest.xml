@@ -11,9 +11,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 
-    <!-- Android 11+ (API 30) 管理外部存储权限 -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
-
+    <!-- 明文流量豁免是有意的产品取舍：WebView 抓取的小说站大量 http-only，
+         无法预置域名白名单；代价是该流量可被中间人注入（issue #44）。
+         一方 API（托管后端）始终走 https，不受此开关影响。 -->
     <application
         android:usesCleartextTraffic="true"
         android:label="随心阅读"

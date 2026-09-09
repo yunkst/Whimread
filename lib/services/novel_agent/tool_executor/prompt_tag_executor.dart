@@ -34,7 +34,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
           .where((c) => c.name.toLowerCase() == categoryName.toLowerCase())
           .toList();
       if (categories.isEmpty) {
-        LoggerService.instance.d(
+        LoggerService.instance.w(
           '工具引导错误: category_not_found categoryName=$categoryName',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'list_prompt_tags', 'category_not_found'],
@@ -88,7 +88,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     final (name, _) = parser.optionalString('name');
 
     if (id == null && (name == null || name.isEmpty)) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: missing_arg (id 和 name 均未提供)',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'get_prompt_tag', 'missing_arg'],
@@ -111,7 +111,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     if (id != null) {
       final tags = await tagRepo.getByIds([id]);
       if (tags.isEmpty) {
-        LoggerService.instance.d(
+        LoggerService.instance.w(
           '工具引导错误: tag_not_found id=$id',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'get_prompt_tag', 'tag_not_found'],
@@ -140,7 +140,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     if (matched.isEmpty) {
       final fuzzy = await tagRepo.search(name!);
       final suggestedNames = fuzzy.map((t) => t.name).toSet().toList();
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: tag_not_found name=$name',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'get_prompt_tag', 'tag_not_found'],
@@ -208,7 +208,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
         .where((c) => c.name.toLowerCase() == categoryName.toLowerCase())
         .firstOrNull;
     if (category == null || category.id == null) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: category_not_found categoryName=$categoryName',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'save_prompt_tag', 'category_not_found'],
@@ -227,7 +227,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
       // 更新已有技巧
       final existingTags = await tagRepo.getByIds([id]);
       if (existingTags.isEmpty) {
-        LoggerService.instance.d(
+        LoggerService.instance.w(
           '工具引导错误: tag_not_found id=$id',
           category: LogCategory.ai,
           tags: ['agent', 'tool', 'save_prompt_tag', 'tag_not_found'],
@@ -294,7 +294,7 @@ class PromptTagExecutor with ToolExecutorHelpers {
     // 确认技巧存在
     final existingTags = await tagRepo.getByIds([id]);
     if (existingTags.isEmpty) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: tag_not_found id=$id',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'delete_prompt_tag', 'tag_not_found'],

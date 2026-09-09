@@ -38,14 +38,6 @@ class ManagedModel {
       ? shortName!
       : displayName;
 
-  /// 倍率显示文本(整数去小数)
-  String get rateText {
-    if (consumptionRate == consumptionRate.truncateToDouble()) {
-      return consumptionRate.toInt().toString();
-    }
-    return consumptionRate.toString();
-  }
-
   @override
   String toString() =>
       'ManagedModel(id=$id, display=$displayName, rate=$consumptionRate, '
@@ -66,11 +58,18 @@ class ManagedModelCatalog {
     return null;
   }
 
-  ManagedModel? get baseline =>
-      models.where((m) => m.isBaseline).cast<ManagedModel?>().firstWhere(
-            (m) => m != null,
-            orElse: () => null,
-          );
+  /// 倍率展示:整数去小数(5 → "5", 2.5 → "2.5")。
+  static String _formatRate(double rate) =>
+      rate == rate.truncateToDouble()
+          ? rate.toInt().toString()
+          : rate.toString();
+
+  ManagedModel? get baseline {
+    for (final m in models) {
+      if (m.isBaseline) return m;
+    }
+    return null;
+  }
 
   /// 后端 `data[0]` 即 baseline(ratio=1,最便宜)
   /// —— 该约定由 `cloudfunctions/llm-proxy/model-catalog.js` 保证
@@ -113,17 +112,45 @@ class ManagedModelCatalog {
       ));
     }
     final baselineRaw = data['baseline_model_id'];
+    ManagedModel? firstBaseline;
+    for (final m in models) {
+      if (m.isBaseline) {
+        firstBaseline = m;
+        break;
+      }
+    }
     final baselineId = (baselineRaw is String && baselineRaw.isNotEmpty)
         ? baselineRaw
-        : (models.where((m) => m.isBaseline).cast<ManagedModel?>().firstWhere(
-              (m) => m != null,
-              orElse: () => null,
-            )?.id) ??
+        : firstBaseline?.id ??
             (models.isNotEmpty ? models.first.id : null);
     if (baselineId == null || models.isEmpty) {
       throw const FormatException('catalog empty or baseline missing');
     }
-    // 校正 baseline 标记(后端兜底)
+    // misconfig 检测:baselineModelId 与每条 isBaseline=true 的 id 必须一一对应。
+    // 不一致(后端误标两个 baseline、或 baselineModelId 不命中任何 isBaseline=true 条目)
+    // → warn 提示运维自查,但仍继续走校正(避免 P0 阻塞 UI)。
+    final baselineIdsFromFlag = models
+        .where((m) => m.isBaseline)
+        .map((m) => m.id)
+        .toSet();
+    final baselineIdsFromCatalog = <String>{baselineId};
+    final isConsistent = baselineIdsFromFlag.length == 1 &&
+        baselineIdsFromCatalog.containsAll(baselineIdsFromFlag) &&
+        baselineIdsFromFlag.containsAll(baselineIdsFromCatalog);
+    if (!isConsistent) {
+      LoggerService.instance.w(
+        'model catalog baseline misconfig: '
+        'baseline_model_id=$baselineId but is_baseline=true on '
+        '${baselineIdsFromFlag.toList()}',
+        category: LogCategory.ai,
+        tags: ['managed_model', 'catalog', 'baseline_misconfig'],
+      );
+    }
+    // 校正 baseline 标记(客户端兜底):server `model-catalog.js` 只透传
+    // `is_baseline` 字段不做校验,所以两端都标 baseline、或 baselineModelId
+    // 与任何 is_baseline=true 的 id 不一致这种 misconfig 必须由本函数消化。
+    // 校正后保证目录里只有一条 model.isBaseline == true,且 == baselineModelId,
+    // 让 byId / defaultModel 取到的 baseline 单一且可预测。
     final fixed = models
         .map((m) => ManagedModel(
               id: m.id,
@@ -145,11 +172,7 @@ class ManagedModelCatalog {
     final refName = (base != null && base.shortLabel.isNotEmpty)
         ? base.shortLabel
         : '基准';
-    final rate = model.consumptionRate;
-    final rateStr = rate == rate.truncateToDouble()
-        ? rate.toInt().toString()
-        : rate.toString();
-    return '消耗速度约是$refName 的 $rateStr 倍';
+    return '消耗速度约是$refName 的 ${_formatRate(model.consumptionRate)} 倍';
   }
 }
 
@@ -224,10 +247,10 @@ class ManagedModelService {
     required ManagedModelCatalog? catalog,
     required String? selectedId,
   }) {
-    if (catalog == null) return selectedId; // 目录未知,信任本地选择
-    if (selectedId == null) return catalog.defaultModel?.id;
-    final hit = catalog.byId(selectedId);
-    if (hit != null) return hit.id;
-    return catalog.defaultModel?.id;
+    // 目录未知:信任本地选择(冷启动 / 网络失败时的兜底,后端在 chat 路径
+    // 会再做白名单校验)。目录已知:byId 命中即用,否则落回 defaultModel。
+    if (catalog == null) return selectedId;
+    final hit = selectedId == null ? null : catalog.byId(selectedId);
+    return (hit ?? catalog.defaultModel)?.id;
   }
 }

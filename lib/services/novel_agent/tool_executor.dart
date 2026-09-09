@@ -78,7 +78,7 @@ class ToolExecutor with ToolExecutorHelpers {
       });
     }
 
-    LoggerService.instance.d('执行工具: $toolName (args=${args.keys.toList()})',
+    LoggerService.instance.i('执行工具: $toolName (args=${args.keys.toList()})',
         category: LogCategory.ai, tags: ['agent', 'tool', toolName, 'exec']);
     try {
       switch (toolName) {

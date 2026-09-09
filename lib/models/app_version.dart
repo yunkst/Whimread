@@ -13,12 +13,17 @@ class AppVersion {
   final String? changelog;
   final String createdAt;
 
+  /// 安装包 SHA256（发布流水线/后端 manifest 提供，下载后做完整性校验；
+  /// 旧 release 可能没有，null 时跳过校验）
+  final String? sha256;
+
   AppVersion({
     required this.version,
     required this.downloadUrl,
     required this.fileSize,
     this.changelog,
     required this.createdAt,
+    this.sha256,
   });
 
   /// 从JSON创建
@@ -53,6 +58,7 @@ class AppVersion {
     return 'AppVersion(version: $version, '
         'downloadUrl: $downloadUrl, fileSize: $fileSize, '
         'changelog: $changelog, '
+        'sha256: ${sha256 == null ? "(none)" : "${sha256!.substring(0, 8)}…"}, '
         'createdAt: $createdAt)';
   }
 }

@@ -43,6 +43,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await SharedPreferences.getInstance();
 
+    // 独立数据库目录：并发跑测试文件时不再与 backup_service_test
+    // 撞同名 novel_reader.db（CI 已放开 -j 1）
+    await useIsolatedDatabaseDir('backup_bundle_test');
     dbDir = await getDatabasesPath();
     dbPath = p.join(dbDir, 'novel_reader.db');
     await Directory(dbDir).create(recursive: true);

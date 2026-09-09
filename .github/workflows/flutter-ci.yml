@@ -46,36 +46,20 @@ jobs:
         run: flutter analyze --no-fatal-infos
 
       # 测试范围说明：
-      #   历史上 CI 只跑 test/unit/ test/bug/ test/verification/，显式排除了
-      #   test/widgets/ test/screens/ test/integration/，导致 widget/screen 层
-      #   的测试永远不跑，回归无门禁。
-      #   现把 test/widgets/ test/widget/ test/screens/ 一并纳入。
-      #   test/screens/subagent_detail_screen_test.dart 已知破坏（引用已删的
-      #   SubagentRun.tokenSource / CancellationTokenSource），用 --exclude-tags
-      #   无法过滤（文件级编译失败）；先用文件名 grep 跳过，待 owner 修复后移除
-      #   跳过。test/integration/ 依赖真实 headless WebView / 网络，跑在 CI 会
+      #   历史上 CI 只跑 test/unit/ test/bug/ test/verification/，widget/screen
+      #   层测试无门禁；现已把 test/widgets/ test/widget/ test/screens/ 一并纳入
+      #   （曾排除的 subagent_detail_screen_test.dart 已删除）。
+      #   test/integration/ 依赖真实 headless WebView / 网络，跑在 CI 会
       #   flaky，暂不纳入（后续可拆 separate job + continue-on-error）。
       - name: Run unit tests with coverage
-        # 必须用 '*_test.dart' 过滤：flutter test 只在传目录时才自动挑
-        # _test.dart；一旦显式列文件，*.mocks.dart 等非测试文件会因无
-        # main() 编译失败（假失败）。SKIP_LIST 文件引用已删 API 待修复。
         run: |
           rm -rf .dart_tool/sqflite_common_ffi 2>/dev/null || true
-          SKIP_LIST="test/screens/subagent_detail_screen_test.dart"
-          FILES=""
-          for d in test/unit/ test/bug/ test/verification/; do
-            for f in $(find "$d" -name '*_test.dart' 2>/dev/null); do
-              skip=0
-              for s in $SKIP_LIST; do
-                [ "$f" = "$s" ] && skip=1 && break
-              done
-              [ $skip -eq 0 ] && FILES="$FILES $f"
-            done
-          done
-          flutter test --no-pub --coverage $FILES
+          # 传目录即可：flutter test 自动只挑 *_test.dart。
+          # （SKIP_LIST 文件清单机制随 subagent_detail_screen_test.dart 删除一并移除）
+          flutter test --no-pub --coverage test/unit/ test/bug/ test/verification/ test/widgets/ test/widget/ test/screens/
 
       - name: Check line coverage threshold
-        # coverage_config.yaml 写的是 70% 阈值，但当前测试集实际水位约 38%
+        # docs/coverage_config.yaml 写的是 70% 阈值，但当前测试集实际水位约 38%
         #（2026-09-06 实测 8271/21594），立即套 70%/50% 会让 CI 长期红亮、
         # 掩盖真正的失败信号。先以 35% 作为基线门禁让门禁重新可信，
         # 新增代码必须同步补测试，水位回升后逐步收紧到 70%。

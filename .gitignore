@@ -81,3 +81,6 @@ cloudfunctions/*/__tests__/
 
 # git worktrees(superpowers 技能约定)
 .worktrees/
+
+# Python 字节码缓存（skill 脚本本地运行产物）
+__pycache__/

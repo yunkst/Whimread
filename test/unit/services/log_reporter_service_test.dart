@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/log_reporter_service.dart';
 import 'package:novel_app/services/logger_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// LogReporterService 单元测试
 ///
@@ -90,6 +91,41 @@ void main() {
       expect(LogReporterService.maxBufferSize, equals(100));
       expect(LogReporterService.backoffThreshold, equals(3));
       expect(LogReporterService.backoffMaxSeconds, equals(300));
+    });
+  });
+
+  group('LogReporterService - 凭证不可用不计退避（issue #47）', () {
+    test('自部署模式 NO_BACKEND 静默放弃本轮，失败计数不涨', () async {
+      SharedPreferences.setMockInitialValues({
+        'backend_host': 'https://selfhost.example.com',
+      });
+      await SharedPreferences.getInstance();
+      final reporter = LogReporterService.instance;
+      // onLogAdded 有 _initialized 守卫，需先 init；结束 dispose 撤掉定时器
+      await reporter.init();
+
+      final sizeBefore = reporter.bufferSize;
+      final failuresBefore = reporter.consecutiveFailuresForTest;
+      reporter.onLogAdded(LogEntry(
+        timestamp: DateTime.now(),
+        level: LogLevel.error,
+        message: 'no-backend probe',
+      ));
+      expect(reporter.bufferSize, sizeBefore + 1);
+
+      await reporter.flush();
+
+      // 测试构建 kHasBundledBackend=false：authedHeaders → 注册 → NO_BACKEND。
+      // 修复前该异常落入通用 catch 被计入退避（自部署上报永久失效）。
+      expect(reporter.consecutiveFailuresForTest, failuresBefore,
+          reason: '凭证不可用是稳态而非故障，不应推进退避');
+      expect(reporter.currentIntervalSecondsForTest,
+          LogReporterService.intervalSeconds,
+          reason: '间隔必须保持正常值，不进入退避模式');
+      expect(reporter.bufferSize, sizeBefore + 1,
+          reason: '失败条目保留待下次重试');
+
+      reporter.dispose();
     });
   });
 

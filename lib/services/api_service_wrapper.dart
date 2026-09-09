@@ -17,8 +17,9 @@ import 'preferences_service.dart';
 /// ## 核心职责
 /// 1. **配置管理**：统一管理后端 Host（托管模式以打包注入地址优先）
 /// 2. **设备鉴权**：经 [authHeaderProvider] 注入设备 JWT 请求头
-/// 3. **错误处理**：网络异常的统一处理和重试机制
-/// 4. **连接管理**：自动检测连接健康状态，必要时重新初始化
+/// 3. **凭证自愈**：401 时经 [unauthorizedRecoveryProvider] 换新凭证重放一次
+/// 4. **错误处理**：网络异常的统一处理和重试机制
+/// 5. **连接管理**：自动检测连接健康状态，必要时重新初始化
 ///
 /// ## 使用示例
 /// ```dart
@@ -47,6 +48,23 @@ class ApiServiceWrapper {
   /// 由 APP 启动时注入 `DeviceAuthService.authedHeaders`，避免本文件与
   /// 设备服务形成循环 import；未注入时需要鉴权的请求直接抛错。
   Future<Map<String, String>> Function()? authHeaderProvider;
+
+  /// 401 自动恢复回调：刷新设备凭证并返回新请求头，返回 null 表示无法恢复。
+  ///
+  /// 由 APP 启动时注入 `DeviceAuthService.renewAuthHeaders`（与
+  /// [authHeaderProvider] 同理避免循环 import）；[_AuthRetryInterceptor]
+  /// 在收到 401 时调用它换新凭证重放请求（每个请求至多重试一次）。
+  Future<Map<String, String>?> Function()? unauthorizedRecoveryProvider;
+
+  /// 进行中的凭证恢复（并发 401 共享同一次刷新，避免重复注册）
+  Future<Map<String, String>?>? _recoveryInFlight;
+
+  Future<Map<String, String>?> _recoverAuthHeaders() {
+    final provider = unauthorizedRecoveryProvider;
+    if (provider == null) return Future.value(null);
+    return _recoveryInFlight ??=
+        provider().whenComplete(() => _recoveryInFlight = null);
+  }
 
   /// 取设备鉴权请求头
   Future<Map<String, String>> _authHeaders() async {
@@ -133,6 +151,13 @@ class ApiServiceWrapper {
         tags: ['interceptor'],
       ),
     ));
+
+    // 401 自动续签拦截器（与 LogInterceptor 同理去重，防止 init 重复累积）
+    _dio.interceptors
+        .whereType<_AuthRetryInterceptor>()
+        .toList()
+        .forEach(_dio.interceptors.remove);
+    _dio.interceptors.add(_AuthRetryInterceptor(this));
 
     _initialized = true;
     LoggerService.instance.d(
@@ -570,6 +595,54 @@ class ApiServiceWrapper {
         tags: ['image_to_video', 'video', 'fetch', 'error'],
       );
       return (null, 0);
+    }
+  }
+}
+
+/// 401 时刷新设备凭证并重放请求一次的拦截器。
+///
+/// 设备 JWT 是 30 天期会话凭证，过期后所有鉴权请求会集体 401；
+/// 这里经 [ApiServiceWrapper.unauthorizedRecoveryProvider] 换新凭证后
+/// 重放原请求，对调用方透明。挑战/注册端点本身不携带凭证，其 401
+/// 与 token 无关，不进入重试（否则恢复流程会自激）。
+class _AuthRetryInterceptor extends Interceptor {
+  _AuthRetryInterceptor(this._wrapper);
+
+  static const String _retriedKey = 'auth_retry_done';
+
+  /// 不携带设备凭证的端点（重注册链路自身）
+  static const List<String> _unauthenticatedPaths = [
+    '/api/v1/devices/challenge',
+    '/api/v1/devices/register',
+  ];
+
+  final ApiServiceWrapper _wrapper;
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    final options = err.requestOptions;
+    final path = options.path;
+    final isAuthEndpoint =
+        _unauthenticatedPaths.any((p) => path.contains(p));
+    if (err.response?.statusCode != 401 ||
+        options.extra[_retriedKey] == true ||
+        isAuthEndpoint) {
+      return handler.next(err);
+    }
+
+    final freshHeaders = await _wrapper._recoverAuthHeaders();
+    if (freshHeaders == null) return handler.next(err);
+
+    options.extra[_retriedKey] = true;
+    options.headers.addAll(freshHeaders);
+    try {
+      final response = await _wrapper.dio.fetch(options);
+      return handler.resolve(response);
+    } on DioException catch (retryErr) {
+      return handler.next(retryErr);
+    } catch (_) {
+      // 重试出现非 Dio 异常（如反序列化失败）：保持原始 401 语义
+      return handler.next(err);
     }
   }
 }

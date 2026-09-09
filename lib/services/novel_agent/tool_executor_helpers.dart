@@ -76,7 +76,7 @@ mixin ToolExecutorHelpers {
   ) async {
     final currentNovelId = ctx?.currentNovelId;
     if (currentNovelId == null) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: no_current_novel',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'no_current_novel'],
@@ -96,7 +96,7 @@ mixin ToolExecutorHelpers {
     final repo = ref.read(novelRepositoryProvider);
     final novelUrl = await repo.getNovelUrlById(novelId);
     if (novelUrl == null) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: novel_not_found novelId=$novelId',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'novel_not_found'],
@@ -140,7 +140,7 @@ mixin ToolExecutorHelpers {
     final repo = ref.read(chapterRepositoryProvider);
     final chapters = await repo.getCachedNovelChapters(novelUrl);
     if (position < 1 || position > chapters.length) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: chapter_position_out_of_range position=$position total=${chapters.length}',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'chapter_position_out_of_range'],

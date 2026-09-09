@@ -40,6 +40,22 @@ class ManagedModelState {
       catalog != null &&
       fetchedAt != null &&
       DateTime.now().difference(fetchedAt!) < managedModelCacheTtl;
+
+  /// copyWith 默认不重置 loading(true 时显式关闭);避免每次刷新写两行 state=。
+  ManagedModelState copyWith({
+    ManagedModelCatalog? catalog,
+    String? selectedModelId,
+    DateTime? fetchedAt,
+    bool? loading,
+    bool clearLoading = false,
+  }) {
+    return ManagedModelState(
+      catalog: catalog ?? this.catalog,
+      selectedModelId: selectedModelId ?? this.selectedModelId,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      loading: clearLoading ? false : (loading ?? this.loading),
+    );
+  }
 }
 
 const Duration managedModelCacheTtl = Duration(minutes: 5);
@@ -52,12 +68,7 @@ class ManagedModelNotifier extends StateNotifier<ManagedModelState> {
   Future<void> refresh({bool force = false}) async {
     if (state.loading) return;
     if (!force && state.isFresh) return;
-    state = ManagedModelState(
-      catalog: state.catalog,
-      selectedModelId: state.selectedModelId,
-      fetchedAt: state.fetchedAt,
-      loading: true,
-    );
+    state = state.copyWith(loading: true);
     final svc = ManagedModelService.instance;
     final results = await Future.wait([
       svc.fetchCatalog(),
@@ -66,33 +77,18 @@ class ManagedModelNotifier extends StateNotifier<ManagedModelState> {
     final catalog = results[0] as ManagedModelCatalog?;
     final selectedId = results[1] as String?;
     if (!mounted) return;
-    state = ManagedModelState(
+    state = state.copyWith(
       catalog: catalog ?? state.catalog,
       selectedModelId: selectedId ?? state.selectedModelId,
       fetchedAt: DateTime.now(),
+      clearLoading: true,
     );
   }
 
   /// 用户在 picker 选中一个新模型。
   Future<void> select(String modelId) async {
     await ManagedModelService.instance.setSelectedModelId(modelId);
-    state = ManagedModelState(
-      catalog: state.catalog,
-      selectedModelId: modelId,
-      fetchedAt: state.fetchedAt,
-    );
-  }
-
-  /// 选中不在目录(目录更新后失效)时回退到默认;返回新选择是否变化。
-  Future<bool> revalidateSelection() async {
-    final catalog = state.catalog;
-    final sel = state.selectedModelId;
-    if (catalog == null || sel == null) return false;
-    if (catalog.byId(sel) != null) return false;
-    final fallback = catalog.defaultModel?.id;
-    if (fallback == null) return false;
-    await select(fallback);
-    return true;
+    state = state.copyWith(selectedModelId: modelId);
   }
 }
 

@@ -172,4 +172,47 @@ void main() {
           reason: '无缓存 token 时 fetchQuota 不应触发注册副作用');
     });
   });
+
+  group('loadCached（空串归一化，issue #46）', () {
+    test('缓存为空串时归一化为未注册（防发空 Bearer）', () async {
+      // getString 缺省返回 ''，若原样缓存会让 null 守卫全部被穿透
+      SharedPreferences.setMockInitialValues({'device_jwt': ''});
+      await service.loadCached();
+
+      expect(service.cachedToken, isNull);
+    });
+
+    test('未缓存与非空缓存行为不变', () async {
+      SharedPreferences.setMockInitialValues({});
+      await service.loadCached();
+      expect(service.cachedToken, isNull);
+
+      SharedPreferences.setMockInitialValues({'device_jwt': 'tok-xyz'});
+      await service.loadCached();
+      expect(service.cachedToken, 'tok-xyz');
+    });
+
+    test('空串缓存不会被 ensureRegistered 直接返回（必须走注册）', () async {
+      SharedPreferences.setMockInitialValues({'device_jwt': ''});
+      await service.loadCached();
+
+      // 测试构建 kHasBundledBackend=false：注册必然抛 NO_BACKEND。
+      // 若守卫失效这里会返回 '' 而不抛——抛出即证明空串被拒绝。
+      await expectLater(
+        service.ensureRegistered(),
+        throwsA(isA<DeviceAuthException>()
+            .having((e) => e.code, 'code', 'NO_BACKEND')),
+      );
+    });
+  });
+
+  group('renewAuthHeaders（401 自动恢复入口，issue #48）', () {
+    test('恢复失败（注册不可用）返回 null，调用方放弃重试', () async {
+      SharedPreferences.setMockInitialValues({});
+      service.useWrapper(ApiServiceWrapper(Dio()..httpClientAdapter = failIfCalled()));
+      await service.loadCached();
+
+      expect(await service.renewAuthHeaders(), isNull);
+    });
+  });
 }

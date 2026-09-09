@@ -183,6 +183,7 @@ class AppUpdateService {
       fileSize: file.size,
       changelog: release.changelog,
       createdAt: release.publishedAt,
+      sha256: file.sha256.isEmpty ? null : file.sha256,
     );
   }
 
@@ -214,12 +215,16 @@ class AppUpdateService {
       return null;
     }
 
+    // SHA256SUMS.txt 尽力获取：拿不到就不校验（fetchSha256Sums 已兜底返回 null）
+    final sums = await _githubService.fetchSha256Sums(release);
+
     return AppVersion(
       version: release.versionNumber,
       downloadUrl: asset.browserDownloadUrl,
       fileSize: asset.size,
       changelog: _extractChangelog(release.body),
       createdAt: release.publishedAt,
+      sha256: sums?[asset.name],
     );
   }
 
@@ -296,6 +301,7 @@ class AppUpdateService {
     return await _githubService.downloadApk(
       downloadUrl: version.downloadUrl,
       fileName: fileName,
+      expectedSha256: version.sha256,
       onProgress: onProgress,
       onStatus: onStatus,
     );

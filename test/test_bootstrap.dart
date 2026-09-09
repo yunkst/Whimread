@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -59,6 +62,24 @@ void initDatabaseTests() {
   // 可以在这里添加更多数据库测试特定配置
   // ignore: avoid_print
   print('✅ 数据库测试环境初始化完成');
+}
+
+/// 为当前测试文件切换到独立的数据库目录。
+///
+/// 生产代码固定打开 `getDatabasesPath()/novel_reader.db`（DatabaseConnection、
+/// BackupService 均如此）。`flutter test` 默认并发跑多个测试文件，若两个文件
+/// 都操作同名物理文件会互相删库（backup_service_test / backup_bundle_test
+/// 曾因此在放开并发后 flaky）。在 setUp 里先调用本函数即可隔离。
+///
+/// 幂等：setDatabasesPath 后 getDatabasesPath 已返回隔离目录，
+/// 同一文件多次 setUp 不会嵌套出 backup_service_test/backup_service_test/…
+Future<void> useIsolatedDatabaseDir(String testFileName) async {
+  final current = await databaseFactory.getDatabasesPath();
+  final dir = p.basename(current) == testFileName
+      ? current
+      : p.join(current, testFileName);
+  await Directory(dir).create(recursive: true);
+  await databaseFactory.setDatabasesPath(dir);
 }
 
 /// 初始化API服务（用于测试）

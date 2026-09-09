@@ -6,7 +6,7 @@ Novel App 发布脚本
 
 阶段 1 — 预检（模拟 CI）:
   1.1 flutter analyze --no-fatal-infos
-  1.2 flutter test --no-pub test/unit/ test/bug/ test/verification/
+  1.2 flutter test --no-pub test/{unit,bug,verification,widgets,widget,screens}
   1.3 flutter build apk --release
 
 阶段 2 — 版本识别:
@@ -54,8 +54,8 @@ def get_project_root() -> Path:
 
 
 def get_flutter_app_dir(project_root: Path) -> Path:
-    """获取 Flutter 应用目录"""
-    return project_root / "novel_app"
+    """获取 Flutter 应用目录（2026-09 重构后应用在仓库根，无 novel_app/ 子目录）"""
+    return project_root
 
 
 def get_flutter_version(project_root: Path) -> tuple[str, int]:
@@ -65,7 +65,7 @@ def get_flutter_version(project_root: Path) -> tuple[str, int]:
     Returns:
         (version_name, version_code) 例如: ("1.0.1", 2)
     """
-    pubspec_path = project_root / "novel_app" / "pubspec.yaml"
+    pubspec_path = project_root / "pubspec.yaml"
 
     if not pubspec_path.exists():
         raise FileNotFoundError(f"找不到 pubspec.yaml: {pubspec_path}")
@@ -168,13 +168,17 @@ def run_preflight(project_root: Path) -> bool:
         return False
     print("  ✅ flutter analyze 通过")
 
-    # 1.2 flutter test
-    # -j 1 串行执行：backup_service_test 等通过全局共享 novel_reader.db 文件
-    # 操作的测试在并发下会互相干扰（PathNotFoundException），与 CI 保持一致。
-    print("\n  [1.2/3] flutter test --no-pub -j 1 test/unit/ test/bug/ test/verification/")
+    # 1.2 flutter test —— 与 CI 同范围：6 个目录，flutter test 自动只挑
+    # *_test.dart。传目录而非文件清单，避免 Windows cmd.exe 8191 字符
+    # 命令行上限（shell=True 下 195 个文件路径必超长）。
+    # （旧版 -j 1 是为绕开 backup 测试共享 novel_reader.db 撞库，
+    #  test_bootstrap.useIsolatedDatabaseDir 修复根因后已与 CI 一并放开）
+    test_dirs = ["test/unit", "test/bug", "test/verification",
+                 "test/widgets", "test/widget", "test/screens"]
+    print("\n  [1.2/3] flutter test --no-pub " + " ".join(test_dirs))
     print("  " + "-" * 40)
     rc, stdout, stderr = run_command(
-        ["flutter", "test", "--no-pub", "-j", "1", "test/unit/", "test/bug/", "test/verification/"],
+        ["flutter", "test", "--no-pub", *test_dirs],
         flutter_dir,
     )
 
@@ -284,7 +288,7 @@ _CC_CATEGORIES: dict[str, str] = {
     "ci": "👷 CI/CD",
 }
 
-# novel_app 路径前缀 → 模块中文名（按匹配优先级排序）
+# lib/ 路径前缀 → 模块中文名（按匹配优先级排序）
 _MODULE_PATTERNS: list[tuple[str, str]] = [
     ("lib/screens/", "界面"),
     ("lib/widgets/", "组件"),
@@ -347,16 +351,16 @@ def _classify_module(file_path: str) -> str | None:
     """
     将文件路径归类到模块中文名。
 
-    只关注 novel_app/ 下的 .dart 代码文件，其余（.claude/、.md、配置等）返回 None。
+    只关注 lib/ 下的 .dart 代码文件，其余（.claude/、.md、配置等）返回 None。
     """
-    if not file_path.startswith("novel_app/"):
+    if not file_path.startswith("lib/"):
         return None
     if not file_path.endswith(".dart"):
         return None
     for prefix, label in _MODULE_PATTERNS:
         if prefix in file_path:
             return label
-    if "novel_app/test/" in file_path:
+    if "test/" in file_path:
         return "测试"
     return None
 

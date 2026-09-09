@@ -169,37 +169,89 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final baseline = catalog.baseline;
     final baseName = baseline?.shortLabel ?? '基准';
+    return _InfoBanner(
+      icon: Icons.bolt_outlined,
+      tint: colors.agentAccent,
+      title: '不同模型消耗额度的速度不同',
+      subtitle:
+          '以下倍率以「$baseName」为基准(最便宜的模型)。倍率越高,处理同等请求消耗的额度越多。',
+    );
+  }
+}
+
+class _Footer extends StatelessWidget {
+  final ManagedModelCatalog catalog;
+  final AppColors colors;
+  const _Footer({required this.catalog, required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    final baseline = catalog.baseline;
+    return _InfoBanner(
+      icon: Icons.info_outline,
+      tint: colors.inkSoft,
+      title: null,
+      subtitle: '选择会立即应用于后续所有 AI 调用。'
+          '${baseline != null ? "当前基准:${baseline.displayName}。" : ""}',
+    );
+  }
+}
+
+/// Header/Footer 复用:同样的 tinted Container + Row(Icon + Text)。
+/// 仅标题颜色和背景 alpha 不同,用 tint 颜色驱动。
+class _InfoBanner extends StatelessWidget {
+  final IconData icon;
+  final Color tint;
+  final String? title;
+  final String subtitle;
+
+  const _InfoBanner({
+    required this.icon,
+    required this.tint,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final isHighlighted = title != null;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(isHighlighted ? 14 : 12),
       decoration: BoxDecoration(
-        color: colors.agentAccent.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: colors.agentAccent.withValues(alpha: 0.20),
-          width: 0.6,
-        ),
+        color: isHighlighted
+            ? tint.withValues(alpha: 0.06)
+            : colors.divider.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(isHighlighted ? 10 : 8),
+        border: isHighlighted
+            ? Border.all(color: tint.withValues(alpha: 0.20), width: 0.6)
+            : null,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.bolt_outlined, size: 18, color: colors.agentAccent),
-          const SizedBox(width: 8),
+          Icon(icon, size: isHighlighted ? 18 : 14, color: tint),
+          SizedBox(width: isHighlighted ? 8 : 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '不同模型消耗额度的速度不同',
-                  style: AppTypography.novelTitle.copyWith(
-                    fontSize: 13,
-                    color: colors.agentAccent,
+                if (title != null) ...[
+                  Text(
+                    title!,
+                    style: AppTypography.novelTitle.copyWith(
+                      fontSize: 13,
+                      color: tint,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
+                  const SizedBox(height: 4),
+                ],
                 Text(
-                  '以下倍率以「$baseName」为基准(最便宜的模型)。倍率越高,'
-                  '处理同等请求消耗的额度越多。',
-                  style: TextStyle(fontSize: 12, color: colors.inkSoft),
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: isHighlighted ? 12 : 11,
+                    color: colors.inkSoft,
+                  ),
                 ),
               ],
             ),
@@ -326,37 +378,6 @@ class _ModelTile extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _Footer extends StatelessWidget {
-  final ManagedModelCatalog catalog;
-  final AppColors colors;
-  const _Footer({required this.catalog, required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    final baseline = catalog.baseline;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.divider.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, size: 14, color: colors.inkSoft),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '选择会立即应用于后续所有 AI 调用。'
-              '${baseline != null ? "当前基准:${baseline.displayName}。" : ""}',
-              style: TextStyle(fontSize: 11, color: colors.inkSoft),
-            ),
-          ),
-        ],
       ),
     );
   }

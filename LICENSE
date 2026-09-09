@@ -1,21 +1,64 @@
-MIT License
+Whimread（随心阅读）源码许可协议
+Source License — 非商业免费 / 商用需授权
 
-Copyright (c) 2025 yunkst
+Copyright (c) 2025-2026 yunkst. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+========================================================================
+English summary: Source is available for personal learning, research,
+and other non-commercial use, with attribution. Any commercial use
+requires prior written permission from the copyright holder. All other
+rights are reserved. See the Chinese text below, which prevails.
+========================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+一、定义
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1.1 "本项目"：指本仓库中的源代码、配置、资源文件及相关文档。
+1.2 "商业用途"：指以营利为目的的任何使用方式，包括但不限于：
+    (a) 将本项目或其衍生作品全部或部分集成、捆绑到商业产品或商业服务中；
+    (b) 销售、出租、许可本项目或其衍生作品；
+    (c) 将本项目部署为对外提供的有偿服务（含 SaaS、小程序、App 等）；
+    (d) 在企业经营、内部商业运营中使用本项目；
+    (e) 借助本项目开展广告、会员、增值服务等任何形式的变现。
+
+二、授权授予
+
+2.1 在严格遵守本协议的前提下，版权所有者免费授予任何个人或组织：
+    (a) 为个人学习、研究、测试等非商业目的使用、复制、修改本项目的权利；
+    (b) 在非商业且保留署名与本协议文本的前提下，再分发本项目源码的权利。
+
+三、商业用途须授权
+
+3.1 任何商业用途均须事先取得版权所有者的书面授权（含电子邮件等可查证的
+    书面形式）。
+3.2 未取得授权而将本项目用于商业用途的，构成侵权，版权所有者保留依法追究
+    的权利。
+3.3 商业授权的具体范围、期限与费用由双方另行书面约定。
+
+四、再分发要求
+
+无论是否修改，再分发本项目源码时必须：
+4.1 完整保留本协议文本与上述版权声明；
+4.2 不得以任何方式变更或移除本协议的授权条款；
+4.3 在修改后的文件中标明已作更改。
+
+五、商标与名称
+
+5.1 "Whimread"、"随心阅读"及相关标识归版权所有者所有。
+5.2 未经书面授权，不得将上述名称或标识用于衍生产品的命名、宣传或推广。
+
+六、免责声明
+
+6.1 本项目"按现状"提供，不附带任何明示或默示的担保，包括但不限于适销性、
+    特定用途适用性与不侵权的担保。
+6.2 在任何情况下，版权所有者均不对因使用或无法使用本项目而产生的任何直接、
+    间接、偶然或后果性损失承担责任。
+
+七、协议终止
+
+7.1 一旦违反本协议任何条款，据此授予的全部许可自动终止，并应停止使用、
+    删除相关副本。
+
+八、联系授权
+
+商业授权洽询请通过本仓库（github.com/yunkst/Whimread）提供的联系方式
+与作者取得联系。

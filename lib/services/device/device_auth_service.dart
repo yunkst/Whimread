@@ -4,8 +4,9 @@
 /// 1. [ensureRegistered]：拿 challenge → TEE 生成 attested 密钥（平台通道）
 ///    → 注册 → 拿设备 JWT 并缓存
 /// 2. [authedHeaders]：给 LLM 代理请求附带 `Authorization: Bearer <JWT>`
-/// 3. 收到 401（token 过期/无效）时调用 [renewToken]——同 android_id 重注册，
-///    服务端去重不会重复发额度，只补发新 JWT
+/// 3. 收到 401（token 过期/无效）时 ApiServiceWrapper 的 401 拦截器经
+///    [renewAuthHeaders]→[renewToken] 自动重注册——同 android_id 服务端
+///    去重不会重复发额度，只补发新 JWT
 ///
 /// 安全模型：私钥生成于硬件 TEE 且不可导出，JWT 只是 30 天期的会话凭证；
 /// 凭证丢失/过期后的重注册都需要真实设备重新通过 attestation。
@@ -91,15 +92,19 @@ class DeviceAuthService {
   /// 当前可用 token（null = 尚未注册）
   String? get cachedToken => _cachedToken;
 
-  /// APP 启动时恢复本地缓存的 JWT（无网络请求）
+  /// APP 启动时恢复本地缓存的 JWT（无网络请求）。
+  ///
+  /// 空串归一化为 null（getString 缺省返回 ''，不归一会让
+  /// [ensureRegistered]/[fetchQuota] 的空值守卫被穿透，发出空 Bearer 请求）。
   Future<void> loadCached() async {
-    _cachedToken = await PreferencesService.instance.getString(_kDeviceToken);
+    final token = await PreferencesService.instance.getString(_kDeviceToken);
+    _cachedToken = token.isEmpty ? null : token;
   }
 
   /// 确保持有有效 JWT；有缓存用缓存，否则走注册。
   Future<String> ensureRegistered() async {
     final cached = _cachedToken;
-    if (cached != null) return cached;
+    if (cached != null && cached.isNotEmpty) return cached;
     return register();
   }
 
@@ -167,6 +172,24 @@ class DeviceAuthService {
     return register();
   }
 
+  /// 401 自动恢复入口（注入 [ApiServiceWrapper.unauthorizedRecoveryProvider]）。
+  ///
+  /// 清掉失效缓存后走 [renewToken] 重注册，返回新请求头；
+  /// 恢复失败返回 null（调用方放弃重试，让原始 401 照常上抛）。
+  Future<Map<String, String>?> renewAuthHeaders() async {
+    try {
+      final token = await renewToken();
+      return {'Authorization': 'Bearer $token'};
+    } catch (e) {
+      LoggerService.instance.w(
+        '设备凭证自动恢复失败: $e',
+        category: LogCategory.ai,
+        tags: ['device', 'renew'],
+      );
+      return null;
+    }
+  }
+
   /// 业务请求头：`Authorization: Bearer <设备JWT>`
   Future<Map<String, String>> authedHeaders() async {
     final token = await ensureRegistered();
@@ -180,7 +203,7 @@ class DeviceAuthService {
   Future<DeviceQuotaInfo?> fetchQuota() async {
     if (!kHasBundledBackend) return null;
     final token = _cachedToken;
-    if (token == null) return null;
+    if (token == null || token.isEmpty) return null;
     return fetchMeWithToken(token);
   }
 

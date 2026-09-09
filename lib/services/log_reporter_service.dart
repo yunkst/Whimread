@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart'
+    show debugPrint, visibleForTesting;
 
 import '../core/constants/build_config.dart';
 import 'device/device_auth_service.dart';
@@ -114,6 +115,14 @@ class LogReporterService {
     final seconds = intervalSeconds * multiplier;
     return seconds > backoffMaxSeconds ? backoffMaxSeconds : seconds;
   }
+
+  /// 连续失败计数（测试观察退避状态用）
+  @visibleForTesting
+  int get consecutiveFailuresForTest => _consecutiveFailures;
+
+  /// 当前生效的上报间隔（测试观察退避状态用）
+  @visibleForTesting
+  int get currentIntervalSecondsForTest => _currentIntervalSeconds;
 
   // ========== 公开方法 ==========
 
@@ -302,6 +311,11 @@ class LogReporterService {
     } on DioException catch (e) {
       debugPrint('LogReporter: 上报失败 reason=网络错误: ${e.message ?? e.type.name}');
       return _onUploadFailure('网络错误: ${e.message ?? e.type.name}');
+    } on DeviceAuthException catch (e) {
+      // 凭证不可用（自部署模式未托管后端/注册不可用）是稳态而非故障：
+      // 静默放弃本轮上报且不计入退避，否则会被永久打入退避、上报从此失效。
+      debugPrint('LogReporter: 凭证不可用跳过本轮上报: ${e.code}');
+      return false;
     } catch (e) {
       debugPrint('LogReporter: 上报失败 reason=未知错误: $e');
       return _onUploadFailure('未知错误: $e');

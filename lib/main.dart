@@ -118,6 +118,9 @@ void main() async {
       // 反向注入设备 JWT 请求头，备份/媒体/日志等请求以设备身份鉴权
       DeviceAuthService.instance.useWrapper(apiService);
       apiService.authHeaderProvider = DeviceAuthService.instance.authedHeaders;
+      // 401 时经 wrapper 拦截器自动重注册换新 JWT（30 天凭证过期自愈）
+      apiService.unauthorizedRecoveryProvider =
+          DeviceAuthService.instance.renewAuthHeaders;
       await DeviceAuthService.instance.loadCached();
     } catch (e, stackTrace) {
       LoggerService.instance.e(

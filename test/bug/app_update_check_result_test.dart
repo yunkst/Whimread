@@ -37,6 +37,10 @@ class _FakeGithubReleaseService implements GithubReleaseService {
   Future<void> recordCheckTime() async {}
 
   @override
+  Future<Map<String, String>?> fetchSha256Sums(GithubRelease release) async =>
+      null;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

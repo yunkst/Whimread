@@ -67,7 +67,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     final chapters = await chapterRepo.getCachedNovelChapters(novelUrl);
     final totalCount = chapters.length;
     if (position < 1 || position > totalCount + 1) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: create_chapter_position_out_of_range position=$position total=$totalCount',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'create_chapter', 'position_out_of_range'],
@@ -209,7 +209,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     } on OutlineEditException catch (e) {
       final errorCode =
           e.reason == 'ambiguous' ? 'ambiguous_match' : 'not_found';
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '编辑章节失败: $errorCode, position=$position',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'update_chapter_content', errorCode],
@@ -226,7 +226,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
           novelUrl: novelUrl,
         );
     if (affected == 0) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: chapter_not_found position=$position',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'update_chapter_content', 'chapter_not_found'],
@@ -323,7 +323,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
           novelUrl: novelUrl,
         );
     if (affected == 0) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: chapter_not_found position=$position',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'rewrite_chapter', 'chapter_not_found'],
@@ -478,6 +478,9 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     final llm =
         await ref.read(llmConfigServiceProvider).buildActiveProvider(scenarioId);
     if (llm == null) {
+      LoggerService.instance.w('LLM 未配置: $failTag',
+          category: LogCategory.ai,
+          tags: ['agent', 'tool', failTag, 'llm_not_configured']);
       return _RewriteResult.failure({
         'error': 'llm_not_configured',
         'message': LlmConfigService.notConfiguredMessage,
@@ -502,6 +505,9 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       }
       final content = buffer.toString().trim();
       if (content.isEmpty) {
+        LoggerService.instance.w('LLM 空响应: $failTag (buffered=${buffer.length}字符)',
+            category: LogCategory.ai,
+            tags: ['agent', 'tool', failTag, 'llm_empty_response']);
         return _RewriteResult.failure({
           'error': 'llm_empty_response',
           'message': 'LLM 返回了空内容。请稍后重试或调整要求。',

@@ -8,7 +8,6 @@
 /// 就地 `OcrRestoreService(ref, renderPua)` 构造。
 library;
 
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../poc/ocr_predictor.dart';
@@ -18,7 +17,7 @@ import '../../utils/device_arch.dart';
 /// OCR 模型下载器单例。main() 在 post-frame 里触发 ensureLocal()。
 final ocrModelDownloaderProvider = Provider<OcrModelDownloader>((ref) {
   return OcrModelDownloader(
-    dio: Dio(),
+    // 不传 dio：走 _buildDefaultDio() 的超时配置（裸 Dio 弱网下可无限挂起）
     // manifest 里的 key 是 'arm64-v8a' / 'armeabi-v7a' / 'x86_64',
     // 与 DeviceArch.apkNameSegment 输出一致
     archProvider: () async {

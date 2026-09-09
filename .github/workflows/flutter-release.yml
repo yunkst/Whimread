@@ -14,9 +14,11 @@ on:
 permissions:
   contents: write
 
-# 避免同 tag 并发发布互相覆盖
+# 避免同 tag 并发发布互相覆盖。
+# group 必须按 tag 名归一：workflow_dispatch 时 github.ref 是分支 ref，
+# 与 tag push 的 refs/tags/* 落不同组，起不到互斥作用。
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -55,26 +57,13 @@ jobs:
         run: flutter analyze --no-fatal-infos
 
       - name: Run tests
-        # 必须用 '*_test.dart' 过滤：flutter test 只在传目录时才自动挑
-        # _test.dart；一旦显式列文件（本写法），所有传入路径都会被当
-        # 测试加载，*.mocks.dart 等非测试文件会因无 main() 编译失败
-        # （曾在 CI 上致 16 个 loading failed 假失败）。
-        # SKIP_LIST 的 subagent_detail_screen_test.dart 引用已删 API，
-        # 文件级编译失败，grep 跳过待修复。
+        # 传目录：flutter test 自动只挑 *_test.dart，*.mocks.dart 等非
+        # 测试文件不会被加载（显式列文件曾致 16 个 loading failed 假失败）。
         run: |
           rm -rf .dart_tool/sqflite_common_ffi 2>/dev/null || true
-          SKIP_LIST="test/screens/subagent_detail_screen_test.dart"
-          FILES=""
-          for d in test/unit/ test/bug/ test/verification/; do
-            for f in $(find "$d" -name '*_test.dart' 2>/dev/null); do
-              skip=0
-              for s in $SKIP_LIST; do
-                [ "$f" = "$s" ] && skip=1 && break
-              done
-              [ $skip -eq 0 ] && FILES="$FILES $f"
-            done
-          done
-          flutter test --no-pub $FILES
+          # 传目录即可：flutter test 自动只挑 *_test.dart。
+          # （SKIP_LIST 文件清单机制随 subagent_detail_screen_test.dart 删除一并移除）
+          flutter test --no-pub test/unit/ test/bug/ test/verification/ test/widgets/ test/widget/ test/screens/
 
   build-and-release:
     needs: quality
@@ -283,10 +272,10 @@ jobs:
           fi
 
           # 全部逻辑放一个 python heredoc,避免 bash 拼 JSON 的引号陷阱
-          # 流程:分片上传(CI → /chunk 5MB × N → /finalize → /publish JSON)
+          # 流程:分片上传(CI → /chunk 2MB × N → /finalize → /publish JSON)
           # 零腾讯云密钥:云函数用 SCF runtime STS 凭据直接调 COS SDK
           python3 - <<'PYEOF'
-          import hashlib, json, os, subprocess, sys, urllib.error, urllib.request
+          import hashlib, json, os, sys, time, urllib.error, urllib.request
 
           backend_url = os.environ["BACKEND_URL"].rstrip("/")
           backend_token = os.environ["BACKEND_TOKEN"]
@@ -342,7 +331,24 @@ jobs:
           upload_by_abi = {f["abi"]: f for f in init["files"]}
           print(f"拿到 {len(init['files'])} 个 uploadId")
 
-          # ---- 步骤 2:对每个 APK 切 5MB 分片,循环 POST /chunk ----
+          # ---- 步骤 2:对每个 APK 切 2MB 分片,循环 POST /chunk ----
+          def _upload_chunk_with_retry(req, part_num, attempts=3):
+              last = ""
+              for i in range(1, attempts + 1):
+                  try:
+                      with urllib.request.urlopen(req, timeout=60) as resp:
+                          return json.loads(resp.read().decode("utf-8"))
+                  except urllib.error.HTTPError as e:
+                      body = e.read().decode("utf-8")[:300]
+                      if 400 <= e.code < 500 and e.code != 429:
+                          sys.exit(f"❌ /chunk part {part_num} 失败 (HTTP {e.code}): {body}")
+                      last = f"HTTP {e.code}: {body}"
+                  except Exception as err:
+                      last = str(err)
+                  print(f"    part {part_num} 第 {i}/{attempts} 次失败,重试中: {last}")
+                  time.sleep(2 * i)
+              sys.exit(f"❌ /chunk part {part_num} 重试 {attempts} 次仍失败: {last}")
+
           print("==> 步骤 2: 逐 APK 分片上传(/chunk)")
           parts_by_abi = {}
           for e in entries:
@@ -367,12 +373,9 @@ jobs:
                                                    headers={"X-API-TOKEN": backend_token,
                                                             "Content-Type": "application/octet-stream",
                                                             "Content-Length": str(len(chunk))})
-                      try:
-                          with urllib.request.urlopen(req, timeout=60) as resp:
-                              r = json.loads(resp.read().decode("utf-8"))
-                              file_parts.append({"partNumber": r["partNumber"], "etag": r["etag"]})
-                      except urllib.error.HTTPError as e:
-                          sys.exit(f"❌ /chunk part {part_num} 失败 (HTTP {e.code}): {e.read().decode('utf-8')[:300]}")
+                      # 瞬时失败重试（4xx 语义错误除外，重试无意义）
+                      r = _upload_chunk_with_retry(req, part_num)
+                      file_parts.append({"partNumber": r["partNumber"], "etag": r["etag"]})
               print(f"    传了 {len(file_parts)} 个分片")
               parts_by_abi[abi] = file_parts
 

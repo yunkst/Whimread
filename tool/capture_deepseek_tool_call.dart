@@ -1,7 +1,6 @@
 /// DeepSeek-V4-Pro 流式 tool_calls 抓包脚本
 ///
-/// 用法（一次性诊断，不入仓库）：
-///   cd novel_app
+/// 用法：
 ///   DEEPSEEK_TOKEN=sk-xxx dart run tool/capture_deepseek_tool_call.dart
 ///
 /// 行为：完全重放 llm_1787760494454_3332 那条原始请求体（同一个 endpoint、
@@ -80,22 +79,21 @@ Future<void> main() async {
 
   int frameCount = 0;
   int toolCallFrameCount = 0;
-  final rawBuf = StringBuffer();
+  int rawBytes = 0;
 
-  // 按 SSE 帧切：data: 行 + 空行表示一个事件结束
+  // 按 SSE 帧切：data: 行 + 空行表示一个事件结束。
+  // 必须经 LineSplitter 流式逐行——SSE 行会被 TCP chunk 从中间截断，
+  // 逐 chunk split 会把断行残余当作普通行清掉 pending data（丢帧）。
   final events = <String>[];
   String? currentData;
-  await for (final chunk in resp.transform(utf8.decoder)) {
-    rawBuf.write(chunk);
-    for (final line in chunk.split('\n')) {
-      if (line.startsWith('data:')) {
-        currentData = line.substring(5).trim();
-      } else if (line.isEmpty && currentData != null) {
-        events.add(currentData!);
-        currentData = null;
-      } else {
-        currentData = null;
-      }
+  await for (final line
+      in resp.transform(utf8.decoder).transform(const LineSplitter())) {
+    rawBytes += utf8.encode(line).length + 1;
+    if (line.startsWith('data:')) {
+      currentData = line.substring(5).trim();
+    } else if (line.isEmpty && currentData != null) {
+      events.add(currentData!);
+      currentData = null;
     }
   }
   if (currentData != null) events.add(currentData!);
@@ -143,7 +141,7 @@ Future<void> main() async {
   print('---');
   print('总帧数: $frameCount');
   print('tool_call 帧数: $toolCallFrameCount');
-  print('原始流字节数: ${rawBuf.length}');
+  print('原始流字节数: $rawBytes');
   print('原始流已落盘: ${outFile.path}');
   client.close(force: true);
 }

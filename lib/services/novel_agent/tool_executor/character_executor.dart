@@ -70,7 +70,7 @@ class CharacterExecutor with ToolExecutorHelpers {
     final repo = ref.read(characterRepositoryProvider);
     final existing = await repo.findCharacterByName(novelUrl, name);
     if (existing == null) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: character_not_found name=$name',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'update_character', 'character_not_found'],
@@ -234,7 +234,7 @@ class CharacterExecutor with ToolExecutorHelpers {
     final repo = ref.read(characterRepositoryProvider);
     final existing = await repo.findCharacterByName(novelUrl, name);
     if (existing == null) {
-      LoggerService.instance.d(
+      LoggerService.instance.w(
         '工具引导错误: character_not_found name=$name',
         category: LogCategory.ai,
         tags: ['agent', 'tool', 'delete_character', 'character_not_found'],

@@ -642,7 +642,7 @@ class AgentLoop {
     void Function(AgentEvent) emit,
     CancellationToken? cancellationToken,
   ) async {
-    LoggerService.instance.d('工具调度: ${call.name} (scenario=${_scenario.id})',
+    LoggerService.instance.i('工具调度: ${call.name} (scenario=${_scenario.id})',
         category: LogCategory.ai,
         tags: ['agent', 'tool', call.name, _scenario.id]);
     emit(ToolCallStartEvent(call.name, call.arguments, call.id));
@@ -713,8 +713,9 @@ class AgentLoop {
       fullResult: fullResultStr,
       success: toolSuccess,
     ));
+    final errorSuffix = toolSuccess ? '' : ', error=${result['error']}';
     LoggerService.instance.i(
-        '工具完成: ${call.name} (success=$toolSuccess, resultLen=${resultStr.length}, fullLen=${fullResultStr.length}, scenario=${_scenario.id})',
+        '工具完成: ${call.name} (success=$toolSuccess$errorSuffix, resultLen=${resultStr.length}, fullLen=${fullResultStr.length}, scenario=${_scenario.id})',
         category: LogCategory.ai,
         tags: [
           'agent',
