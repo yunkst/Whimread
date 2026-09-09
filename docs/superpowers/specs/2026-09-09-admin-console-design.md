@@ -253,6 +253,7 @@ admin/web/                  # Vite + React 18 + TS + Ant Design 5;qrcode(渲染�
 ```
 
 - 布局:antd `Layout` 侧边导航(总览/设备/反馈/审计);移动端不管(管理台桌面用)
+- 路由与构建:`HashRouter`(URL 形如 `/admin/#/devices`,规避静态托管 404 回退配置);`vite.config.ts` 设 `base: '/admin/'`(子路径部署);API 地址经构建期 `VITE_API_BASE` 注入,由部署脚本按环境传入(§10)
 - 交互红线:封禁、重置额度、踢下线三个动作必须二次确认并要求填写 note(note 进审计);操作失败展示后端错误码对应中文
 - 会话:access 过期静默 refresh;refresh 失效跳登录;路由守卫校验登录态
 
@@ -273,14 +274,22 @@ tcb fn config update admin-console -e $ENV_ID --env '{
 }'
 # device-auth 追加:GITHUB_STAR_REPO / GITHUB_TOKEN
 
-# 前端静态托管(新增脚本 scripts/cloudbase/deploy-admin.sh)
-cd admin/web && npm run build
-tcb hosting deploy ./dist -e $ENV_ID --path /admin
+# 前端静态托管(新增 scripts/cloudbase/deploy-admin.sh,风格对齐 deploy.sh:ENV 参数 + .env 注入)
+./scripts/cloudbase/deploy-admin.sh dev     # dev | staging | prod
+# 脚本内部:
+#   cd admin/web && npm ci
+#   VITE_API_BASE=$(从 .env 按环境取 API 域名) npm run build   # vite.config.ts base:'/admin/'
+#   tcb hosting deploy ./dist -e "$ENV_ID" --path /admin        # CLI 参数以实现期实测为准
 ```
 
 - `cloudbaserc.json` 增加 `admin-console` 函数定义(timeout 30s)
 - **seed**:`scripts/cloudbase/seed-admin.mjs` 生成随机初始密码(打印一次)插入 `admins` 行(`must_change_password=true`),并提示首次登录完成 TOTP 绑定
 - **runbook**(写入 `README-cloudbase.md` 附录):① TOTP 全丢 → `reset-admin-totp.mjs`;② 改密/换密钥 → 更新 env + `session_version+1`;③ 静态域名更换 → 同步 `ADMIN_WEB_ORIGINS`
+- **托管形态决策**:CloudBase 静态网站托管(与函数同环境同账号,CDN/HTTPS 自带,单管理员流量对免费额度可忽略)。对比过 COS+CDN、GitHub Pages、云托管容器:要么新增运维面,要么跨境访问后端不顺,均不采用 [判断]
+- **域名与 CORS**:各环境默认域名 `https://<envId>.tcloudbaseapp.com` 开箱可用、HTTPS 自带;可选绑自定义子域(需域名已备案,`whimread.dazhi.site` 已有先例)。域名定稿后写入 `.env`,并同步把前端 origin 加入 `ADMIN_WEB_ORIGINS`
+- **SPA 深链**:HashRouter(URL 形如 `/admin/#/devices`)无需任何服务端 404 回退配置;若日后改 BrowserRouter,需在静态托管控制台把错误页指向 `index.html`,记入 runbook
+- **可见性**:index.html 加 `<meta name="robots" content="noindex">`,避免被外部搜索引擎收录登录页;数据全部在认证之后,登录页公开可访问无妨
+- **CI 自动部署(可选后置)**:GitHub Actions 监听 `admin/web/**` 变更自动构建+部署,需向 CI 注入 TCB 密钥;V1 与后端一致走手动脚本,待 CI 密钥接入到位再迁移
 
 ## 11. 测试策略
 
