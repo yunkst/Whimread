@@ -125,4 +125,22 @@ class LlmConfigRepository extends BaseRepository
         await db.rawQuery('SELECT COUNT(*) as count FROM $_table');
     return result.first['count'] as int;
   }
+
+  @override
+  Future<int> clearAllApiKeys() async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // 只清空原本非空的行，避免无意义的 updated_at 写入
+    final cleared = await db.update(
+      _table,
+      {'api_key': '', 'updated_at': now},
+      where: "api_key != ''",
+    );
+    LoggerService.instance.i(
+      '托管模式：已清空 $cleared 条 LLM 配置的 API Key',
+      category: LogCategory.ai,
+      tags: ['llm_config', 'clear_api_keys', 'managed'],
+    );
+    return cleared;
+  }
 }

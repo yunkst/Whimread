@@ -37,6 +37,9 @@ class _AgentScenarioConfigDialogState
   int? _selectedConfigId;
   bool _isLoading = true;
 
+  /// 托管模式下历史上被清除的 API Key 配置条数；null = 从未清除过
+  int? _apiKeysClearedCount;
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +49,9 @@ class _AgentScenarioConfigDialogState
   Future<void> _loadConfigs() async {
     final service = ref.read(llmConfigServiceProvider);
     await service.ensureMigratedFromLegacy();
+    // 托管包首启时顺带完成 Key 清除（幂等），再读计数供说明卡展示
+    await service.ensureApiKeysClearedForManaged();
+    _apiKeysClearedCount = await service.getApiKeysClearedCount();
     final configs = await service.getAllConfigs();
 
     // 获取当前场景激活的配置
@@ -97,8 +103,27 @@ class _AgentScenarioConfigDialogState
             const Text(
               '当前 LLM 请求统一通过 Whimread 服务端转发,'
               'API Key 由服务端持有,客户端无需配置。'
-              '\n\n模型与额度由服务端管理,可在「设置 → 设备额度」查看余额。',
+              '\n\n模型与额度由服务端管理,可在设置页「点 Star 补充 AI 额度」'
+              '查看余额。',
             ),
+            if ((_apiKeysClearedCount ?? 0) > 0) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.shield_outlined,
+                      size: 16, color: context.appColors.chatButtonPrimary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '已按安全策略清除本机历史配置中的 API Key '
+                      '(${_apiKeysClearedCount!} 条)。',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
         actions: [

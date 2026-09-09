@@ -25,4 +25,10 @@ abstract class ILlmConfigRepository {
 
   /// 获取配置数量
   Future<int> count();
+
+  /// 清空所有配置的 API Key（保留 name/api_url/model 等元数据）。
+  ///
+  /// AI 托管模式下使用：客户端不再持有任何第三方 LLM Key。
+  /// 返回实际清空的配置条数（原本 Key 为空的行不计入）。
+  Future<int> clearAllApiKeys();
 }

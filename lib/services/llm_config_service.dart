@@ -22,6 +22,7 @@ class LlmConfigService {
   static const String _migratedKey = 'llm_configs_migrated';
   static const String _scenarioPrefix = 'active_llm_profile_';
   static const String _globalActiveMigratedV2Key = 'llm_global_active_migrated_v2';
+  static const String _apiKeysClearedCountKey = 'llm_api_keys_cleared_count';
 
   /// 统一未配置错误消息（AgentErrorEvent / Exception 共用）
   static const String notConfiguredMessage =
@@ -30,6 +31,7 @@ class LlmConfigService {
   /// 全局激活 → 默认 迁移的内存标记，避免热路径重复读 SharedPreferences
   bool _migrationChecked = false;
   bool _globalActiveMigratedV2 = false;
+  bool _apiKeysClearedChecked = false;
 
   LlmConfigService(this._ref);
 
@@ -138,6 +140,7 @@ class LlmConfigService {
   Future<llm.LlmProvider?> buildActiveProvider(String scenarioId) async {
     await ensureMigratedFromLegacy();
     await ensureGlobalActiveMigrated();
+    await ensureApiKeysClearedForManaged();
 
     // AI 托管模式：托管后端代理是唯一 AI 通道
     final managed = await buildManagedProvider(scenarioId);
@@ -297,5 +300,45 @@ class LlmConfigService {
 
     await prefs.setBool(_globalActiveMigratedV2Key, true);
     _globalActiveMigratedV2 = true;
+  }
+
+  // ── 托管模式安全清除 ──
+
+  /// AI 托管模式下清空本地自配 LLM 配置的 API Key（幂等，只跑一次）。
+  ///
+  /// 客户端切换到托管后端后不再需要任何第三方 LLM Key；为避免用户付费 Key
+  /// 以明文残留在 SQLite 中，在首次构建 Provider 或打开场景配置对话框时
+  /// 将 `llm_configs.api_key` 全部置空，仅保留 name/api_url/model 元数据。
+  ///
+  /// 未打包托管后端（自部署场景）不触碰用户数据，直接返回 0。
+  /// 返回本次实际清除的配置条数；已清除过则返回 0。
+  Future<int> ensureApiKeysClearedForManaged() async {
+    if (!kHasBundledBackend) return 0;
+    if (_apiKeysClearedChecked) return 0;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getInt(_apiKeysClearedCountKey) != null) {
+      _apiKeysClearedChecked = true;
+      return 0;
+    }
+
+    final cleared = await _ref.read(llmConfigRepositoryProvider).clearAllApiKeys();
+    await prefs.setInt(_apiKeysClearedCountKey, cleared);
+    _apiKeysClearedChecked = true;
+    LoggerService.instance.i(
+      '托管模式 API Key 清除完成: $cleared 条',
+      category: LogCategory.ai,
+      tags: ['llm_config', 'managed', 'api_key_cleared'],
+    );
+    return cleared;
+  }
+
+  /// 读取历史清除记录（`llm_api_keys_cleared_count`），供 UI 提示展示。
+  ///
+  /// 从未执行过清除（非托管包）时返回 null。
+  Future<int?> getApiKeysClearedCount() async {
+    if (!kHasBundledBackend) return null;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_apiKeysClearedCountKey);
   }
 }
