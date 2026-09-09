@@ -78,3 +78,6 @@ cloudfunctions/*/node_modules/
 cloudfunctions/*/package-lock.json
 cloudfunctions/*/__tests__/
 .agents/skills/cloudbase/
+
+# git worktrees(superpowers 技能约定)
+.worktrees/
