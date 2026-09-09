@@ -316,20 +316,14 @@ tcb fn config update admin-console -e $ENV_ID --env '{
 
 ---
 
-## 13. 代码托管策略(待确认)
+## 13. 代码托管策略(已确认)
 
 **用户约束**:后端相关代码不开源。本仓库 `cloudfunctions/` 目前随主仓库公开可见,但此为历史现状;**后续**新增的后端代码不进入公开仓库。
 
-**待确认的两点**(影响实现计划的目录结构,writing-plans 前需定):
+**最终决策(2026-09-09 用户确认)**:
 
-1. **新 admin-console 云函数放哪里**
-   - (a) 留在本仓库 `cloudfunctions/admin-console/`(与现有 device-auth / llm-proxy / app-release / feedback 同目录,实施快,但与「不开源」约束相悖)
-   - (b) 拆到独立私有仓库(如 `whimread-admin-backend`),本仓库只放 SPA + spec/plan(推荐,严格符合约束)
-2. **migrations 归属**
-   - (a) 与 admin-console 同址
-   - (b) 单独私有仓库的 `migrations/`
-   - (c) 仍留本仓库 `cloudbase/migrations/`(表结构本身无敏感信息,但需评估)
-
-**SPA(前端)**:设计文档/SQL/migration 公开与否则视上面决策统一。
-
-**写作计划前置条件**:writing-plans 需依据以上两点确定目录结构才能产出可执行的实施步骤。
+1. **admin-console 云函数**:放在本仓库 `cloudfunctions/admin-console/`,与现有 `device-auth` / `llm-proxy` / `app-release` / `feedback` 同目录、同等待遇(`cloudbaserc.json` 增加一项)。理由:与 user backend 同仓,共用 `common/`、`scripts/cloudbase/` 工具链,运维最简
+2. **migrations**:放在本仓库 `cloudbase/migrations/`,与现有 7 张表的 migration 同目录、同 `migrate.sh` 部署链路。理由:表结构本身无敏感信息;运维一致性优先于「严格私有」
+3. **SPA(前端)**:放在本仓库 `admin/web/`,与 Flutter 主项目同仓
+4. **「不开源」的实际执行**:所有密钥(`ADMIN_JWT_SECRET`、GitHub Token 等)经 `tcb fn config update` 注入,**不入库**;`.gitignore` 已屏蔽 `.env`;审计/限额/CORS 防护按 §7 落实;管理台端点全部经 TOTP + JWT 双因素;**不公开**的是密钥与运行配置,不是代码结构——这与现有 user backend 一致
+5. **实施期调整空间**:若日后需要把 admin-console 单独迁出(例如私有仓),只需把 `cloudfunctions/admin-console/` + 它独占的 migration + `admin/web/` 移走,spec 其它章节不受影响——目录边界按此设计已留好
