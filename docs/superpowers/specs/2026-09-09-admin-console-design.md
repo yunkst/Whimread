@@ -203,6 +203,8 @@ TOTP 错误计数独立(`totp_failed_attempts`),≥5 同样锁 15 分钟;login/r
 
 **路径约定**:管理后台人用 API 统一 `/admin/*` 前缀;客户端/CI 等机器面统一 `/api/*`。CI 发布端点 `/api/admin/app/releases/*` 维持现状(机器对机器,不属于本管理台),后续如需对齐 `/admin/` 再单独迁移(需同步改 GitHub Actions 与密钥)。两者前缀不重叠,网关按前缀路由无歧义。
 
+**同源部署**:管理台前端与后端共用同一域名 `whimread.dazhi.site`,前端位于子路径 `/admin/`。前后端**同源**,浏览器发起的请求天然不需要 CORS 校验。`ADMIN_WEB_ORIGINS` 环境变量仍保留,仅作防御纵深(默认值即为该同源域名)。`VITE_API_BASE` 构建期可显式设为同源或留空用相对路径。
+
 统一响应沿用 `errors.js` 的 `ok()/err()`;错误码扩 `ACCOUNT_LOCKED / ACCOUNT_DISABLED / TOTP_REQUIRED / TOTP_INVALID / CONCURRENT_MODIFY / VALIDATION_FAILED`。
 
 | 方法 | 路径 | 入参 | 说明 |
@@ -286,10 +288,11 @@ tcb fn config update admin-console -e $ENV_ID --env '{
 - **seed**:`scripts/cloudbase/seed-admin.mjs` 生成随机初始密码(打印一次)插入 `admins` 行(`must_change_password=true`),并提示首次登录完成 TOTP 绑定
 - **runbook**(写入 `README-cloudbase.md` 附录):① TOTP 全丢 → `reset-admin-totp.mjs`;② 改密/换密钥 → 更新 env + `session_version+1`;③ 静态域名更换 → 同步 `ADMIN_WEB_ORIGINS`
 - **托管形态决策**:CloudBase 静态网站托管(与函数同环境同账号,CDN/HTTPS 自带,单管理员流量对免费额度可忽略)。对比过 COS+CDN、GitHub Pages、云托管容器:要么新增运维面,要么跨境访问后端不顺,均不采用 [判断]
-- **域名与 CORS**:各环境默认域名 `https://<envId>.tcloudbaseapp.com` 开箱可用、HTTPS 自带;可选绑自定义子域(需域名已备案,`whimread.dazhi.site` 已有先例)。域名定稿后写入 `.env`,并同步把前端 origin 加入 `ADMIN_WEB_ORIGINS`
+- **域名策略(强制)**:仅使用 `whimread.dazhi.site` 一个域名。CloudBase 静态托管与 HTTP 访问服务同时绑定到该域名,通过路径前缀路由——`/admin/*` 走静态托管(SPA)、`/api/*` 与 `/v1/*` 走云函数。**不使用** `<envId>.tcloudbaseapp.com` 默认域名;**不新增**子域名
+- **同源收益**:前后端同源,浏览器不触发 CORS 预检;`ADMIN_WEB_ORIGINS` 仅作防御纵深(填同源域名);`VITE_API_BASE` 可留空走相对路径或显式同源
 - **SPA 深链**:HashRouter(URL 形如 `/admin/#/devices`)无需任何服务端 404 回退配置;若日后改 BrowserRouter,需在静态托管控制台把错误页指向 `index.html`,记入 runbook
 - **可见性**:index.html 加 `<meta name="robots" content="noindex">`,避免被外部搜索引擎收录登录页;数据全部在认证之后,登录页公开可访问无妨
-- **CI 自动部署(可选后置)**:GitHub Actions 监听 `admin/web/**` 变更自动构建+部署,需向 CI 注入 TCB 密钥;V1 与后端一致走手动脚本,待 CI 密钥接入到位再迁移
+- **部署方式**:全程手动——后端 `scripts/cloudbase/deploy.sh` + 前端 `scripts/cloudbase/deploy-admin.sh`,均在本地登录 `tcb` 后执行。**不接入 GitHub Actions 自动部署**;后续若要引入,需单独评估密钥管理与部署审计
 
 ## 11. 测试策略
 
@@ -309,4 +312,24 @@ tcb fn config update admin-console -e $ENV_ID --env '{
 | 3 | feedback 函数尚未 commit | 部署顺序依赖 | 实施前先独立 commit feedback 函数(与本设计解耦) |
 | 4 | GitHub API 限流 | redeem 不可用 | `GITHUB_TOKEN` 提额;失败策略为拒绝发放(§6.2),无资损 |
 | 5 | access JWT 存 localStorage 的 XSS 面 | 会话被窃 | 单管理员内部工具接受;refresh 7d + 复用检测兜底;V2 可评估 httpOnly cookie + 同域改造 |
-| 6 | 静态托管域名与函数域跨域 | 配置遗漏导致前端不可用 | 部署清单强制项:`ADMIN_WEB_ORIGINS` 与实际托管域一致 |
+| 6 | 静态托管域名与函数域跨域 | 配置遗漏导致前端不可用 | 同源部署(§6.1 / §10)后此项消除,仅作防御纵深保留 `ADMIN_WEB_ORIGINS` |
+
+---
+
+## 13. 代码托管策略(待确认)
+
+**用户约束**:后端相关代码不开源。本仓库 `cloudfunctions/` 目前随主仓库公开可见,但此为历史现状;**后续**新增的后端代码不进入公开仓库。
+
+**待确认的两点**(影响实现计划的目录结构,writing-plans 前需定):
+
+1. **新 admin-console 云函数放哪里**
+   - (a) 留在本仓库 `cloudfunctions/admin-console/`(与现有 device-auth / llm-proxy / app-release / feedback 同目录,实施快,但与「不开源」约束相悖)
+   - (b) 拆到独立私有仓库(如 `whimread-admin-backend`),本仓库只放 SPA + spec/plan(推荐,严格符合约束)
+2. **migrations 归属**
+   - (a) 与 admin-console 同址
+   - (b) 单独私有仓库的 `migrations/`
+   - (c) 仍留本仓库 `cloudbase/migrations/`(表结构本身无敏感信息,但需评估)
+
+**SPA(前端)**:设计文档/SQL/migration 公开与否则视上面决策统一。
+
+**写作计划前置条件**:writing-plans 需依据以上两点确定目录结构才能产出可执行的实施步骤。
