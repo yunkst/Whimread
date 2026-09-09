@@ -127,6 +127,9 @@ tcb fn config update device-auth -e "$ENV_ID" \
     --env "{
         \"DEVICE_JWT_PRIVATE_KEY\": \"${DEVICE_JWT_PRIVATE_KEY}\",
         \"DEVICE_JWT_PUBLIC_KEY\": \"${DEVICE_JWT_PUBLIC_KEY}\",
+        \"GITHUB_STAR_REPO\": \"${GITHUB_STAR_REPO:-}\",
+        \"GITHUB_TOKEN\": \"${GITHUB_TOKEN:-}\",
+        \"STAR_REDEEM_AMOUNT\": \"${STAR_REDEEM_AMOUNT:-50}\",
         \"TCB_ENV_ID\": \"${ENV_ID}\"
     }"
 
