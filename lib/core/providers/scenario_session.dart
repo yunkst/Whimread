@@ -1081,7 +1081,7 @@ class ScenarioSession {
         _isTokenCancelled = false;
 
       case AgentErrorEvent e:
-        _finalizeAgentResponse(error: e.error);
+        _finalizeAgentResponse(error: e.error, quotaExhausted: e.quotaExhausted);
 
       case InjectedUserInputEvent e:
         // 运行中补充消息的 UI 计数 +1。
@@ -1116,7 +1116,7 @@ class ScenarioSession {
   /// - TextSegment 累积为当前 assistant 的 content
   /// - ToolCallSegment 触发 flush 当前 assistant（含已累积 toolCalls）+ 追加 tool 消息
   /// - [partial]=true（用户取消）时，running 状态的 tool_call 不追加 tool 消息
-  void _finalizeAgentResponse({String? error, bool partial = false}) {
+  void _finalizeAgentResponse({String? error, bool partial = false, bool quotaExhausted = false}) {
     if (error != null) {
       LoggerService.instance.e(
         'ScenarioSession [$scenarioId] Agent 错误: $error',
@@ -1182,6 +1182,7 @@ class ScenarioSession {
       isLoading: false,
       streamingSegments: const [],
       error: error,
+      quotaExhausted: quotaExhausted,
     );
     _pendingSegments.clear();
     _isRunning = false;

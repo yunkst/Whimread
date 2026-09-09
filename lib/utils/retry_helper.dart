@@ -51,6 +51,27 @@ class RetryableHttpException implements Exception {
       '${retryAfterMs != null ? ', retryAfter=${retryAfterMs}ms' : ''})';
 }
 
+/// 设备额度耗尽（HTTP 402 insufficient_quota）的不可重试异常。
+///
+/// 与 [RetryableHttpException] 区分：402 不是瞬态错误，重试不会自愈，
+/// 必须立即把余额耗尽这件事告诉用户。[RetryConfig.defaultShouldRetry]
+/// 和 [isTransientNetworkError] 对本类型返回 false，传输层和回合层都
+/// 不会重试。toString 直接给出友好中文，错误冒泡到 AgentErrorEvent
+/// 时消息流渲染可读，无需在调用点额外映射文案。
+class QuotaExhaustedException implements Exception {
+  /// 服务端返回的原始响应体（如 `{"error":{"code":"insufficient_quota",...}}`）。
+  /// 保留以便日志诊断与未来结构化解析。
+  final String body;
+
+  /// 请求 URL。
+  final String url;
+
+  const QuotaExhaustedException(this.body, this.url);
+
+  @override
+  String toString() => '免费额度已用完,请联系管理员或在设置中查看设备额度';
+}
+
 /// 重试策略
 class RetryConfig {
   /// 总尝试次数（含首次）。默认 8。
@@ -88,6 +109,10 @@ class RetryConfig {
   /// 自 2026-07-17 起所有 HTTP 错误由 [RetryableHttpException] 统一承载
   /// （传输层 `_postJsonOnce`/`_postJsonStreamHandshake` 一律抛此类型），
   /// 故此处不再单独判 `HttpException`（该分支不可达）。
+  ///
+  /// [QuotaExhaustedException]（HTTP 402 余额耗尽）不继承
+  /// [RetryableHttpException]、天然不匹配任何分支 → 不重试：余额耗尽
+  /// 重试不会自愈且浪费预算，应立刻让用户看到额度耗尽提示。
   static bool defaultShouldRetry(Object error) {
     if (error is SocketException) return true;
     if (error is HandshakeException) return true;
@@ -284,6 +309,8 @@ bool isRetryableStatus(int statusCode) {
 /// - [SocketException] / [HandshakeException] → TCP/TLS 层断开
 /// - [TimeoutException] → 超时
 /// - [RetryableHttpException] → HTTP 4xx/5xx（含 429 限流）
+/// - [QuotaExhaustedException]（HTTP 402 余额耗尽）→ false：见
+///   [RetryConfig.defaultShouldRetry] 注释，重试无意义。
 /// - 其他（FormatException / StateError 等）→ false（逻辑错误不应重试）
 bool isTransientNetworkError(Object e) {
   if (e is SocketException) return true;

@@ -50,6 +50,21 @@ class DeviceQuotaInfo {
   });
 }
 
+/// GitHub Star 兑换额度结果（POST /api/v1/devices/star/redeem）。
+class StarRedeemResult {
+  final int granted;
+  final int quotaBalance;
+  final String githubLogin;
+  final String message;
+
+  const StarRedeemResult({
+    required this.granted,
+    required this.quotaBalance,
+    required this.githubLogin,
+    required this.message,
+  });
+}
+
 class DeviceAuthService {
   DeviceAuthService._();
 
@@ -246,5 +261,110 @@ class DeviceAuthService {
   Future<String> _appVersion() async {
     final info = await PackageInfo.fromPlatform();
     return info.version;
+  }
+
+  // ======================================================================
+  // GitHub Star 兑换免费额度
+  // ======================================================================
+
+  /// GitHub Star 兑换：校验该账号已给项目点 Star → 每账号一次性补额。
+  ///
+  /// 后端逻辑见 whimread-backend `/api/v1/devices/star/redeem`：
+  /// - 每个 GitHub 账号全局只能兑换一次（换设备/重装都不行）
+  /// - 额度发放与流水写入同事务
+  ///
+  /// 错误以 [DeviceAuthException] 抛出，code 与后端 error_code 一致：
+  /// NOT_STARRED / ALREADY_REDEEMED / INVALID_GITHUB_LOGIN /
+  /// STAR_REDEEM_RATE_LIMITED / GITHUB_CHECK_FAILED / NO_BACKEND。
+  Future<StarRedeemResult> redeemStarQuota(String githubLogin) async {
+    if (!kHasBundledBackend) {
+      throw DeviceAuthException(
+        'NO_BACKEND',
+        '未配置托管后端（打包时未注入 BACKEND_BASE_URL）',
+      );
+    }
+    final token = await ensureRegistered();
+    try {
+      final Response resp = await _api.dio.post(
+        '/api/v1/devices/star/redeem',
+        data: {'github_login': githubLogin.trim()},
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      );
+      final result = parseStarRedeemResponse(resp.data);
+      LoggerService.instance.i(
+        'Star 兑换成功: login=${result.githubLogin} '
+        'granted=${result.granted} balance=${result.quotaBalance}',
+        category: LogCategory.ai,
+        tags: ['device', 'star-redeem'],
+      );
+      return result;
+    } on DioException catch (e) {
+      throw mapRedeemDioError(e);
+    }
+  }
+
+  /// 解析 /star/redeem 成功响应；字段缺失时抛 ArgumentError。
+  @visibleForTesting
+  static StarRedeemResult parseStarRedeemResponse(dynamic data) {
+    if (data is! Map) {
+      throw ArgumentError('star/redeem 响应不是 JSON 对象: $data');
+    }
+    final granted = data['granted'];
+    final balance = data['quota_balance'];
+    if (granted is! int || balance is! int) {
+      throw ArgumentError('star/redeem 响应缺少数值字段: $data');
+    }
+    return StarRedeemResult(
+      granted: granted,
+      quotaBalance: balance,
+      githubLogin: data['github_login']?.toString() ?? '',
+      message: data['message']?.toString() ?? '兑换成功',
+    );
+  }
+
+  /// 把兑换接口的 DioException 映射为带语义 code 的 [DeviceAuthException]。
+  ///
+  /// 后端错误体统一为 `{"error": <code>, "message": <msg>, "details": {}}`；
+  /// 网络层失败（无响应）映射为 NETWORK。
+  @visibleForTesting
+  static DeviceAuthException mapRedeemDioError(DioException e) {
+    final resp = e.response;
+    if (resp == null) {
+      return DeviceAuthException('NETWORK', '网络不可用，请检查网络后重试');
+    }
+    final data = resp.data;
+    final rawCode = data is Map ? data['error']?.toString() : null;
+    final message = data is Map ? data['message']?.toString() : null;
+    switch (rawCode) {
+      case 'NOT_STARRED':
+        return DeviceAuthException(
+          rawCode!,
+          '未在项目 Star 列表中找到该账号，请先去 GitHub 点 ⭐ Star 再试',
+        );
+      case 'ALREADY_REDEEMED':
+        return DeviceAuthException(rawCode!, '该 GitHub 账号已兑换过免费额度');
+      case 'INVALID_GITHUB_LOGIN':
+        return DeviceAuthException(
+          rawCode!,
+          'GitHub 用户名格式不正确（仅字母/数字/连字符）',
+        );
+      case 'STAR_REDEEM_RATE_LIMITED':
+        return DeviceAuthException(rawCode!, '兑换请求过于频繁，请稍后再试');
+      case 'GITHUB_CHECK_FAILED':
+        return DeviceAuthException(rawCode!, 'GitHub 服务暂时不可用，请稍后再试');
+      case 'DEVICE_TOKEN_EXPIRED':
+      case 'DEVICE_TOKEN_INVALID':
+      case 'DEVICE_TOKEN_MISSING':
+        return DeviceAuthException(rawCode!, '设备凭证已失效，请重启应用重新注册');
+      default:
+        return DeviceAuthException(
+          rawCode ?? 'HTTP_${resp.statusCode}',
+          message ?? '兑换失败（HTTP ${resp.statusCode}）',
+        );
+    }
   }
 }

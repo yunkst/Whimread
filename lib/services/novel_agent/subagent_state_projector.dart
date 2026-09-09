@@ -50,7 +50,8 @@ class EventTagger {
       ) =>
         ToolProgressEvent(toolCallId, generatedChars, runId: runId),
       AgentDoneEvent() => AgentDoneEvent(runId: runId),
-      AgentErrorEvent(:final error) => AgentErrorEvent(error, runId: runId),
+      AgentErrorEvent(:final error, :final quotaExhausted) =>
+        AgentErrorEvent(error, runId: runId, quotaExhausted: quotaExhausted),
       InjectedUserInputEvent(:final text, :final scenarioId) =>
         InjectedUserInputEvent(text, scenarioId: scenarioId, runId: runId),
       CompactionEvent(

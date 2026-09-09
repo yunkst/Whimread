@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:novel_app/services/llm_logger/llm_logger.dart';
 import 'package:novel_app/services/dsl_engine/retry_signals.dart';
 import 'package:novel_app/services/logger_service.dart';
@@ -292,6 +293,33 @@ class IoLlmHttpClient implements LlmHttpClient {
     ].join('\n');
   }
 
+  /// HTTP 错误状态码 → 异常的统一映射（传输层单一真理源）。
+  ///
+  /// - 402（托管后端余额耗尽 insufficient_quota）→ [QuotaExhaustedException]：
+  ///   非瞬态错误，不进重试预算（8 次/60s 白白打 8 发），立刻抛给上层
+  ///   展示「免费额度已用完」。
+  /// - 其余 4xx/5xx → [RetryableHttpException]：保持 2026-07-17 起
+  ///   「所有 HTTP 错误一律重试」的瞬态自愈策略。
+  ///
+  /// 暴露为 visibleForTesting：`_handleHttpFailure` 依赖真实
+  /// HttpClientResponse 无法直接单测（dart:io 响应对象不可构造，
+  /// Windows 下 flutter test 起本地 HttpServer 会被防火墙静默吞连接），
+  /// 故把「状态码 → 异常类型」的契约抽出来直测。
+  @visibleForTesting
+  static Never throwForHttpFailure({
+    required int statusCode,
+    required String responseBody,
+    required String url,
+    int? retryAfterMs,
+  }) {
+    if (statusCode == 402) {
+      throw QuotaExhaustedException(responseBody, url);
+    }
+    throw RetryableHttpException(
+      statusCode, responseBody, url, retryAfterMs: retryAfterMs,
+    );
+  }
+
   static Never _handleHttpFailure({
     required io.HttpClientResponse response,
     required String responseBody,
@@ -305,19 +333,31 @@ class IoLlmHttpClient implements LlmHttpClient {
     final statusCode = response.statusCode;
     final tag = isStreaming ? 'stream_establish' : 'post_json';
     final label = isStreaming ? ' (stream)' : '';
-    final retryAfterMs = parseRetryAfterMs(
-      response.headers.value('retry-after'),
-    );
-    LoggerService.instance.w(
-      'LLM HTTP $statusCode$label (retryable): '
-      '${retryAfterMs != null ? 'retryAfter=${retryAfterMs}ms, ' : ''}'
-      'url=$url',
-      category: LogCategory.ai,
-      stackTrace: _buildHttpErrorContext(url, headers, body, responseBody),
-      tags: ['dsl', 'llm', 'http', tag, 'retryable'],
-    );
-    throw RetryableHttpException(
-      statusCode, responseBody, url, retryAfterMs: retryAfterMs,
+    final retryAfterMs = statusCode == 402
+        ? null
+        : parseRetryAfterMs(response.headers.value('retry-after'));
+
+    if (statusCode == 402) {
+      LoggerService.instance.w(
+        'LLM HTTP 402$label (quota exhausted): url=$url',
+        category: LogCategory.ai,
+        tags: ['dsl', 'llm', 'http', tag, 'quota_exhausted'],
+      );
+    } else {
+      LoggerService.instance.w(
+        'LLM HTTP $statusCode$label (retryable): '
+        '${retryAfterMs != null ? 'retryAfter=${retryAfterMs}ms, ' : ''}'
+        'url=$url',
+        category: LogCategory.ai,
+        stackTrace: _buildHttpErrorContext(url, headers, body, responseBody),
+        tags: ['dsl', 'llm', 'http', tag, 'retryable'],
+      );
+    }
+    throwForHttpFailure(
+      statusCode: statusCode,
+      responseBody: responseBody,
+      url: url,
+      retryAfterMs: retryAfterMs,
     );
   }
 }

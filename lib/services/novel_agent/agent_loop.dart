@@ -10,7 +10,8 @@ import 'dart:convert';
 import 'package:novel_app/services/logger_service.dart';
 import 'package:novel_app/utils/cancellation_token.dart';
 import 'package:novel_app/utils/retry_helper.dart'
-    show RetryPolicy, RetryableHttpException, isTransientNetworkError;
+    show QuotaExhaustedException, RetryPolicy, RetryableHttpException,
+        isTransientNetworkError;
 
 import '../dsl_engine/llm_provider.dart';
 import '../dsl_engine/retry_signals.dart';
@@ -511,6 +512,19 @@ class AgentLoop {
         roundRetryCount = 0;
         round++;
       } catch (e, stack) {
+        // 额度耗尽（HTTP 402 insufficient_quota）：不是瞬态错误，重试不会
+        // 自愈，短路重试预算直接把事件抛给用户；quotaExhausted=true 让
+        // UI 在错误条上挂「去 Star 补额度」动作入口。
+        if (e is QuotaExhaustedException) {
+          LoggerService.instance.w(
+              'Agent 循环遇额度耗尽 (round=$round, scenario=${_scenario.id})，'
+              '跳过重试直接提示用户',
+              category: LogCategory.ai,
+              tags: ['agent', 'loop', 'quota_exhausted', _scenario.id]);
+          emit(AgentErrorEvent(e.toString(), quotaExhausted: true));
+          RetrySignals.instance.clear();
+          return;
+        }
         // 瞬态网络错误（SocketException / TimeoutException / 5xx 等）
         // → round 级整体重试，保留 messages 上下文，避免多轮 ReAct 白跑
         if (isTransientNetworkError(e) &&

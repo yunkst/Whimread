@@ -7,6 +7,7 @@ import '../../core/providers/agent_chat_state.dart';
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../services/dsl_engine/retry_signals.dart';
+import '../star_quota_redeem_dialog.dart';
 import 'agent_icons.dart';
 
 /// 状态条种类
@@ -30,12 +31,29 @@ class AgentStatus {
     this.onAction,
     this.actionLabel,
   });
+
+  /// 是否挂了「Star 补额度」类动作（测试/断言辅助：以动作标签是否存在为准）
+  bool get hasAction => actionLabel != null && onAction != null;
 }
 
 /// 优先级：error > retry > supplement。isLoading 普通态返回 null（靠消息流流式光标）。
-AgentStatus? selectStatus(AgentChatState chatState, RetryState? retry) {
+///
+/// [onQuotaAction]：额度耗尽错误（`chatState.quotaExhausted`）时挂到
+/// [AgentStatus.onAction] 的回调——UI 层弹「点 Star 补充免费额度」对话框。
+/// 纯函数本身不依赖 BuildContext，便于单测。
+AgentStatus? selectStatus(
+  AgentChatState chatState,
+  RetryState? retry, {
+  VoidCallback? onQuotaAction,
+}) {
   if (chatState.error != null && !chatState.isLoading) {
-    return AgentStatus(AgentStatusKind.error, chatState.error!);
+    final isQuota = chatState.quotaExhausted;
+    return AgentStatus(
+      AgentStatusKind.error,
+      chatState.error!,
+      actionLabel: isQuota ? '去 Star 补额度' : null,
+      onAction: isQuota ? onQuotaAction : null,
+    );
   }
   if (retry != null) {
     final levelLabel = retry.level == RetryLevel.transport ? '传输层' : '回合层';
@@ -108,11 +126,25 @@ class _AgentStatusStripState extends ConsumerState<AgentStatusStrip> {
     });
   }
 
+  /// 额度耗尽时弹出 Star 兑换对话框。闭包里拿 context（widget 已 mounted），
+  /// 用 mount 守卫防止 widget 在异步对话框生命周期内被卸载。
+  void _openStarRedeemDialog() {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (_) => const StarQuotaRedeemDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(currentChatStateProvider);
     final retry = RetrySignals.instance.notifier.value;
-    final status = selectStatus(chatState, retry);
+    final status = selectStatus(
+      chatState,
+      retry,
+      onQuotaAction: _openStarRedeemDialog,
+    );
 
     if (status?.kind == AgentStatusKind.retry) {
       final attempt = retry!.attempt;
@@ -177,6 +209,35 @@ class _AgentStatusStripState extends ConsumerState<AgentStatusStrip> {
               ],
             ),
           ),
+          // 额度耗尽专属动作按钮（与「停止」互斥：error 态不该有停止按钮）
+          if (isError &&
+              status.actionLabel != null &&
+              status.onAction != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: status.onAction,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.chatButtonPrimary,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star, size: 11, color: Colors.white),
+                    const SizedBox(width: 3),
+                    Text(status.actionLabel!,
+                        style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (status.kind == AgentStatusKind.retry && _countdown > 0)
             Text('${_countdown}s',
                 style: TextStyle(

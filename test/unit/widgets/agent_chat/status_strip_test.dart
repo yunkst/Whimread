@@ -27,6 +27,33 @@ void main() {
     expect(s?.message, 'boom');
   });
 
+  test('普通 error 不带动作按钮（quotaExhausted=false）', () {
+    final s = selectStatus(const AgentChatState(error: 'boom'), null);
+    expect(s?.hasAction, isFalse);
+  });
+
+  test('额度耗尽 error -> error 态挂「去 Star 补额度」动作', () {
+    var tapped = false;
+    final s = selectStatus(
+      const AgentChatState(error: '免费额度已用完', quotaExhausted: true),
+      null,
+      onQuotaAction: () => tapped = true,
+    );
+    expect(s?.kind, AgentStatusKind.error);
+    expect(s?.hasAction, isTrue);
+    s?.onAction?.call();
+    expect(tapped, isTrue);
+  });
+
+  test('额度耗尽但未传 onQuotaAction -> 无回调（安全降级）', () {
+    final s = selectStatus(
+      const AgentChatState(error: '免费额度已用完', quotaExhausted: true),
+      null,
+    );
+    expect(s?.hasAction, isFalse);
+    expect(s?.onAction, isNull);
+  });
+
   test('error 且 isLoading -> 不返 error（让位 retry/running）', () {
     final s = selectStatus(
         const AgentChatState(error: 'boom', isLoading: true), null);

@@ -117,7 +117,20 @@ class AgentDoneEvent extends AgentEvent {
 /// Agent 错误
 class AgentErrorEvent extends AgentEvent {
   final String error;
-  const AgentErrorEvent(this.error, {super.runId});
+
+  /// 当错误由「免费额度耗尽（HTTP 402 insufficient_quota）」引发时为 true。
+  ///
+  /// 与通用错误的差别：不可重试（不是瞬态网络错误），需要给用户一个
+  /// 明确的可执行入口——「去 GitHub 点 Star 补一次额度」。UI 据此在
+  /// 错误条上挂一个动作按钮（参见 `agent_status_strip.dart` 的
+  /// `AgentStatus.onAction`），而不是仅显示「重试」。
+  final bool quotaExhausted;
+
+  const AgentErrorEvent(
+    this.error, {
+    this.quotaExhausted = false,
+    super.runId,
+  });
 }
 
 /// 运行中注入的 user 补充消息

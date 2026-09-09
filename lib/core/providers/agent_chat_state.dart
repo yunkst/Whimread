@@ -16,6 +16,12 @@ class AgentChatState {
   final List<AgentChatSegment> streamingSegments;
   final String? error;
 
+  /// 最近一次 error 是否由「免费额度耗尽（HTTP 402）」引发。
+  ///
+  /// UI 据此在错误条上显示「去 GitHub 点 Star 补额度」动作按钮
+  /// （对话由按钮回调触发，状态本身只做标记）。error 为 null 时无意义。
+  final bool quotaExhausted;
+
   // ===== Agent 扩展字段 =====
   /// 当前场景 ID
   final String scenarioId;
@@ -37,6 +43,7 @@ class AgentChatState {
     this.isLoading = false,
     this.streamingSegments = const [],
     this.error,
+    this.quotaExhausted = false,
     this.scenarioId = ScenarioIds.writing,
     this.scenarioDisplayName = '小说写作助手',
     this.currentNovel,
@@ -48,6 +55,7 @@ class AgentChatState {
     bool? isLoading,
     List<AgentChatSegment>? streamingSegments,
     String? error,
+    bool quotaExhausted = false,
     String? scenarioId,
     String? scenarioDisplayName,
     CurrentNovel? currentNovel,
@@ -59,6 +67,7 @@ class AgentChatState {
       isLoading: isLoading ?? this.isLoading,
       streamingSegments: streamingSegments ?? this.streamingSegments,
       error: error,
+      quotaExhausted: quotaExhausted,
       scenarioId: scenarioId ?? this.scenarioId,
       scenarioDisplayName: scenarioDisplayName ?? this.scenarioDisplayName,
       currentNovel:

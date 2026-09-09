@@ -13,6 +13,7 @@ import '../../services/novel_agent/agent_scenario.dart';
 import '../../services/novel_agent/agent_scenario_factory.dart';
 import 'agent_icons.dart';
 import 'agent_novel_picker_dialog.dart';
+import 'quota_badge.dart';
 
 class AgentChatHeader extends ConsumerWidget {
   final VoidCallback? onHistory;
@@ -99,6 +100,9 @@ class AgentChatHeader extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           _ContextLine(isWebview: isWebview, chatState: chatState),
+          // 托管包显示 AI 剩余额度；非托管包内部自行隐藏
+          const SizedBox(height: 2),
+          const Align(alignment: Alignment.centerLeft, child: QuotaBadge()),
         ],
       ),
     );
