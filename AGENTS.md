@@ -13,6 +13,8 @@
 - AI 托管模式：LLM 请求走打包注入的托管后端（`--dart-define=BACKEND_BASE_URL`），
   设备注册领免费额度；不注入则回退用户自配 AI 供应商模式
 
+> 2026-09-09 起后端服务（device-auth/llm-proxy/app-release/feedback + 部署工具链）已迁至私有仓 `D:\myspace\whimread-admin`，本仓仅保留 Flutter 客户端；AI 托管模式的部署与迁移见该仓 README-cloudbase.md。
+
 ## 常用命令
 
 ```bash
@@ -36,6 +38,8 @@ assets/               # 字体 / 模型 / 图片
 docs/                 # 开发者文档（架构图 / 日志规范 / 计划）
 tool/                 # 测试脚本 / 字体子集化
 ```
+
+> 2026-09-09 起后端服务（device-auth/llm-proxy/app-release/feedback + 部署工具链）已迁至私有仓 `D:\myspace\whimread-admin`，本仓仅保留 Flutter 客户端；AI 托管模式的部署与迁移见该仓 README-cloudbase.md。
 
 ## 规则
 
