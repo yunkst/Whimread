@@ -13,6 +13,7 @@ import '../models/llm_config.dart' as app;
 import '../services/device/device_auth_service.dart';
 import '../services/dsl_engine/llm_provider.dart' as llm;
 import '../services/logger_service.dart';
+import '../services/managed_models/managed_model_service.dart';
 import 'ai/ai_service_factory.dart';
 
 class LlmConfigService {
@@ -117,17 +118,27 @@ class LlmConfigService {
   /// **AI 托管模式(打包注入 BACKEND_BASE_URL)**:所有 LLM 请求走 CloudBase
   /// `llm-proxy` 函数(`/v1/chat/completions`),由服务端持有 LLM API Key 并转发
   /// 到真实 LLM 供应商(DeepSeek/OpenAI/GLM/Kimi/Claude)。客户端只用设备 JWT
-  /// 鉴权,**不持有任何 LLM Key**。模型字段被服务端强制覆写。
+  /// 鉴权,**不持有任何 LLM Key**。模型字段由用户在设置中选择(若未选 / 目录
+  /// 未知则不发 model 字段,服务端落回 baseline)。
   ///
   /// [scenarioId] 仅用于缓存绑定场景(当前各场景共用同一后端配置)。
   Future<llm.LlmProvider?> buildManagedProvider(String scenarioId) async {
     if (!kHasBundledBackend) return null; // 未注入托管后端 → 走旧用户自配路径
     final token = await DeviceAuthService.instance.ensureRegistered();
+    // 用户选择的模型(可能为 null):拉一次目录 + 读选择,组合出真实请求字段。
+    // 失败(目录未知) → 直接信任本地选择;选择不存在于目录 → 落回 baseline。
+    final svc = ManagedModelService.instance;
+    final catalog = await svc.fetchCatalog();
+    final selectedId = await svc.getSelectedModelId();
+    final modelId = svc.resolveForRequest(
+      catalog: catalog,
+      selectedId: selectedId,
+    );
     return AiServiceFactory.buildLlmProvider(
       llm.LlmConfig(
         baseUrl: '$kBackendBaseUrl/v1',
         apiKey: token,                        // ⚠️ 这里传的是设备 JWT,不是 LLM Key
-        defaultModel: 'whimread-managed',    // 实际模型由服务端强制覆写
+        defaultModel: modelId ?? '',         // 空 → LlmProvider 不发 model 字段
       ),
     );
   }

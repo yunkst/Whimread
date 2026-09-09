@@ -95,6 +95,9 @@ class LlmProvider {
   /// 构建请求体（Phase 1: 增加 tools / toolChoice 参数）
   ///
   /// 不发送 max_tokens：输出长度交给模型 / provider 原生上限。
+  ///
+  /// model 字段缺省 / 显式空字符串 → 不写入 body，由服务端按 catalog baseline
+  /// 兜底（否则空字符串会被 OpenAI 兼容网关解读为「指定空 model」而 400）。
   Map<String, dynamic> buildRequestBody({
     required List<ChatMessage> messages,
     bool stream = false,
@@ -105,8 +108,9 @@ class LlmProvider {
     String? toolChoice,
     Map<String, dynamic>? extra,
   }) {
+    final resolvedModel = model ?? config.defaultModel;
     final body = <String, dynamic>{
-      'model': model ?? config.defaultModel,
+      if (resolvedModel.isNotEmpty) 'model': resolvedModel,
       'stream': stream,
       'temperature': temperature ?? config.temperature,
       'messages': messages.map((m) => m.toJson()).toList(),

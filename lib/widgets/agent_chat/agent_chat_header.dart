@@ -13,6 +13,7 @@ import '../../services/novel_agent/agent_scenario.dart';
 import '../../services/novel_agent/agent_scenario_factory.dart';
 import 'agent_icons.dart';
 import 'agent_novel_picker_dialog.dart';
+import 'active_model_chip.dart';
 import 'quota_badge.dart';
 
 class AgentChatHeader extends ConsumerWidget {
@@ -98,11 +99,18 @@ class AgentChatHeader extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+const SizedBox(height: 6),
           _ContextLine(isWebview: isWebview, chatState: chatState),
-          // 托管包显示 AI 剩余额度；非托管包内部自行隐藏
-          const SizedBox(height: 2),
-          const Align(alignment: Alignment.centerLeft, child: QuotaBadge()),
+          // 托管包:左边 chip 切模型,右边 QuotaBadge 显示余额
+          // 非托管包:两者内部自行隐藏,留空 Row 占位
+          const SizedBox(height: 4),
+          Row(
+            children: const [
+              ActiveModelChip(),
+              SizedBox(width: 12),
+              QuotaBadge(),
+            ],
+          ),
         ],
       ),
     );

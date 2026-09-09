@@ -17,14 +17,18 @@ const REGISTER_BONUS = 100;       // 注册奖励额度
 const TOKENS_PER_QUOTA = 1000;    // 1 额度 = 1000 tokens
 
 /**
- * 按 token 数算扣减额度(向上取整,最少 1)
+ * 按 token 数算扣减额度(向上取整,最少 1)。
  *
  * @param {number} totalTokens
+ * @param {number} [ratio=1] 模型相对 baseline 的消耗倍率(>0)。
+ *   llm-proxy 按 model 目录的 ratio 传入;其它调用方(register bonus / grant)
+ *   不关心倍率,默认 1。倍率 < 0 / NaN 当作 1。
  * @returns {number}
  */
-function calcCost(totalTokens) {
+function calcCost(totalTokens, ratio = 1) {
     if (!totalTokens || totalTokens < 0) return 0;
-    return Math.max(1, Math.ceil(totalTokens / TOKENS_PER_QUOTA));
+    const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    return Math.max(1, Math.ceil((totalTokens / TOKENS_PER_QUOTA) * r));
 }
 
 /**

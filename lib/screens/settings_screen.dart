@@ -9,6 +9,7 @@ import 'image_model_management_screen.dart';
 import 'log_report_settings_screen.dart';
 import 'feedback_submit_screen.dart';
 import 'log_viewer_screen.dart';
+import 'managed_model_picker_screen.dart';
 import '../widgets/common/library_app_bar.dart';
 import 'preload_queue_debug_screen.dart';
 import '../services/app_update_service.dart';
@@ -20,6 +21,8 @@ import '../utils/toast_utils.dart';
 import '../core/providers/theme_provider.dart';
 import '../core/providers/service_providers.dart';
 import '../core/providers/device_quota_provider.dart';
+import '../core/providers/managed_model_provider.dart';
+import '../core/constants/build_config.dart';
 import '../core/database/database_connection.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
@@ -75,6 +78,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final info = state.info;
     if (info == null) return 'Star 项目可免费补充一次 AI 托管额度';
     return '当前余额 ${info.quotaBalance} 点 · Star 可补充一次';
+  }
+
+  /// 「AI 模型选择」副标题：当前选中模型名 + 倍率文案。
+  /// 目录未拉取时回退通用提示,引导用户打开选择页手动触发。
+  String _managedModelSubtitle(ManagedModelState state) {
+    final catalog = state.catalog;
+    final selected = state.selectedModelId;
+    if (catalog == null) {
+      return state.loading ? '加载目录中…' : '点击选择 AI 模型';
+    }
+    final id = selected ?? catalog.defaultModel?.id;
+    if (id == null) return '点击选择 AI 模型';
+    final model = catalog.byId(id);
+    if (model == null) return '点击选择 AI 模型';
+    return '${model.displayName} · ${catalog.rateLabel(model)}';
   }
 
   Future<void> _loadPreviewChannel() async {
@@ -215,8 +233,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 },
               ),
               ListTile(
-                leading:
-                    Icon(Icons.psychology_outlined, color: appColors.agentAccent),
+                leading: Icon(Icons.psychology_outlined, color: appColors.agentAccent),
                 title: const Text('Agent 记忆管理'),
                 subtitle: const Text('查看和管理 Agent 各场景的经验记忆'),
                 trailing: const Icon(Icons.arrow_forward_ios),
@@ -230,6 +247,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   );
                 },
               ),
+              if (kHasBundledBackend)
+                ListTile(
+                  leading: Icon(Icons.tune, color: appColors.agentAccent),
+                  title: const Text('AI 模型选择'),
+                  subtitle: Text(_managedModelSubtitle(
+                      ref.watch(managedModelProvider))),
+                  trailing: const Icon(Icons.arrow_forward_ios),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const ManagedModelPickerScreen(),
+                      ),
+                    ).then((_) {
+                      if (mounted) {
+                        ref.read(managedModelProvider.notifier).refresh();
+                      }
+                    });
+                  },
+                ),
               ListTile(
                 leading: Icon(Icons.star_outline, color: appColors.agentAccent),
                 title: const Text('点 Star 补充 AI 额度'),
