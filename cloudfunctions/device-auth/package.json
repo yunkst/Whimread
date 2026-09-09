@@ -5,7 +5,7 @@
   "main": "index.js",
   "private": true,
   "scripts": {
-    "test": "node --test __tests__/"
+    "test": "node --test \"__tests__/**/*.test.js\""
   },
   "dependencies": {
     "@cloudbase/node-sdk": "^3.16.0",
