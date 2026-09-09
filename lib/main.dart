@@ -6,6 +6,8 @@ import 'screens/bookshelf_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/webview_browser_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
+import 'services/app_update_service.dart';
+import 'services/app_update_result.dart';
 import 'core/providers/service_providers.dart';
 import 'core/providers/theme_provider.dart';
 import 'core/providers/onboarding_providers.dart';
@@ -23,6 +25,7 @@ import 'services/native_crash_reporter.dart' show kGitHubRepo, NativeCrashReport
 import 'services/novel_agent/agent_scenario.dart';
 import 'services/star_prompt_service.dart';
 import 'widgets/agent_chat/agent_floating_button.dart';
+import 'widgets/app_update_dialog.dart';
 import 'widgets/star_prompt_dialog.dart';
 
 /// 最近记录的全局异常签名（前 200 字符 hash），用于去重。
@@ -337,7 +340,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       category: LogCategory.ui,
       tags: ['lifecycle', 'init'],
     );
-    // post-frame 后检查（crash 优先，star 其后；互不干扰）。
+    // post-frame 后检查（crash 优先，star 其后，更新最后；互不干扰）。
     // 只检查一次（_HomePageState 在 app 生命周期内只 initState 一次）。
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -366,7 +369,52 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       } catch (_) {
         // 任何异常吞掉，绝不阻塞启动。
       }
+
+      // 3. 启动期静默检查正式版更新
+      //    仅 stable 通道（includePrerelease=false），预览版不弹。
+      //    失败一律吞掉，不阻塞启动；用户可随时去设置页手动检查。
+      if (!mounted) return;
+      await _silentCheckStableUpdate();
     });
+  }
+
+  /// 启动期静默检查正式版更新：有新正式版则弹窗，预览版 / 失败 / 已是最新均不打扰。
+  Future<void> _silentCheckStableUpdate() async {
+    try {
+      final updateService = AppUpdateService();
+      // includePrerelease=false：仅查 stable 通道，预览版不会触发弹窗
+      final result = await updateService.checkForUpdateDetailed(
+        forceCheck: false, // 走 1 小时节流
+        includePrerelease: false,
+      );
+      if (!mounted) return;
+
+      if (result is! AppUpdateAvailable) {
+        // UpToDate / CheckFailed：静默吞掉，不打扰用户
+        return;
+      }
+
+      final version = result.version;
+
+      // 用户此前已点过「稍后提醒」忽略该版本 → 不再弹
+      if (await updateService.isVersionIgnored(version.version)) {
+        return;
+      }
+
+      await showAppUpdateDialog(
+        context,
+        version: version,
+        updateService: updateService,
+        isNewVersion: true,
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.w(
+        '启动期更新检查异常(不影响 App): $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.general,
+        tags: ['update', 'startup-check', 'silent-error'],
+      );
+    }
   }
 
   @override
