@@ -2,8 +2,8 @@
 ///
 /// 验证:
 /// - 「关于」组末尾出现「问题反馈」ListTile
-/// - trailing 携带 open_in_new 外链图标
-/// - 点击 onTap 不抛异常（url_launcher 在测试环境走失败路径，不校验具体 URL）
+/// - trailing 携带 arrow_forward_ios 内页图标(已从 GitHub 外链改为站内表单页)
+/// - 点击 push 到 FeedbackSubmitScreen(不再 launchUrl GitHub)
 ///
 /// 注意:
 /// - SettingsScreen 用 ListView(懒加载),关于组在默认视口外不会 build,
@@ -25,6 +25,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:novel_app/core/providers/service_providers.dart';
 import 'package:novel_app/core/providers/theme_provider.dart';
+import 'package:novel_app/screens/feedback_submit_screen.dart';
 import 'package:novel_app/screens/settings_screen.dart';
 import 'package:novel_app/services/backup_service.dart';
 import 'package:novel_app/services/logger_service.dart';
@@ -105,7 +106,7 @@ void main() {
     await _resetLogger();
   });
 
-  testWidgets('「问题反馈」条目 trailing 是 open_in_new 外链图标',
+  testWidgets('「问题反馈」条目 trailing 是 arrow_forward_ios 内页图标',
       (tester) async {
     await tester.pumpWidget(_wrap(const SettingsScreen()));
     await tester.pumpAndSettle();
@@ -120,24 +121,54 @@ void main() {
     expect(tile, findsOneWidget);
     final listTile = tester.widget<ListTile>(tile);
     expect(listTile.trailing, isA<Icon>());
-    expect((listTile.trailing! as Icon).icon, Icons.open_in_new);
+    expect((listTile.trailing! as Icon).icon, Icons.arrow_forward_ios);
     await _resetLogger();
   });
 
-  testWidgets('点击「问题反馈」条目 onTap 不抛异常', (tester) async {
-    await tester.pumpWidget(_wrap(const SettingsScreen()));
+  testWidgets('点击「问题反馈」条目 push 到 FeedbackSubmitScreen',
+      (tester) async {
+    final pushedRoutes = <Route<dynamic>>[];
+    final observer = _RecordingNavigatorObserver(onPushed: pushedRoutes.add);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        backupServiceProvider.overrideWithValue(_FakeBackupService()),
+      ],
+      child: MaterialApp(
+        theme:
+            const ThemeState(themeMode: AppThemeMode.light).getLightTheme(),
+        navigatorObservers: [observer],
+        home: const SettingsScreen(),
+      ),
+    ));
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
       find.text('问题反馈'),
       200,
     );
+    // scrollUntilVisible 可能把条目停在视口边缘,ensureVisible 居中后再 tap
+    await tester.ensureVisible(find.text('问题反馈'));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('问题反馈'));
-    await tester.pump(); // 不调用 pumpAndSettle,launchUrl 在测试环境异步等待不会 settle
+    await tester.pumpAndSettle();
 
-    // 无异常即通过(launchUrl 抛 PlatformException 被 try/catch 吞掉)
-    expect(tester.takeException(), isNull);
+    expect(pushedRoutes, isNotEmpty,
+        reason: '点击后应触发 push');
+    expect(find.byType(FeedbackSubmitScreen), findsOneWidget);
     await _resetLogger();
   });
+}
+
+/// 记录 push 事件的 NavigatorObserver。
+class _RecordingNavigatorObserver extends NavigatorObserver {
+  _RecordingNavigatorObserver({required this.onPushed});
+
+  final void Function(Route<dynamic> route) onPushed;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    onPushed(route);
+  }
 }

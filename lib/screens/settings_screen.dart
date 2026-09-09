@@ -7,15 +7,19 @@ import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
 import 'image_model_management_screen.dart';
 import 'log_report_settings_screen.dart';
+import 'feedback_submit_screen.dart';
 import 'log_viewer_screen.dart';
 import '../widgets/common/library_app_bar.dart';
 import 'preload_queue_debug_screen.dart';
 import '../services/app_update_service.dart';
+import '../services/device/device_auth_service.dart';
 import '../services/logger_service.dart';
 import '../widgets/app_update_dialog.dart';
+import '../widgets/star_quota_redeem_dialog.dart';
 import '../utils/toast_utils.dart';
 import '../core/providers/theme_provider.dart';
 import '../core/providers/service_providers.dart';
+import '../core/providers/device_quota_provider.dart';
 import '../core/database/database_connection.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
@@ -43,6 +47,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadPackageInfo();
     _loadLastBackupTime();
     _loadPreviewChannel();
+    // 「点 Star 补充 AI 额度」副标题的余额查询统一走 deviceQuotaProvider
+    // （与 Agent Chat 顶部 QuotaBadge 同一数据源 + 60s 缓存）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(deviceQuotaProvider.notifier).refresh();
+    });
+  }
+
+  /// 打开 Star 兑换对话框；成功后强制刷新共享额度状态 + toast 反馈。
+  Future<void> _openStarRedeemDialog() async {
+    final result = await showDialog<StarRedeemResult>(
+      context: context,
+      builder: (_) => const StarQuotaRedeemDialog(),
+    );
+    if (result == null || !mounted) return;
+    ToastUtils.showSuccess(
+      '${result.message}，当前余额 ${result.quotaBalance} 点',
+      context: context,
+    );
+    // 兑换改变了服务端余额，绕过 60s 缓存强制拉新
+    ref.read(deviceQuotaProvider.notifier).refresh(force: true);
+  }
+
+  /// 「点 Star 补充 AI 额度」副标题：余额已知时展示具体数字，
+  /// 未配置托管后端 / 未注册 / 查询失败时回退通用文案。
+  String _quotaSubtitle(DeviceQuotaState state) {
+    final info = state.info;
+    if (info == null) return 'Star 项目可免费补充一次 AI 托管额度';
+    return '当前余额 ${info.quotaBalance} 点 · Star 可补充一次';
   }
 
   Future<void> _loadPreviewChannel() async {
@@ -197,6 +229,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   );
                 },
+              ),
+              ListTile(
+                leading: Icon(Icons.star_outline, color: appColors.agentAccent),
+                title: const Text('点 Star 补充 AI 额度'),
+                subtitle: Text(_quotaSubtitle(
+                    ref.watch(deviceQuotaProvider))),
+                trailing: const Icon(Icons.arrow_forward_ios),
+                onTap: _openStarRedeemDialog,
               ),
               themeAsync.when(
                 data: (themeState) {
@@ -411,7 +451,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     Icon(Icons.feedback_outlined, color: appColors.neutral),
                 title: const Text('问题反馈'),
                 subtitle: const Text('报告 Bug 或提出功能建议'),
-                trailing: const Icon(Icons.open_in_new, size: 18),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: _openFeedback,
               ),
             ],
@@ -487,19 +527,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// 打开 GitHub issues/new 页,GitHub 会显示 3 个 Issue Forms 模板选择器
-  /// (Bug 报告 / 功能建议 / 提问),由用户自行选择。
-  ///
-  /// 异常吞掉(无浏览器等),与「支持项目 → 去 GitHub 点 Star」入口范式一致。
-  Future<void> _openFeedback() async {
-    try {
-      await launchUrl(
-        Uri.parse('$kGitHubRepo/issues/new'),
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {
-      // 静默
-    }
+  /// 打开问题反馈表单页,提交到后端(不再跳 GitHub issues)。
+  void _openFeedback() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const FeedbackSubmitScreen(),
+      ),
+    );
   }
 
   /// 获取主题模式显示文本
