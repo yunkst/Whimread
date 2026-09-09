@@ -65,7 +65,7 @@ Whimread 托管后端(CloudBase 三函数:device-auth / llm-proxy / app-release)
 CloudBase 静态网站托管 ←—— SPA(Vite + React + TS + Ant Design 5,构建产物)
    │ 跨域白名单(ADMIN_WEB_ORIGINS)
    ▼
-HTTP 访问 /api/admin/console/* ──→ 云函数 admin-console(Nodejs20.19)
+HTTP 访问 /admin/* ──→ 云函数 admin-console(Nodejs20.19)
                                     │ lib/repo.js  ← 所有 SQL 集中于此
                                     │ lib/auth.js  ← scrypt / TOTP / JWT / 会话
                                     │ common/db.js → ExecutePGSql → CloudBase PG
@@ -84,6 +84,7 @@ device-auth 函数新增路由:
 - **不动** device-auth 现有三路由、llm-proxy、app-release、feedback 函数(它继续承担反馈/日志的**写入**,其 `X-API-TOKEN` 管理端点保留给 CLI 用)
 - 管理后台对 feedback 数据**直查 PG**(同库),不让浏览器持有 `PUBLISH_API_TOKEN`
 - Flutter 客户端唯一的改动是 §2.3 的错误映射修复 + redeem 端点对齐
+- **路径前缀**:管理台人用 API 走 `/admin/*`;客户端/CI 等机器面走 `/api/*`(见 §6.1)
 
 ## 4. 数据模型
 
@@ -198,7 +199,9 @@ TOTP 错误计数独立(`totp_failed_attempts`),≥5 同样锁 15 分钟;login/r
 
 ## 6. API 设计
 
-### 6.1 admin-console(`/api/admin/console/*`,全部要求 access JWT)
+### 6.1 admin-console(`/admin/*`,全部要求 access JWT)
+
+**路径约定**:管理后台人用 API 统一 `/admin/*` 前缀;客户端/CI 等机器面统一 `/api/*`。CI 发布端点 `/api/admin/app/releases/*` 维持现状(机器对机器,不属于本管理台),后续如需对齐 `/admin/` 再单独迁移(需同步改 GitHub Actions 与密钥)。两者前缀不重叠,网关按前缀路由无歧义。
 
 统一响应沿用 `errors.js` 的 `ok()/err()`;错误码扩 `ACCOUNT_LOCKED / ACCOUNT_DISABLED / TOTP_REQUIRED / TOTP_INVALID / CONCURRENT_MODIFY / VALIDATION_FAILED`。
 
