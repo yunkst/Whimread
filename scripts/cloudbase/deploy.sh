@@ -161,6 +161,21 @@ tcb fn config update llm-proxy -e "$ENV_ID" \
     }"
 
 # ============================================
+# 5. 部署 feedback 函数 + 注入 admin/JWT 公钥
+# ============================================
+log_info "==> 步骤 5/5: 部署 feedback"
+cd "$ROOT_DIR/cloudfunctions/feedback"
+[[ -d node_modules ]] || npm install --omit=dev
+
+tcb fn deploy feedback -e "$ENV_ID"
+tcb fn config update feedback -e "$ENV_ID" \
+    --env "{
+        \"DEVICE_JWT_PUBLIC_KEY\": \"${DEVICE_JWT_PUBLIC_KEY}\",
+        \"TCB_ENV_ID\": \"${ENV_ID}\",
+        \"PUBLISH_API_TOKEN\": \"${PUBLISH_API_TOKEN}\"
+    }"
+
+# ============================================
 # 完成
 # ============================================
 log_info "部署完成!"

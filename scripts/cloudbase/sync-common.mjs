@@ -21,7 +21,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const CF_ROOT = path.join(ROOT, 'cloudfunctions');
 const COMMON = path.join(CF_ROOT, 'common');
 
-const FUNCTIONS = ['device-auth', 'app-release', 'llm-proxy'];
+const FUNCTIONS = ['device-auth', 'app-release', 'llm-proxy', 'feedback'];
 const COMMON_FILES = ['db.js', 'jwt.js', 'quota.js', 'errors.js', 'logger.js', 'tcb-admin.js', 'cos-admin.js', 'package.json'];
 
 const commonPkg = JSON.parse(fs.readFileSync(path.join(COMMON, 'package.json'), 'utf8'));

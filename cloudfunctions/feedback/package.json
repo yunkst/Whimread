@@ -1,0 +1,12 @@
+{
+  "name": "feedback",
+  "version": "0.1.0",
+  "description": "Whimread feedback 云函数:用户反馈提交 + LogReporterService 批量日志上报 + 管理端拉取",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.16.0",
+    "jsonwebtoken": "^9.0.2",
+    "cos-nodejs-sdk-v5": "^2.14.0"
+  }
+}
