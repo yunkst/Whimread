@@ -2,6 +2,7 @@ package com.example.novel_app
 
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -93,6 +94,26 @@ object DeviceAttestation {
             keyStore.containsAlias(KEY_ALIAS)
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /**
+     * 读取 [Settings.Secure.ANDROID_ID]（真正的 SSAID，按 APP 签名 + 用户隔离）。
+     *
+     * 为什么不用 device_info_plus 的 AndroidDeviceInfo.id：那个字段实际是
+     * [Build.ID]（如 `BP2A.250605.031.A3_V000L1`），同型号同系统版本的所有设备
+     * 共享同一字符串，无法作为设备唯一标识；用它注册会让第二台同款机继承第一台
+     * 的账户/额度。Settings.Secure.ANDROID_ID 自 Android 8 起对每个 (signing key,
+     * user) 组合稳定，是 Google 官方推荐的设备唯一标识，无需任何运行时权限。
+     *
+     * 返回 null 表示系统未提供（极旧版本或被 OEM 屏蔽），由 Dart 侧 fallback。
+     */
+    fun getAndroidId(context: Context): String? {
+        return try {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
         }
     }
 

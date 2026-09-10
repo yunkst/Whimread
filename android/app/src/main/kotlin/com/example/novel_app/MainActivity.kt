@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
                 "attest" -> DeviceAttestation.attest(call, result, this)
                 "sign" -> DeviceAttestation.signChallenge(call, result)
                 "hasKey" -> result.success(DeviceAttestation.hasKey())
+                "androidId" -> result.success(DeviceAttestation.getAndroidId(this))
                 else -> result.notImplemented()
             }
         }

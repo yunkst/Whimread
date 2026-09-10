@@ -260,10 +260,18 @@ class DeviceAuthService {
     }
   }
 
-  /// Android SSAID（Android 8+ 按 APP 签名隔离，同签名重装不变）；
-  /// 读取失败退化为安装期随机 ID（仅影响“重装识别”，不影响 attestation 强度）。
+  /// Android SSAID（Android 8+ 按 APP 签名 + 用户隔离，同签名重装不变；同型号
+  /// 不同设备互不撞号）。优先读原生通道 [Settings.Secure.ANDROID_ID]；读不到
+  /// 时退回 [DeviceInfoPlugin] 的 `id`（实际是 [Build.ID]，会撞号但比没有好），
+  /// 再退化为安装期随机 ID（仅影响"重装识别"，不影响 attestation 强度）。
   Future<String> _androidId() async {
     if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final id = await _channel.invokeMethod<String>('androidId');
+        if (id != null && id.isNotEmpty) return id;
+      } on PlatformException {
+        // 原生通道未实现（老版本 / 测试环境）→ fallback 到旧逻辑
+      }
       try {
         final info = await _deviceInfo.androidInfo;
         final id = info.id;
