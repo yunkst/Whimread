@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -29,6 +30,7 @@ import '../core/theme/app_typography.dart';
 import '../screens/onboarding/onboarding_screen.dart';
 import 'backup_management_screen.dart';
 import 'media_cache_screen.dart';
+import '../widgets/debug/attestation_chain_debug_sheet.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -43,6 +45,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isPreviewChannel = false;
   String? _lastBackupTime;
   bool _isRepairing = false;
+
+  // Debug-only：关于应用 7-tap 触发 attestation 证书链调试面板。
+  // 窗口 3s 内连续点击才累计，超时重置。
+  int _versionTapCount = 0;
+  DateTime? _firstTapTime;
+
+  void _handleVersionTap() {
+    if (!kDebugMode) return;
+    final now = DateTime.now();
+    if (_firstTapTime == null ||
+        now.difference(_firstTapTime!) > const Duration(seconds: 3)) {
+      _firstTapTime = now;
+      _versionTapCount = 1;
+      return;
+    }
+    _versionTapCount++;
+    if (_versionTapCount >= 7) {
+      _versionTapCount = 0;
+      _firstTapTime = null;
+      AttestationChainDebugSheet.show(context);
+    }
+  }
 
   @override
   void initState() {
@@ -421,6 +445,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ? '版本 ${_packageInfo!.version} (${_packageInfo!.buildNumber})'
                       : '加载中...',
                 ),
+                // Debug-only：7-tap 打开 attestation 证书链调试面板（release 无反应）
+                onTap: _handleVersionTap,
               ),
               ListTile(
                 leading: _isCheckingUpdate

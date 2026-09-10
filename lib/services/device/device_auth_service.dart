@@ -261,6 +261,26 @@ class DeviceAuthService {
     }
   }
 
+  /// 调试用:采集一次 attestation 证书链(PEM 列表),不注册、不落库、
+  /// 不消耗额度。仅在 debug 入口(关于应用 7-tap)触发;生产代码不应调此路径。
+  ///
+  /// 用途:让开发者在端上直接看到自己设备的 Key Attestation 链——锚到
+  /// Google Hardware Attestation 根、还是厂商自签根、还是 Software 级——判断
+  /// 是否需要补 OEM 根、或者彻底放弃 attestation 这条线。
+  Future<List<String>> captureAttestationChain() async {
+    final dio = _api.dio;
+    final Response challengeResp = await dio.post('/api/v1/devices/challenge');
+    final nonce = challengeResp.data['nonce'] as String?;
+    if (nonce == null || nonce.isEmpty) {
+      throw DeviceAuthException('CHALLENGE_INVALID', '服务器未返回有效 challenge');
+    }
+    final chain = await _attest(nonce);
+    if (chain.isEmpty) {
+      throw DeviceAuthException('ATTESTATION_EMPTY', '原生通道未返回证书链');
+    }
+    return chain;
+  }
+
   /// Android SSAID（Android 8+ 按 APP 签名 + 用户隔离，同签名重装不变；同型号
   /// 不同设备互不撞号）。优先读原生通道 [Settings.Secure.ANDROID_ID]；读不到
   /// 时退回 [DeviceInfoPlugin] 的 `id`（实际是 [Build.ID]，会撞号但比没有好），
