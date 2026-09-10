@@ -15,6 +15,7 @@ library;
 import 'dart:io';
 
 import '../../models/image_model.dart';
+import '../conversion/gguf_writer.dart' show kGgufMagic;
 import '../logger_service.dart';
 import 'image_generation_backend.dart';
 
@@ -26,9 +27,6 @@ class LocalEngineNotReadyException implements Exception {
   @override
   String toString() => message;
 }
-
-/// gguf 文件头 magic：ASCII "GGUF"
-const List<int> kGgufMagic = [0x47, 0x47, 0x55, 0x46];
 
 class LocalSdCppBackend implements ImageGenerationBackend {
   /// sd.cpp 编译产物名（Android arm64）。阶段 B 由 NDK 构建产出放入 jniLibs。

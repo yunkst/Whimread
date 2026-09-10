@@ -814,7 +814,7 @@ class AgentTools {
     },
   };
 
-  // ===== 文生图（ComfyUI）=====
+  // ===== 文生图（客户端本地引擎）=====
 
   static const _listText2ImgModels = {
     'type': 'function',
@@ -856,7 +856,7 @@ class AgentTools {
           'modelName 必须是 list_text2img_models 返回的某个模型 name（按用户'
           '需求语义挑最匹配 description/tags 的那个）；不传则使用默认模型。'
           '建议先调用 list_text2img_models 拿到 promptSkill，'
-          '据此撰写 prompt 和 negativePrompt 会显著提升出图质量。',
+          '据此撰写 prompt 会显著提升出图质量（负向提示词已由模型预设，无需关心）。',
       'parameters': {
         'type': 'object',
         'properties': {
@@ -866,13 +866,6 @@ class AgentTools {
                 '图片生成提示词（自然语言描述画面，建议含主体、服饰、场景、光影等）。'
                 '英文技巧名效果通常更好，可中英混合。'
                 '先调用 list_text2img_models 拿到 promptSkill 可获取针对性的写法建议。',
-          },
-          'negativePrompt': {
-            'type': 'string',
-            'description':
-                '负向提示词（可选，避免生成你不想要的元素，例如 '
-                '"worst quality, extra fingers, blurry, watermark"）。'
-                '本地引擎是否支持取决于该模型文件本身（多数 SD1.5/SDXL gguf 支持）。',
           },
           'count': {
             'type': 'integer',

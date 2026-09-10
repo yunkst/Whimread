@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 41;
+  static const int currentVersion = 42;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -860,6 +860,34 @@ class DatabaseMigrations {
         await _createIndexIfNotExists(
             db, 'idx_image_models_enabled', 'image_models', 'is_enabled');
         _log('迁移 v40 → v41: 新建 image_models 表（本地生图模型管理）');
+        break;
+
+      // ========== 版本 42：生图模型生命周期 + 负向提示词预设 + 来源快照 ==========
+      // image_models 加 7 列，支撑「浏览器下载 → 端上转换 → 可用」全生命周期：
+      //   - negative_prompt：负向提示词预设（LLM 只传正向 prompt，负向随模型走）
+      //   - status：downloading|paused|converting|ready|failed。
+      //     存量行默认 'ready' 零影响；getEnabled 只取 ready，agent 看不到半成品。
+      //   - progress：下载/转换进度 0-100，列表内联进度条
+      //   - source_url：文件直链（断点续传/重试）
+      //   - source_page_url / page_snapshot：介绍页 URL + 文本快照（≤50KB），
+      //     为后续「AI 填充 description/tags」存原料
+      //   - error_message：失败原因摘要（重试按钮旁展示）
+      case 42:
+        await _addColumnIfNotExists(db, 'image_models',
+            'negative_prompt', 'TEXT NOT NULL DEFAULT \'\'');
+        await _addColumnIfNotExists(db, 'image_models',
+            'status', 'TEXT NOT NULL DEFAULT \'ready\'');
+        await _addColumnIfNotExists(db, 'image_models',
+            'progress', 'INTEGER NOT NULL DEFAULT 0');
+        await _addColumnIfNotExists(db, 'image_models',
+            'source_url', 'TEXT NOT NULL DEFAULT \'\'');
+        await _addColumnIfNotExists(db, 'image_models',
+            'source_page_url', 'TEXT NOT NULL DEFAULT \'\'');
+        await _addColumnIfNotExists(db, 'image_models',
+            'page_snapshot', 'TEXT NOT NULL DEFAULT \'\'');
+        await _addColumnIfNotExists(db, 'image_models',
+            'error_message', 'TEXT NOT NULL DEFAULT \'\'');
+        _log('迁移 v41 → v42: image_models 加生命周期/负向预设/来源快照 7 列');
         break;
     }
   }

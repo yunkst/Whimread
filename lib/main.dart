@@ -9,6 +9,7 @@ import 'screens/onboarding/onboarding_screen.dart';
 import 'services/app_update_service.dart';
 import 'services/app_update_result.dart';
 import 'core/providers/service_providers.dart';
+import 'core/providers/image_model_download_providers.dart';
 import 'core/providers/theme_provider.dart';
 import 'core/providers/onboarding_providers.dart';
 import 'core/providers/ui_providers.dart';
@@ -132,6 +133,20 @@ void main() async {
 
       // 继续运行，用户可以在设置中配置
     }
+
+    // 生图模型下载/转换的对账：进程被杀遗留的 downloading/converting 行
+    // 归位为 paused/failed（可续传/可重试）。异步执行，不阻塞启动。
+    unawaited(() async {
+      try {
+        await container
+            .read(imageModelDownloadServiceProvider)
+            .recoverOnStartup();
+      } catch (e) {
+        LoggerService.instance.w('生图模型下载对账失败: $e',
+            category: LogCategory.general,
+            tags: ['startup', 'image-model', 'recover']);
+      }
+    }());
 
     runApp(UncontrolledProviderScope(
       container: container,

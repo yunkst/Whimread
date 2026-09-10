@@ -7,7 +7,6 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../models/image_model.dart';
 import '../../repositories/image_model_repository.dart';
 import 'database_providers.dart';
 
@@ -17,12 +16,4 @@ import 'database_providers.dart';
 final imageModelRepositoryProvider = Provider<ImageModelRepository>((ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   return ImageModelRepository(dbConnection: dbConnection);
-});
-
-/// 全部生图模型列表（按 sort_order 排序）
-///
-/// CRUD 后调用 `ref.invalidate(imageModelListProvider)` 刷新。
-final imageModelListProvider = FutureProvider<List<ImageModel>>((ref) async {
-  final repo = ref.watch(imageModelRepositoryProvider);
-  return repo.getAll();
 });

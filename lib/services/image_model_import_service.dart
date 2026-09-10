@@ -17,6 +17,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'conversion/gguf_writer.dart' show kGgufMagic;
+import 'conversion/safetensors_reader.dart';
+
 /// 导入失败（UI 直接把 message 展示给用户）
 class ImageModelImportException implements Exception {
   final String message;
@@ -37,10 +40,15 @@ class ImageModelImportResult {
   /// 用户原始文件名（仅用于预填名字/展示）
   final String originalFileName;
 
+  /// true = safetensors 源文件，需要经端上转换（Q8_0）产出 gguf 后才可用；
+  /// 调用方应建 status=converting 的模型行并调下载服务的转换入口
+  final bool needsConversion;
+
   const ImageModelImportResult({
     required this.filePath,
     required this.fileSize,
     required this.originalFileName,
+    this.needsConversion = false,
   });
 }
 
@@ -49,20 +57,18 @@ class ImageModelImportService {
 
   static final ImageModelImportService instance = ImageModelImportService._();
 
-  /// gguf 文件头 magic：ASCII "GGUF"（G=0x47 G=0x47 U=0x55 F=0x46）
-  static final List<int> _ggufMagic = [0x47, 0x47, 0x55, 0x46];
-
   /// 模型文件存放目录名（位于应用文档目录下）
   static const String _dirName = 'image_models';
 
   /// 弹系统文件选择器 → 校验 → 复制到应用私有目录。
   ///
   /// 用户取消返回 null；校验失败抛 [ImageModelImportException]。
+  /// 支持 .gguf（直接可用）与 .safetensors（needsConversion=true）。
   Future<ImageModelImportResult?> pickAndImport() async {
     final picked = await FilePicker.pickFiles(
       type: FileType.any,
       allowMultiple: false,
-      // 绝不 withData：模型文件 1-2GB，只取路径
+      // 绝不 withData：模型文件 1-12GB，只取路径
       withData: false,
     );
     final pickedFile = picked?.files.single;
@@ -71,11 +77,10 @@ class ImageModelImportService {
       return null;
     }
 
-    return importFromPath(sourcePath,
-        originalFileName: pickedFile.name);
+    return importFromPath(sourcePath, originalFileName: pickedFile.name);
   }
 
-  /// 从已有路径导入（跳过文件选择器，便于测试与未来的 URL 下载入口复用）。
+  /// 从已有路径导入（跳过文件选择器，便于测试与浏览器下载入口复用）。
   Future<ImageModelImportResult> importFromPath(
     String sourcePath, {
     String? originalFileName,
@@ -86,33 +91,55 @@ class ImageModelImportService {
     }
 
     final fileName = originalFileName ?? p.basename(sourcePath);
-    if (!fileName.toLowerCase().endsWith('.gguf')) {
+    final lower = fileName.toLowerCase();
+    final isGguf = lower.endsWith('.gguf');
+    final isSafetensors = lower.endsWith('.safetensors');
+    if (!isGguf && !isSafetensors) {
       throw const ImageModelImportException(
-          '仅支持 .gguf 格式的模型文件（stable-diffusion.cpp 标准格式）。');
+          '仅支持 .gguf 或 .safetensors 格式的模型文件。');
     }
 
-    // 文件头 magic 校验：读前 4 字节，拒绝改扩展名的假 gguf
-    final raf = await source.open(mode: FileMode.read);
-    try {
-      final header = await raf.read(4);
-      var matchesMagic = header.length == 4;
-      for (var i = 0; matchesMagic && i < 4; i++) {
-        if (header[i] != _ggufMagic[i]) matchesMagic = false;
+    if (isGguf) {
+      // 文件头 magic 校验：读前 4 字节，拒绝改扩展名的假 gguf
+      final raf = await source.open(mode: FileMode.read);
+      try {
+        final header = await raf.read(4);
+        var matchesMagic = header.length == 4;
+        for (var i = 0; matchesMagic && i < 4; i++) {
+          if (header[i] != kGgufMagic[i]) matchesMagic = false;
+        }
+        if (!matchesMagic) {
+          throw const ImageModelImportException(
+              '文件头校验失败：不是有效的 GGUF 模型文件（可能仅改了扩展名）。');
+        }
+      } finally {
+        await raf.close();
       }
-      if (!matchesMagic) {
-        throw const ImageModelImportException(
-            '文件头校验失败：不是有效的 GGUF 模型文件（可能仅改了扩展名）。');
+    } else {
+      // safetensors：解析 header 校验（只读头部几 MB，12GB 文件也很快）
+      try {
+        await parseSafetensors(source);
+      } on FormatException catch (e) {
+        throw ImageModelImportException('不是有效的 safetensors 文件：${e.message}');
       }
-    } finally {
-      await raf.close();
     }
 
     final size = await source.length();
 
-    // 复制到应用私有目录（时间戳命名，杜绝非法字符与重名）
-    final destDir = await _ensureModelDir();
-    final destPath = p.join(
-        destDir.path, 'model_${DateTime.now().millisecondsSinceEpoch}.gguf');
+    // 复制到应用私有目录（时间戳命名，杜绝非法字符与重名）。
+    // safetensors 放 model_downloads（转换中间产物目录），gguf 放 image_models。
+    final Directory destDir;
+    if (isSafetensors) {
+      final docs = await getApplicationDocumentsDirectory();
+      destDir = Directory(p.join(docs.path, 'model_downloads'));
+    } else {
+      destDir = await _ensureModelDir();
+    }
+    if (!await destDir.exists()) await destDir.create(recursive: true);
+
+    final destExt = isSafetensors ? 'safetensors' : 'gguf';
+    final destPath = p.join(destDir.path,
+        'model_${DateTime.now().millisecondsSinceEpoch}.$destExt');
     await source.copy(destPath);
     final copiedSize = await File(destPath).length();
 
@@ -120,6 +147,7 @@ class ImageModelImportService {
       filePath: destPath,
       fileSize: copiedSize > 0 ? copiedSize : size,
       originalFileName: fileName,
+      needsConversion: isSafetensors,
     );
   }
 
@@ -143,5 +171,17 @@ class ImageModelImportService {
       await dir.create(recursive: true);
     }
     return dir;
+  }
+
+  /// 已落盘的模型文件路径（image_models 目录下，时间戳命名）。
+  ///
+  /// 下载/转换链路和手动导入共用同款命名规范，避免转换产物落到不同目录
+  /// 或重名覆盖。
+  static Future<String> finalizedModelPath(String ext) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(docs.path, _dirName));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return p.join(dir.path,
+        'model_${DateTime.now().millisecondsSinceEpoch}.$ext');
   }
 }

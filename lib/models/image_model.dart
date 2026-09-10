@@ -1,9 +1,10 @@
 /// 生图模型
 ///
-/// 用户导入的本地 SD 模型（或映射的后端 ComfyUI 工作流）及其元数据。
+/// 用户导入的本地 SD 模型及其元数据。
 /// - [name] 全局唯一，agent 作为 create_images 的 modelName key
 /// - [description] / [tags] 是模型的"特点"，agent 据此为用户需求挑选模型
 /// - [backendType] 决定 create_images 路由到哪个 ImageGenerationBackend
+/// - [status] 生命周期（downloading→converting→ready），半成品对 agent 不可见
 library;
 
 import 'dart:convert';
@@ -33,9 +34,67 @@ enum ImageModelBackendType {
         return ImageModelBackendType.localSd;
     }
   }
+}
 
-  /// UI 展示名
-  String get displayName => '本地引擎';
+/// 生图模型生命周期状态
+///
+/// 完整链路：downloading ─pause→ paused        （下载进度 progress）
+///              │                 ▲resume
+///              ▼ 自动            │
+///           converting ─失败→ failed ─retry─┐
+///              │ 成功                        │
+///              ▼                            ▼
+///            ready                        （可删除）
+///
+/// 仅 [ImageModelStatus.ready] 的模型会被 [ImageModelRepository.getEnabled]
+/// 返回——agent 永远看不到半成品。
+enum ImageModelStatus {
+  downloading,
+  paused,
+  converting,
+  ready,
+  failed;
+
+  /// 数据库 status 列名
+  String get dbName {
+    switch (this) {
+      case ImageModelStatus.downloading:
+        return 'downloading';
+      case ImageModelStatus.paused:
+        return 'paused';
+      case ImageModelStatus.converting:
+        return 'converting';
+      case ImageModelStatus.ready:
+        return 'ready';
+      case ImageModelStatus.failed:
+        return 'failed';
+    }
+  }
+
+  static ImageModelStatus parse(String? name) {
+    switch (name) {
+      case 'downloading':
+        return ImageModelStatus.downloading;
+      case 'paused':
+        return ImageModelStatus.paused;
+      case 'converting':
+        return ImageModelStatus.converting;
+      case 'failed':
+        return ImageModelStatus.failed;
+      case 'ready':
+      default:
+        // 兼容：空值/未知值一律视为 ready（存量行语义）
+        return ImageModelStatus.ready;
+    }
+  }
+
+  /// 是否进行中（UI 据此显示进度条/取消按钮）
+  bool get isActive =>
+      this == ImageModelStatus.downloading ||
+      this == ImageModelStatus.converting;
+
+  /// 是否已就绪（agent 可用）
+  bool get isReady => this == ImageModelStatus.ready;
 }
 
 class ImageModel {
@@ -52,7 +111,7 @@ class ImageModel {
 
   final ImageModelBackendType backendType;
 
-  /// 导入的模型文件绝对路径（local_sd 必填；comfyui 为空）
+  /// 导入的模型文件绝对路径（local_sd 必填）
   final String filePath;
 
   /// 模型文件字节数（UI 展示用）
@@ -73,6 +132,29 @@ class ImageModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  // ===== 生命周期 / 预设 / 来源（v42）=====
+
+  /// 负向提示词预设（LLM 只传正向 prompt，负向随模型走）
+  final String negativePrompt;
+
+  /// 生命周期状态（downloading/paused/converting/ready/failed）
+  final ImageModelStatus status;
+
+  /// 下载/转换进度 0-100
+  final int progress;
+
+  /// 文件直链（断点续传/重试用）
+  final String sourceUrl;
+
+  /// 介绍页 URL（下载来源页面）
+  final String sourcePageUrl;
+
+  /// 介绍页文本快照（≤50KB，AI 填充 description/tags 的原料）
+  final String pageSnapshot;
+
+  /// 失败原因摘要（status=failed 时展示）
+  final String errorMessage;
+
   const ImageModel({
     this.id,
     required this.name,
@@ -91,27 +173,14 @@ class ImageModel {
     this.sortOrder = 0,
     required this.createdAt,
     required this.updatedAt,
+    this.negativePrompt = '',
+    this.status = ImageModelStatus.ready,
+    this.progress = 0,
+    this.sourceUrl = '',
+    this.sourcePageUrl = '',
+    this.pageSnapshot = '',
+    this.errorMessage = '',
   });
-
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'description': description,
-        'tags': jsonEncode(tags),
-        'backend_type': backendType.dbName,
-        'file_path': filePath,
-        'file_size': fileSize,
-        'preview_media_id': previewMediaId,
-        'default_width': defaultWidth,
-        'default_height': defaultHeight,
-        'default_steps': defaultSteps,
-        'default_cfg': defaultCfg,
-        'is_enabled': isEnabled ? 1 : 0,
-        'is_default': isDefault ? 1 : 0,
-        'sort_order': sortOrder,
-        'created_at': createdAt.millisecondsSinceEpoch,
-        'updated_at': updatedAt.millisecondsSinceEpoch,
-      };
 
   factory ImageModel.fromMap(Map<String, dynamic> map) {
     final rawTags = map['tags'] as String?;
@@ -147,33 +216,13 @@ class ImageModel {
           (map['created_at'] as int?) ?? DateTime.now().millisecondsSinceEpoch),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(
           (map['updated_at'] as int?) ?? DateTime.now().millisecondsSinceEpoch),
-    );
-  }
-
-  /// 生成一个用于「复制」的无 id 副本。
-  ///
-  /// 必须用这个方法而不是 `copyWith(id: null)`：copyWith 用 `id ?? this.id`
-  /// 处理可空字段，传 null 会沿用原 id，导致 save 走 update 分支覆盖原记录
-  /// （与 LlmConfig.duplicate 注释同一根因）。名字加后缀避免唯一索引冲突。
-  ImageModel duplicate({String suffix = ' (副本)'}) {
-    final now = DateTime.now();
-    return ImageModel(
-      name: '$name$suffix',
-      description: description,
-      tags: List.of(tags),
-      backendType: backendType,
-      filePath: filePath,
-      fileSize: fileSize,
-      previewMediaId: previewMediaId,
-      defaultWidth: defaultWidth,
-      defaultHeight: defaultHeight,
-      defaultSteps: defaultSteps,
-      defaultCfg: defaultCfg,
-      isEnabled: isEnabled,
-      isDefault: false,
-      sortOrder: sortOrder,
-      createdAt: now,
-      updatedAt: now,
+      negativePrompt: (map['negative_prompt'] as String?) ?? '',
+      status: ImageModelStatus.parse(map['status'] as String?),
+      progress: (map['progress'] as int?) ?? 0,
+      sourceUrl: (map['source_url'] as String?) ?? '',
+      sourcePageUrl: (map['source_page_url'] as String?) ?? '',
+      pageSnapshot: (map['page_snapshot'] as String?) ?? '',
+      errorMessage: (map['error_message'] as String?) ?? '',
     );
   }
 
@@ -195,6 +244,13 @@ class ImageModel {
     int? sortOrder,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? negativePrompt,
+    ImageModelStatus? status,
+    int? progress,
+    String? sourceUrl,
+    String? sourcePageUrl,
+    String? pageSnapshot,
+    String? errorMessage,
   }) =>
       ImageModel(
         id: id ?? this.id,
@@ -214,6 +270,13 @@ class ImageModel {
         sortOrder: sortOrder ?? this.sortOrder,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        negativePrompt: negativePrompt ?? this.negativePrompt,
+        status: status ?? this.status,
+        progress: progress ?? this.progress,
+        sourceUrl: sourceUrl ?? this.sourceUrl,
+        sourcePageUrl: sourcePageUrl ?? this.sourcePageUrl,
+        pageSnapshot: pageSnapshot ?? this.pageSnapshot,
+        errorMessage: errorMessage ?? this.errorMessage,
       );
 
   @override

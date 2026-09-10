@@ -5,7 +5,7 @@
 /// - 导入 .gguf 模型文件 → 编辑对话框填名字与特点 → 落库
 /// - 编辑 / 删除 / 启停 / 设为默认
 ///
-/// 架构：本 Screen 直接 watch [imageModelListProvider]，CRUD 后
+/// 架构：本 Screen watch [imageModelLifecycleProvider]（含下载事件自动刷新），CRUD 后
 /// ref.invalidate 刷新（与 characterListProvider 同款刷新约定）。
 library;
 
@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/interfaces/repositories/i_image_model_repository.dart';
+import '../../core/providers/image_model_download_providers.dart';
 import '../../core/providers/image_model_providers.dart';
 import '../../models/image_model.dart';
 import '../../services/image_model_import_service.dart';
@@ -28,7 +29,8 @@ class ImageModelManagementScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modelsAsync = ref.watch(imageModelListProvider);
+    // 生命周期视图：下载/转换事件自动刷新（进度条实时走动）
+    final modelsAsync = ref.watch(imageModelLifecycleProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -49,18 +51,28 @@ class ImageModelManagementScreen extends ConsumerWidget {
             return EmptyStateView(
               icon: Icons.image_outlined,
               title: '还没有生图模型',
-              subtitle: '导入 .gguf 格式的本地 SD 模型，\n'
+              subtitle: '导入 .gguf / .safetensors 模型文件，\n'
+                  '或在内置浏览器下载模型自动导入；\n'
                   'Agent 会根据模型特点自动选型出图。',
               actionText: '导入第一个模型',
               onAction: () => _addModel(context, ref),
             );
           }
+          // 下载/转换中的排前面（用户正在等的任务），其余按 sort_order
+          final sorted = List<ImageModel>.of(models)
+            ..sort((a, b) {
+              final aActive = a.status.isActive ? 0 : 1;
+              final bActive = b.status.isActive ? 0 : 1;
+              if (aActive != bActive) return aActive - bActive;
+              return a.sortOrder.compareTo(b.sortOrder);
+            });
           return ListView.separated(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: models.length,
+            itemCount: sorted.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, i) =>
-                _ModelCard(model: models[i], existingNames: _nameSet(models, models[i])),
+            itemBuilder: (context, i) => _ModelCard(
+                model: sorted[i],
+                existingNames: _nameSet(sorted, sorted[i])),
           );
         },
       ),
@@ -71,7 +83,9 @@ class ImageModelManagementScreen extends ConsumerWidget {
       {for (final m in all) if (m.id != exclude.id) m.name};
 
   Future<void> _addModel(BuildContext context, WidgetRef ref) async {
-    // 导入流程：选文件 → 复制 → 编辑对话框填元数据
+    // 导入流程：选文件 → 复制 →
+    //   .gguf       → 编辑对话框填元数据 → ready 落库
+    //   .safetensors → 建 converting 行 → 端上转换 → ready
     ImageModelImportResult? imported;
     try {
       imported = await ImageModelImportService.instance.pickAndImport();
@@ -90,6 +104,41 @@ class ImageModelManagementScreen extends ConsumerWidget {
     if (!context.mounted) return;
 
     final repo = ref.read(imageModelRepositoryProvider);
+
+    // ===== safetensors：不弹编辑框（转换完成后再编辑），直接入队转换 =====
+    if (imported.needsConversion) {
+      final now = DateTime.now();
+      final row = ImageModel(
+        name: _stripGguf(imported.originalFileName),
+        status: ImageModelStatus.converting,
+        filePath: imported.filePath,
+        fileSize: imported.fileSize,
+        createdAt: now,
+        updatedAt: now,
+      );
+      try {
+        final id = await repo.save(row.copyWith(sortOrder: await repo.getNextSortOrder()));
+        final saved = await repo.getById(id);
+        if (saved != null) {
+          await ref
+              .read(imageModelDownloadServiceProvider)
+              .startConversionForImportedFile(saved, imported.filePath);
+        }
+        ref.invalidate(imageModelLifecycleProvider);
+        if (context.mounted) {
+          ToastUtils.showInfo(
+              '已导入「${row.name}」，正在转换（Q8_0 量化，需数分钟）',
+              context: context);
+        }
+      } catch (e) {
+        LoggerService.instance.e('safetensors 导入失败: $e',
+            category: LogCategory.ai, tags: ['image_model', 'import']);
+        if (context.mounted) ToastUtils.showError('导入失败：$e', context: context);
+      }
+      return;
+    }
+
+    // ===== gguf：原有编辑对话框流程 =====
     final models = await repo.getAll();
     if (!context.mounted) return;
 
@@ -111,7 +160,7 @@ class ImageModelManagementScreen extends ConsumerWidget {
     try {
       final sortOrder = await repo.getNextSortOrder();
       await repo.save(model.copyWith(sortOrder: sortOrder));
-      ref.invalidate(imageModelListProvider);
+      ref.invalidate(imageModelLifecycleProvider);
       if (context.mounted) ToastUtils.showSuccess('已添加模型「${model.name}」', context: context);
     } on ImageModelNameConflictException {
       if (context.mounted) {
@@ -125,9 +174,8 @@ class ImageModelManagementScreen extends ConsumerWidget {
   }
 
   static String _stripGguf(String fileName) {
-    final base = fileName.endsWith('.gguf') || fileName.endsWith('.GGUF')
-        ? fileName.substring(0, fileName.length - 5)
-        : fileName;
+    final base = fileName.replaceAll(
+        RegExp(r'\.(safetensors|gguf)$', caseSensitive: false), '');
     return base.isEmpty ? '未命名模型' : base;
   }
 }
@@ -141,6 +189,7 @@ class _ModelCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isReady = model.status.isReady;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -160,13 +209,15 @@ class _ModelCard extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (model.status != ImageModelStatus.ready) ...[
+                        const SizedBox(width: 6),
+                        _chip(context, _statusLabel(model.status),
+                            _statusColor(model.status, colorScheme)),
+                      ],
                       if (model.isDefault) ...[
                         const SizedBox(width: 6),
                         _chip(context, '默认', colorScheme.primary),
                       ],
-                      const SizedBox(width: 6),
-                      _chip(context, model.backendType.displayName,
-                          colorScheme.secondary),
                       if (!model.isEnabled) ...[
                         const SizedBox(width: 6),
                         _chip(context, '已停用', colorScheme.outline),
@@ -177,20 +228,41 @@ class _ModelCard extends ConsumerWidget {
                 PopupMenuButton<String>(
                   onSelected: (action) =>
                       _onMenu(context, ref, action),
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'edit', child: Text('编辑')),
-                    if (!model.isDefault)
-                      const PopupMenuItem(value: 'default', child: Text('设为默认')),
-                    PopupMenuItem(
-                      value: 'toggle',
-                      child: Text(model.isEnabled ? '停用' : '启用'),
-                    ),
-                    const PopupMenuItem(value: 'delete', child: Text('删除')),
-                  ],
+                  itemBuilder: (_) => _menuItems(),
                 ),
               ],
             ),
-            if (model.description.isNotEmpty) ...[
+            // 生命周期区：进度条 / 错误信息 / 状态操作按钮
+            if (model.status == ImageModelStatus.downloading) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: model.progress / 100.0),
+              const SizedBox(height: 4),
+              Text('下载中 ${model.progress}%',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ] else if (model.status == ImageModelStatus.paused) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: model.progress / 100.0),
+              const SizedBox(height: 4),
+              Text('已暂停（${model.progress}%）',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ] else if (model.status == ImageModelStatus.converting) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 4),
+              Text('转换中（Q8_0 量化，数分钟）',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ] else if (model.status == ImageModelStatus.failed) ...[
+              const SizedBox(height: 10),
+              Text(
+                model.errorMessage.isEmpty ? '下载/转换失败' : model.errorMessage,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.error,
+                    ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            if (isReady && model.description.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(
                 model.description,
@@ -201,7 +273,7 @@ class _ModelCard extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ],
-            if (model.tags.isNotEmpty) ...[
+            if (isReady && model.tags.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
@@ -212,16 +284,90 @@ class _ModelCard extends ConsumerWidget {
               ),
             ],
             const SizedBox(height: 8),
-            Text(
-              '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurface.withValues(alpha: 0.5),
-                  ),
-            ),
+            if (isReady)
+              Text(
+                '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+              )
+            else if (model.sourcePageUrl.isNotEmpty)
+              Text(
+                '来源：${Uri.tryParse(model.sourcePageUrl)?.host ?? model.sourcePageUrl}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
           ],
         ),
       ),
     );
+  }
+
+  String _statusLabel(ImageModelStatus s) {
+    switch (s) {
+      case ImageModelStatus.downloading:
+        return '下载中';
+      case ImageModelStatus.paused:
+        return '已暂停';
+      case ImageModelStatus.converting:
+        return '转换中';
+      case ImageModelStatus.failed:
+        return '失败';
+      case ImageModelStatus.ready:
+        return '';
+    }
+  }
+
+  Color _statusColor(ImageModelStatus s, ColorScheme scheme) {
+    switch (s) {
+      case ImageModelStatus.downloading:
+      case ImageModelStatus.converting:
+        return scheme.tertiary;
+      case ImageModelStatus.paused:
+        return scheme.outline;
+      case ImageModelStatus.failed:
+        return scheme.error;
+      case ImageModelStatus.ready:
+        return scheme.primary;
+    }
+  }
+
+  List<PopupMenuItem<String>> _menuItems() {
+    switch (model.status) {
+      case ImageModelStatus.downloading:
+        return const [
+          PopupMenuItem(value: 'pause', child: Text('暂停')),
+          PopupMenuItem(value: 'delete', child: Text('取消并删除')),
+        ];
+      case ImageModelStatus.paused:
+        return const [
+          PopupMenuItem(value: 'resume', child: Text('继续下载')),
+          PopupMenuItem(value: 'delete', child: Text('取消并删除')),
+        ];
+      case ImageModelStatus.converting:
+        return const [
+          PopupMenuItem(value: 'delete', child: Text('删除')),
+        ];
+      case ImageModelStatus.failed:
+        return const [
+          PopupMenuItem(value: 'retry', child: Text('重试')),
+          PopupMenuItem(value: 'delete', child: Text('删除')),
+        ];
+      case ImageModelStatus.ready:
+        return [
+          const PopupMenuItem(value: 'edit', child: Text('编辑')),
+          if (!model.isDefault)
+            const PopupMenuItem(value: 'default', child: Text('设为默认')),
+          PopupMenuItem(
+            value: 'toggle',
+            child: Text(model.isEnabled ? '停用' : '启用'),
+          ),
+          const PopupMenuItem(value: 'delete', child: Text('删除')),
+        ];
+    }
   }
 
   static String _fileName(String path) {
@@ -245,7 +391,49 @@ class _ModelCard extends ConsumerWidget {
   Future<void> _onMenu(
       BuildContext context, WidgetRef ref, String action) async {
     final repo = ref.read(imageModelRepositoryProvider);
+    final downloadService = ref.read(imageModelDownloadServiceProvider);
     switch (action) {
+      // ===== 生命周期动作 =====
+      case 'pause':
+        await downloadService.pause(model.id!);
+        ref.invalidate(imageModelLifecycleProvider);
+        break;
+      case 'resume':
+        await downloadService.resume(model);
+        ref.invalidate(imageModelLifecycleProvider);
+        break;
+      case 'retry':
+        // failed 行按来源分流：有源文件的转换失败 → 重试转换；否则重试下载
+        final src = model.sourceUrl.isNotEmpty;
+        if (src) {
+          await downloadService.resume(model);
+        } else {
+          await downloadService.retryConversion(model);
+        }
+        ref.invalidate(imageModelLifecycleProvider);
+        break;
+      case 'delete':
+        if (!context.mounted) return;
+        final confirmed = await ConfirmDialog.show(
+          context,
+          title: '确认删除',
+          message: model.status.isReady
+              ? '将删除模型「${model.name}」及其模型文件，此操作不可恢复。'
+              : '将取消「${model.name}」的下载/转换并删除相关文件。',
+          confirmText: '删除',
+          isDangerous: true,
+        );
+        if (confirmed != true) return;
+        // 清理下载/转换临时文件 + 最终模型文件，再删记录
+        await downloadService.cleanupFiles(model.id!);
+        await ImageModelImportService.instance.deleteModelFile(model.filePath);
+        await repo.delete(model.id!);
+        ref.invalidate(imageModelLifecycleProvider);
+        if (context.mounted) {
+          ToastUtils.showSuccess('已删除「${model.name}」', context: context);
+        }
+        break;
+      // ===== ready 模型的常规动作 =====
       case 'edit':
         if (!context.mounted) return;
         final updated = await showDialog<ImageModel>(
@@ -258,7 +446,7 @@ class _ModelCard extends ConsumerWidget {
         if (updated == null) return;
         try {
           await repo.save(updated);
-          ref.invalidate(imageModelListProvider);
+          ref.invalidate(imageModelLifecycleProvider);
           if (context.mounted) {
             ToastUtils.showSuccess('已保存「${updated.name}」', context: context);
           }
@@ -270,30 +458,11 @@ class _ModelCard extends ConsumerWidget {
         break;
       case 'default':
         await repo.setDefault(model.id!);
-        ref.invalidate(imageModelListProvider);
+        ref.invalidate(imageModelLifecycleProvider);
         break;
       case 'toggle':
         await repo.save(model.copyWith(isEnabled: !model.isEnabled));
-        ref.invalidate(imageModelListProvider);
-        break;
-      case 'delete':
-if (!context.mounted) return;
-        final confirmed = await ConfirmDialog.show(
-          context,
-          title: '确认删除',
-          message: '将删除模型「${model.name}」及其模型文件，'
-              '此操作不可恢复。',
-          confirmText: '删除',
-          isDangerous: true,
-        );
-        if (confirmed != true) return;
-        // 先删文件再删记录
-        await ImageModelImportService.instance.deleteModelFile(model.filePath);
-        await repo.delete(model.id!);
-        ref.invalidate(imageModelListProvider);
-        if (context.mounted) {
-          ToastUtils.showSuccess('已删除「${model.name}」', context: context);
-        }
+        ref.invalidate(imageModelLifecycleProvider);
         break;
     }
   }

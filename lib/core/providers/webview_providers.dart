@@ -1,11 +1,17 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../models/image_model.dart';
 import '../../models/site_script.dart';
 import '../../services/logger_service.dart';
 import '../../services/bookmark_service.dart';
 import '../../services/browser_settings_service.dart';
 import 'database_providers.dart';
+import 'image_model_download_providers.dart';
+import 'image_model_providers.dart';
 
 /// 构造桌面/手机模式的 InAppWebViewSettings
 ///
@@ -567,4 +573,123 @@ class SiteScriptListNotifier
 
   /// 刷新脚本列表
   void refresh() => _loadScripts();
+}
+
+// ============================================================
+// 生图模型下载拦截（2026-09 重生：旧链路 2026-07 因 ComfyUI 后端移除删除，
+// 现目的地改为应用私有目录 + 端上转换）
+// ============================================================
+
+/// 页面快照 + UA 的抓取 JS（在 webview 内执行）
+const String _pageSnapshotJs = '''
+(function() {
+  var desc = '';
+  var metaDesc = document.querySelector('meta[name="description"]');
+  if (metaDesc) desc = metaDesc.content || '';
+  var ogDesc = document.querySelector('meta[property="og:description"]');
+  if (!desc && ogDesc) desc = ogDesc.getAttribute('content') || '';
+  var text = (document.title || '') + '\n' + desc + '\n' +
+    (document.body ? document.body.innerText : '');
+  return JSON.stringify({ text: text.slice(0, 16000), ua: navigator.userAgent });
+})()
+''';
+
+/// 处理 webview 下载请求。
+///
+/// URL 指向模型文件（.safetensors / .gguf）时接管：弹确认 → 建模型行
+/// （status=downloading，含来源页快照）→ 启动下载，返回 true 表示已拦截；
+/// 其他 URL 返回 false（不接管）。
+///
+/// [controller] 用于抓取页面快照与 cookies（保住下载站登录态）；
+/// [sourcePage] 为拦截时的页面 URL。
+Future<bool> handleImageModelDownloadStart(
+  WidgetRef ref, {
+  required String url,
+  required String suggestedFilename,
+  required String sourcePage,
+  InAppWebViewController? controller,
+}) async {
+  final filename = suggestedFilename.isNotEmpty
+      ? suggestedFilename
+      : Uri.tryParse(url)?.pathSegments.lastOrNull ?? 'model';
+
+  final lower = filename.toLowerCase();
+  final isModelFile =
+      lower.endsWith('.safetensors') || lower.endsWith('.gguf');
+  if (!isModelFile) return false;
+
+  final repo = ref.read(imageModelRepositoryProvider);
+  final logger = LoggerService.instance;
+
+  // 去重：同一 URL 已有进行中/暂停的任务
+  final all = await repo.getAll();
+  final duplicate = all.any((m) =>
+      m.sourceUrl == url &&
+      (m.status.isActive || m.status == ImageModelStatus.paused));
+  if (duplicate) {
+    logger.i('模型下载重复拦截（已有任务）: $url',
+        category: LogCategory.network, tags: ['webview', 'download', 'dup']);
+    return true;
+  }
+
+  logger.i('拦截模型下载: $filename ($url)',
+      category: LogCategory.network, tags: ['webview', 'download']);
+
+  // 抓页面快照 + UA（失败不阻断下载）
+  String snapshot = '';
+  String userAgent = '';
+  if (controller != null) {
+    try {
+      final raw = await controller.evaluateJavascript(source: _pageSnapshotJs);
+      if (raw is String && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          snapshot = (decoded['text'] ?? '').toString();
+          userAgent = (decoded['ua'] ?? '').toString();
+        }
+      }
+    } catch (e) {
+      logger.w('抓取页面快照失败（不影响下载）: $e',
+          category: LogCategory.network,
+          tags: ['webview', 'download', 'snapshot']);
+    }
+  }
+
+  // 建模型行并启动下载（status=downloading；名字先用文件名，用户后续可改）
+  final now = DateTime.now();
+  final model = ImageModel(
+    name: filename.replaceAll(RegExp(r'\.(safetensors|gguf)$', caseSensitive: false), ''),
+    status: ImageModelStatus.downloading,
+    sourceUrl: url,
+    sourcePageUrl: sourcePage,
+    pageSnapshot: snapshot,
+    createdAt: now,
+    updatedAt: now,
+  );
+  final id = await repo.save(model);
+  ref.invalidate(imageModelLifecycleProvider);
+
+  // webview cookies → 下载请求头（document.cookie 不含 HttpOnly，尽力而为）
+  String? cookieHeader;
+  if (controller != null) {
+    try {
+      final raw = await controller.evaluateJavascript(
+          source: 'document.cookie');
+      if (raw is String && raw.isNotEmpty && raw != 'null') {
+        cookieHeader = raw;
+      }
+    } catch (_) {}
+  }
+
+  final saved = await repo.getById(id);
+  if (saved != null) {
+    // 不 await——下载可能持续数分钟；错误走 repo 状态流，UI 由
+    // imageModelLifecycleProvider 自动刷新
+    unawaited(ref.read(imageModelDownloadServiceProvider).startDownload(
+          saved,
+          cookieHeader: cookieHeader,
+          userAgent: userAgent.isNotEmpty ? userAgent : null,
+        ));
+  }
+  return true;
 }

@@ -44,6 +44,7 @@ class ImageModelEditDialog extends StatefulWidget {
 class _ImageModelEditDialogState extends State<ImageModelEditDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _negativePromptController;
   late final TextEditingController _tagController;
   late final TextEditingController _widthController;
   late final TextEditingController _heightController;
@@ -67,6 +68,8 @@ class _ImageModelEditDialogState extends State<ImageModelEditDialog> {
       text: widget.presetName ?? m?.name ?? '',
     );
     _descriptionController = TextEditingController(text: m?.description ?? '');
+    _negativePromptController =
+        TextEditingController(text: m?.negativePrompt ?? '');
     _tagController = TextEditingController();
     _widthController = TextEditingController(text: '${m?.defaultWidth ?? 512}');
     _heightController =
@@ -85,6 +88,7 @@ class _ImageModelEditDialogState extends State<ImageModelEditDialog> {
   void dispose() {
     _nameController.dispose();
     _descriptionController.dispose();
+    _negativePromptController.dispose();
     _tagController.dispose();
     _widthController.dispose();
     _heightController.dispose();
@@ -145,6 +149,7 @@ class _ImageModelEditDialogState extends State<ImageModelEditDialog> {
       name: name,
       description: _descriptionController.text.trim(),
       tags: _tags,
+      negativePrompt: _negativePromptController.text.trim(),
       filePath: _filePath,
       fileSize: _fileSize,
       previewMediaId: widget.model?.previewMediaId,
@@ -214,6 +219,19 @@ class _ImageModelEditDialogState extends State<ImageModelEditDialog> {
               onRemove: (tag) => setState(() {
                 _tags = _tags.where((e) => e != tag).toList();
               }),
+            ),
+            const SizedBox(height: 12),
+            // 负向提示词预设（agent 不传 negativePrompt，由模型统一提供）
+            TextField(
+              controller: _negativePromptController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: '负向提示词（预设）',
+                hintText: '如：worst quality, extra fingers, blurry, watermark',
+                helperText: '每次用该模型生图时自动附加，Agent 无需再传',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
             ),
             const SizedBox(height: 12),
             // 模型文件信息

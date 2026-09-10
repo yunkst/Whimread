@@ -5,7 +5,6 @@
 /// - 排序（按 sort_order ASC, id ASC）
 /// - 默认值唯一性（setDefault 原子事务）
 /// - 名字唯一性（unique 索引触发 ImageModelNameConflictException）
-/// - nameExists 编辑自身时排除
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -173,13 +172,6 @@ void main() {
       final id = await repo.save(_mk(name: '保留', description: '原'));
       await repo.save((await repo.getById(id))!.copyWith(description: '新'));
       expect((await repo.getById(id))!.description, '新');
-    });
-
-    test('nameExists 排除自身 ID', () async {
-      final id = await repo.save(_mk(name: '本条'));
-      expect(await repo.nameExists('本条', excludeId: id), false);
-      expect(await repo.nameExists('本条'), true);
-      expect(await repo.nameExists('其他'), false);
     });
   });
 

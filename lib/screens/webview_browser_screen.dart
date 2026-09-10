@@ -9,6 +9,7 @@ import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../services/logger_service.dart';
+import '../utils/toast_utils.dart';
 import '../widgets/webview_address_bar.dart';
 import '../widgets/bookmark_panel.dart';
 import '../widgets/site_script_panel.dart';
@@ -345,6 +346,19 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
       },
       onReceivedError: (controller, request, error) {
         notifier.handleError(error);
+      },
+      onDownloadStartRequest: (controller, request) async {
+        final intercepted = await handleImageModelDownloadStart(
+          ref,
+          url: request.url.toString(),
+          suggestedFilename: request.suggestedFilename ?? '',
+          sourcePage: ref.read(webviewCurrentUrlProvider),
+          controller: controller,
+        );
+        if (intercepted && mounted) {
+          ToastUtils.showInfo('已加入模型下载，可在「设置 → 生图模型管理」查看进度',
+              context: context);
+        }
       },
     );
 

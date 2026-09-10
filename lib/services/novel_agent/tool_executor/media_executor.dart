@@ -88,8 +88,6 @@ class MediaExecutor with ToolExecutorHelpers {
     if (countErr != null) return countErr;
     final (modelName, modelNameErr) = parser.nullableString('modelName');
     if (modelNameErr != null) return modelNameErr;
-    final (negativePrompt, negPromptErr) = parser.nullableString('negativePrompt');
-    if (negPromptErr != null) return negPromptErr;
 
     final count = (countRaw ?? 1).clamp(1, 4);
 
@@ -127,6 +125,9 @@ class MediaExecutor with ToolExecutorHelpers {
 
     // ---------- 本地引擎生图 ----------
     final backend = ref.read(imageGenerationBackendByTypeProvider(model.backendType));
+    // 负向提示词来自模型预设（用户配置），LLM 不传
+    final negativePrompt =
+        model.negativePrompt.isEmpty ? null : model.negativePrompt;
     try {
       final result = await backend.submit(
         ImageGenerationRequest(
@@ -184,9 +185,4 @@ class MediaExecutor with ToolExecutorHelpers {
     }
     return parts.isEmpty ? '' : parts.join('。');
   }
-}
-
-/// firstOrNull 兼容扩展（避免引 collection 包依赖）
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }

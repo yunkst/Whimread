@@ -13,6 +13,36 @@ class ImageModelRepository extends BaseRepository
 
   ImageModelRepository({required super.dbConnection});
 
+  /// save 走的列字典（insert/update 共用，避免两处漂移）
+  Map<String, dynamic> _rowMap(ImageModel model, {required bool isInsert}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return {
+      'name': model.name,
+      'description': model.description,
+      'tags': jsonEncode(model.tags),
+      'backend_type': model.backendType.dbName,
+      'file_path': model.filePath,
+      'file_size': model.fileSize,
+      'preview_media_id': model.previewMediaId,
+      'default_width': model.defaultWidth,
+      'default_height': model.defaultHeight,
+      'default_steps': model.defaultSteps,
+      'default_cfg': model.defaultCfg,
+      'is_enabled': model.isEnabled ? 1 : 0,
+      'is_default': model.isDefault ? 1 : 0,
+      'sort_order': model.sortOrder,
+      'updated_at': now,
+      'negative_prompt': model.negativePrompt,
+      'status': model.status.dbName,
+      'progress': model.progress,
+      'source_url': model.sourceUrl,
+      'source_page_url': model.sourcePageUrl,
+      'page_snapshot': model.pageSnapshot,
+      'error_message': model.errorMessage,
+      if (isInsert) 'created_at': now,
+    };
+  }
+
   @override
   Future<List<ImageModel>> getAll() async {
     final db = await database;
@@ -25,7 +55,7 @@ class ImageModelRepository extends BaseRepository
     final db = await database;
     final maps = await db.query(
       _table,
-      where: 'is_enabled = ?',
+      where: "is_enabled = ? AND status = 'ready'",
       whereArgs: [1],
       orderBy: 'sort_order ASC, id ASC',
     );
@@ -66,49 +96,15 @@ class ImageModelRepository extends BaseRepository
   @override
   Future<int> save(ImageModel model) async {
     final db = await database;
-    final now = DateTime.now().millisecondsSinceEpoch;
 
     try {
       if (model.id == null) {
-        return await db.insert(_table, {
-          'name': model.name,
-          'description': model.description,
-          'tags': jsonEncode(model.tags),
-          'backend_type': model.backendType.dbName,
-          'file_path': model.filePath,
-          'file_size': model.fileSize,
-          'preview_media_id': model.previewMediaId,
-          'default_width': model.defaultWidth,
-          'default_height': model.defaultHeight,
-          'default_steps': model.defaultSteps,
-          'default_cfg': model.defaultCfg,
-          'is_enabled': model.isEnabled ? 1 : 0,
-          'is_default': model.isDefault ? 1 : 0,
-          'sort_order': model.sortOrder,
-          'created_at': now,
-          'updated_at': now,
-        });
+        return await db.insert(_table, _rowMap(model, isInsert: true));
       }
 
       await db.update(
         _table,
-        {
-          'name': model.name,
-          'description': model.description,
-          'tags': jsonEncode(model.tags),
-          'backend_type': model.backendType.dbName,
-          'file_path': model.filePath,
-          'file_size': model.fileSize,
-          'preview_media_id': model.previewMediaId,
-          'default_width': model.defaultWidth,
-          'default_height': model.defaultHeight,
-          'default_steps': model.defaultSteps,
-          'default_cfg': model.defaultCfg,
-          'is_enabled': model.isEnabled ? 1 : 0,
-          'is_default': model.isDefault ? 1 : 0,
-          'sort_order': model.sortOrder,
-          'updated_at': now,
-        },
+        _rowMap(model, isInsert: false),
         where: 'id = ?',
         whereArgs: [model.id],
       );
@@ -183,26 +179,67 @@ class ImageModelRepository extends BaseRepository
     return result.first['count'] as int;
   }
 
+  // ============================================================
+  // 生命周期部分更新（下载/转换高频进度写库，避免整行 UPDATE）
+  // ============================================================
+
   @override
-  Future<bool> nameExists(String name, {int? excludeId}) async {
+  Future<void> updateProgress(int id, int progress) async {
     final db = await database;
-    if (excludeId == null) {
-      final result = await db.query(
-        _table,
-        columns: const ['id'],
-        where: 'name = ?',
-        whereArgs: [name],
-        limit: 1,
-      );
-      return result.isNotEmpty;
-    }
-    final result = await db.query(
+    await db.update(
       _table,
-      columns: const ['id'],
-      where: 'name = ? AND id != ?',
-      whereArgs: [name, excludeId],
-      limit: 1,
+      {
+        'progress': progress.clamp(0, 100),
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
     );
-    return result.isNotEmpty;
+  }
+
+  @override
+  Future<void> updateStatus(
+    int id,
+    ImageModelStatus status, {
+    String errorMessage = '',
+    int? progress,
+    String? filePath,
+    int? fileSize,
+    int? defaultWidth,
+    int? defaultHeight,
+  }) async {
+    final db = await database;
+    await db.update(
+      _table,
+      {
+        'status': status.dbName,
+        'error_message': errorMessage,
+        if (progress != null) 'progress': progress.clamp(0, 100),
+        if (filePath != null) 'file_path': filePath,
+        if (fileSize != null) 'file_size': fileSize,
+        if (defaultWidth != null) 'default_width': defaultWidth,
+        if (defaultHeight != null) 'default_height': defaultHeight,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    LoggerService.instance.i(
+        '生图模型状态变更: id=$id → ${status.dbName}'
+        '${errorMessage.isNotEmpty ? " ($errorMessage)" : ""}',
+        category: LogCategory.database,
+        tags: ['image_model', 'status']);
+  }
+
+  @override
+  Future<List<ImageModel>> getByStatus(ImageModelStatus status) async {
+    final db = await database;
+    final maps = await db.query(
+      _table,
+      where: 'status = ?',
+      whereArgs: [status.dbName],
+      orderBy: 'sort_order ASC, id ASC',
+    );
+    return maps.map(ImageModel.fromMap).toList();
   }
 }

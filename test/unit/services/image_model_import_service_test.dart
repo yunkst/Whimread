@@ -18,7 +18,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:novel_app/services/image_model_import_service.dart';
-import 'path_provider_fake.dart';
+import '../../helpers/path_provider_fake.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +45,19 @@ void main() {
     file.writeAsBytesSync(bytes);
     return file.path;
   }
+  /// 写一个最小合法 safetensors（单 F32 张量）
+  String writeFakeSafetensors({String name = 'fake.safetensors'}) {
+    final header =
+        '{"w":{"dtype":"F32","shape":[4],"data_offsets":[0,16]}}';
+    final buf = BytesBuilder()
+      ..add((ByteData(8)..setUint64(0, header.length, Endian.little))
+          .buffer
+          .asUint8List())
+      ..add(header.codeUnits)
+      ..add(Uint8List(16));
+    final file = File(p.join(tmpRoot.path, name))..writeAsBytesSync(buf.toBytes());
+    return file.path;
+  }
 
   group('importFromPath 校验', () {
     test('文件不存在 → 抛 ImageModelImportException', () async {
@@ -63,6 +76,27 @@ void main() {
         () => ImageModelImportService.instance.importFromPath(src.path),
         throwsA(isA<ImageModelImportException>()),
       );
+    });
+
+    test('合法 safetensors → needsConversion=true，副本在 model_downloads',
+        () async {
+      final src = writeFakeSafetensors();
+      final r = await ImageModelImportService.instance.importFromPath(src);
+      expect(r.needsConversion, isTrue);
+      expect(r.filePath, contains('model_downloads'));
+      expect(r.filePath, endsWith('.safetensors'));
+      expect(File(r.filePath).existsSync(), isTrue);
+    });
+
+    test('损坏 safetensors → 抛 ImageModelImportException', () async {
+      final src = File(p.join(tmpRoot.path, 'broken.safetensors'))
+        ..writeAsBytesSync([1, 2, 3, 4]);
+      try {
+        await ImageModelImportService.instance.importFromPath(src.path);
+        fail('应抛异常');
+      } on ImageModelImportException catch (e) {
+        expect(e.message, contains('safetensors'));
+      }
     });
 
     test('文件头 magic 不对 → 抛 ImageModelImportException', () async {
@@ -97,12 +131,11 @@ void main() {
       expect(copied.readAsBytesSync().sublist(0, 4), [0x47, 0x47, 0x55, 0x46]);
     });
 
-    test('originalFileName 自动去 .gguf 后缀（在 EditDialog 里通过 _stripGguf 处理）',
-        () async {
-      // 本测试只验证 importFromPath 不动 name；剥后缀由调用方完成
-      final src = writeFakeGguf();
-      final result = await ImageModelImportService.instance.importFromPath(src);
-      expect(result.originalFileName, isNotNull);
+    test('originalFileName 原样保留（去后缀由调用方负责）', () async {
+      final src = writeFakeGguf(name: '古风.gguf');
+      final result = await ImageModelImportService.instance
+          .importFromPath(src, originalFileName: '古风.gguf');
+      expect(result.originalFileName, '古风.gguf');
     });
   });
 
@@ -129,10 +162,7 @@ void main() {
       // 路径穿越尝试：tmpRoot 上层
       final escapePath = p.normalize(p.join(tmpRoot.parent.path, 'evil.gguf'));
       await ImageModelImportService.instance.deleteModelFile(escapePath);
-      // 不应抛异常即可
-      expect(true, true);
+      // 不抛异常即通过（护栏命中时不删除任何文件）
     });
   });
-
-  // (helper inlined above; _importOne removed)
 }
