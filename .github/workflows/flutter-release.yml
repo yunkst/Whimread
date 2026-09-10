@@ -224,7 +224,21 @@ jobs:
           ls -la android/novel-app-release-key.jks
 
       - name: Build per-architecture release APKs
-        run: flutter build apk --release --split-per-abi
+        # BACKEND_BASE_URL 经仓库 Variables 注入（vars.——该地址会编译进对外
+        # 分发的 APK，本身非机密）。AI 托管模式（设备注册领额度 / Star 兑换 /
+        # 托管模型列表）全靠它；未设置时构建「非托管」APK：APP 回退用户自配
+        # AI 供应商模式，启动日志出现「后端 HOST 未配置」属预期
+        # （见 lib/core/constants/build_config.dart）。
+        env:
+          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+        run: |
+          ARGS="--release --split-per-abi"
+          if [ -n "$BACKEND_BASE_URL" ]; then
+            ARGS="$ARGS --dart-define=BACKEND_BASE_URL=$BACKEND_BASE_URL"
+          else
+            echo "⚠️ 未设置仓库变量 BACKEND_BASE_URL，构建非托管 APK（无 AI 托管额度）"
+          fi
+          flutter build apk $ARGS
 
       - name: Compute SHA256 checksums
         working-directory: ./build/app/outputs/flutter-apk
