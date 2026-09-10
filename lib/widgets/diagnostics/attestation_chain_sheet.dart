@@ -1,9 +1,9 @@
-/// Debug-only modal sheet: capture & inspect Android Key Attestation chain.
+/// 设置页 → 关于应用 → 7-tap 弹出的 attestation 证书链诊断面板。
 ///
-/// Triggered from settings screen (7-tap on version tile, debug builds only).
-/// 目的:让开发者直接在端上看到自己设备的 Key Attestation 链——锚到
-/// Google Hardware Attestation Root、还是厂商自签根、还是 Software 级——
-/// 据此判断要不要补 OEM 根、或者彻底放弃 attestation 这条线。
+/// 用途:用户反馈问题时,提供一键诊断入口——手机型号/Android 版本/APP
+/// 版本 + attestation 证书链,一键复制完整文本发回开发者,用于判断
+/// 设备 attestation 是否锚到 Google 根、是否需要补 OEM 根、还是
+/// Software 级 attestation。
 ///
 /// 不注册、不落库、不消耗额度——纯本地 + 一次 challenge HTTP。
 library;
@@ -11,8 +11,11 @@ library;
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../services/device/device_auth_service.dart';
 
@@ -27,27 +30,56 @@ const _googleRootFingerprints = <String, String>{
       'Google Hardware Attestation Root (ECDSA P-384, 2025)',
 };
 
-class AttestationChainDebugSheet extends StatefulWidget {
-  const AttestationChainDebugSheet({super.key});
+class AttestationChainSheet extends StatefulWidget {
+  const AttestationChainSheet({super.key});
 
   /// 以 showModalBottomSheet 弹出。
   static Future<void> show(BuildContext context) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const AttestationChainDebugSheet(),
+      builder: (_) => const AttestationChainSheet(),
     );
   }
 
   @override
-  State<AttestationChainDebugSheet> createState() =>
-      _AttestationChainDebugSheetState();
+  State<AttestationChainSheet> createState() => _AttestationChainSheetState();
 }
 
-class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet> {
+class _AttestationChainSheetState extends State<AttestationChainSheet> {
   bool _loading = false;
   String? _error;
   List<_CertInfo> _chain = const [];
+  _DeviceInfo? _device;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDeviceInfo();
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    final package = await PackageInfo.fromPlatform();
+    AndroidDeviceInfo? android;
+    try {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        android = await DeviceInfoPlugin().androidInfo;
+      }
+    } catch (_) {
+      // device_info 不可用(测试环境/极老机型)→ 设备卡片显示 (unknown)
+    }
+    setState(() {
+      _device = _DeviceInfo(
+        manufacturer: android?.manufacturer ?? '(unknown)',
+        model: android?.model ?? '(unknown)',
+        brand: android?.brand ?? '',
+        androidRelease: android?.version.release ?? '',
+        sdkInt: android?.version.sdkInt ?? 0,
+        appVersion: package.version,
+        appBuild: package.buildNumber,
+      );
+    });
+  }
 
   Future<void> _capture() async {
     setState(() {
@@ -79,9 +111,48 @@ class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet>
     }
   }
 
+  String? _rootVerdict() {
+    if (_chain.isEmpty) return null;
+    final top = _chain.last;
+    return top.matchLabel;
+  }
+
+  String _buildDiagnosticText() {
+    final d = _device;
+    final lines = <String>[
+      '=== Whimread 设备安全诊断 ===',
+      if (d != null) ...[
+        '设备: ${d.manufacturer} ${d.model}${d.brand.isNotEmpty && d.brand != d.manufacturer ? " (brand: ${d.brand})" : ""}',
+        'Android: ${d.androidRelease.isNotEmpty ? d.androidRelease : "(?)"} (SDK ${d.sdkInt})',
+        'APP: ${d.appVersion} (${d.appBuild})',
+      ],
+      '采集时间: ${DateTime.now().toIso8601String()}',
+      '',
+      '证书链长度: ${_chain.length}',
+    ];
+    if (_chain.isNotEmpty) {
+      final top = _chain.last;
+      lines.add('末端(根)证书指纹: ${top.fingerprint}');
+      if (top.matchLabel != null) {
+        lines.add('✓ 匹配: ${top.matchLabel}');
+      } else {
+        lines.add('✗ 不匹配已知 Google 根(可能是厂商自签根 / Software 级)');
+      }
+      lines.add('');
+      for (final c in _chain) {
+        lines.add('[$c.index] SHA-256: ${c.fingerprint}'
+            '${c.matchLabel != null ? " ✓" : ""}');
+        lines.add(c.pem);
+        lines.add('');
+      }
+    }
+    return lines.join('\n').trimRight();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final verdict = _rootVerdict();
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -94,17 +165,19 @@ class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet>
                 const Icon(Icons.security, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Attestation 证书链调试（debug only）',
+                  child: Text('设备安全诊断',
                       style: theme.textTheme.titleMedium),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             const Text(
-              '采集一次设备端生成的 attestation 证书链（不注册、不落库、不消耗额度），'
-              '与已知 Google 根指纹对照，判断设备是否锚到 Google Hardware Attestation Root。',
+              '展示本机的 attestation 证书链与已知 Google 根指纹对照。'
+              '遇到安全相关问题时，把这里的诊断文本发给开发者。',
               style: TextStyle(fontSize: 12),
             ),
+            const SizedBox(height: 12),
+            if (_device != null) _DeviceCard(info: _device!),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: _loading ? null : _capture,
@@ -126,7 +199,7 @@ class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet>
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  '采集失败：$_error',
+                  '采集失败:$_error',
                   style: TextStyle(
                       color: theme.colorScheme.onErrorContainer, fontSize: 12),
                 ),
@@ -134,7 +207,7 @@ class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet>
             ],
             if (_chain.isNotEmpty) ...[
               const SizedBox(height: 12),
-              _SummaryCard(certs: _chain),
+              _SummaryCard(certs: _chain, verdict: verdict),
               const SizedBox(height: 12),
               Flexible(
                 child: ListView.separated(
@@ -145,24 +218,79 @@ class _AttestationChainDebugSheetState extends State<AttestationChainDebugSheet>
                 ),
               ),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () {
-                  final all = _chain.map((c) => c.pem).join('\n');
-                  Clipboard.setData(ClipboardData(text: all));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('全部 PEM 已复制'),
-                      duration: Duration(seconds: 1),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(
+                            ClipboardData(text: _buildDiagnosticText()));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('诊断文本已复制,可粘贴发给开发者'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.copy_all),
+                      label: const Text('复制完整诊断'),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.copy_all),
-                label: const Text(
-                    '复制全部 PEM（可贴到 openssl x509 -text 查看）'),
+                  ),
+                ],
               ),
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DeviceInfo {
+  final String manufacturer;
+  final String model;
+  final String brand;
+  final String androidRelease;
+  final int sdkInt;
+  final String appVersion;
+  final String appBuild;
+
+  _DeviceInfo({
+    required this.manufacturer,
+    required this.model,
+    required this.brand,
+    required this.androidRelease,
+    required this.sdkInt,
+    required this.appVersion,
+    required this.appBuild,
+  });
+}
+
+class _DeviceCard extends StatelessWidget {
+  final _DeviceInfo info;
+  const _DeviceCard({required this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('设备: ${info.manufacturer} ${info.model}'
+              '${info.brand.isNotEmpty && info.brand != info.manufacturer ? " (brand: ${info.brand})" : ""}'),
+          const SizedBox(height: 4),
+          Text(
+            'Android: ${info.androidRelease.isNotEmpty ? info.androidRelease : "(?)"} (SDK ${info.sdkInt})',
+          ),
+          const SizedBox(height: 4),
+          Text('APP: ${info.appVersion} (${info.appBuild})'),
+        ],
       ),
     );
   }
@@ -184,13 +312,13 @@ class _CertInfo {
 
 class _SummaryCard extends StatelessWidget {
   final List<_CertInfo> certs;
-  const _SummaryCard({required this.certs});
+  final String? verdict;
+  const _SummaryCard({required this.certs, required this.verdict});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final top = certs.last;
-    final matches = top.matchLabel != null;
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -200,16 +328,16 @@ class _SummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('链长度：${certs.length}'),
+          Text('链长度: ${certs.length}'),
           const SizedBox(height: 4),
           Text(
-            '末端（根）证书指纹：${top.fingerprint}',
+            '末端(根)证书指纹: ${top.fingerprint}',
             style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
           ),
           const SizedBox(height: 6),
-          if (matches)
+          if (verdict != null)
             Text(
-              '✓ 匹配：${top.matchLabel}',
+              '✓ 匹配: $verdict',
               style: TextStyle(
                 color: Colors.green.shade700,
                 fontSize: 12,
@@ -218,7 +346,7 @@ class _SummaryCard extends StatelessWidget {
             )
           else
             Text(
-              '✗ 不匹配已知 Google 根（可能是厂商自签根 / 软件级）',
+              '✗ 不匹配已知 Google 根(可能是厂商自签根 / Software 级)',
               style: TextStyle(
                 color: Colors.orange.shade800,
                 fontSize: 12,
@@ -300,7 +428,6 @@ class _CertCard extends StatelessWidget {
 }
 
 String _fingerprintOfPem(String pem) {
-  // PEM → base64 body (去掉 BEGIN/END 行与空白)
   final body = pem
       .split('\n')
       .where((l) => !l.contains('-----'))
