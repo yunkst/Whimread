@@ -13,6 +13,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -283,7 +284,13 @@ class DeviceAuthService {
     final prefs = PreferencesService.instance;
     var fallback = await prefs.getString(_kAndroidId);
     if (fallback.isEmpty) {
-      fallback = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+      // 生成 16 位 hex(与 Settings.Secure.ANDROID_ID 形态一致)以通过服务端
+      // ANDROID_ID_RE = /^[0-9a-f]{16}$/i 校验。非加密场景,R() 即可。
+      final rnd = Random();
+      final bytes = List<int>.generate(8, (_) => rnd.nextInt(256));
+      fallback = bytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
       await prefs.setString(_kAndroidId, fallback);
     }
     return fallback;
