@@ -140,7 +140,7 @@ class _AttestationChainSheetState extends State<AttestationChainSheet> {
       }
       lines.add('');
       for (final c in _chain) {
-        lines.add('[$c.index] SHA-256: ${c.fingerprint}'
+        lines.add('[${c.index}] SHA-256: ${c.fingerprint}'
             '${c.matchLabel != null ? " ✓" : ""}');
         lines.add(c.pem);
         lines.add('');
