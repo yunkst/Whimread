@@ -27,6 +27,12 @@ class ReaderContentView extends StatefulWidget {
   /// 长按段落回调（index = 段落序号，paragraph = 段落原文）
   final void Function(int index, String paragraph)? onParagraphLongPress;
 
+  /// 待揭示段落（index → 改写后的新文本）；段落进入视口时由其 ParagraphWidget 触发淡出+打字机动画
+  final Map<int, String> pendingReveals;
+
+  /// ParagraphWidget 启动揭示动画时回调（父层据此标记 revealed，避免重放）
+  final void Function(int index)? onParagraphRevealStart;
+
   /// 内容变化回调
   /// - [index] 段落索引（-1 表示全文编辑，>=0 表示段落编辑）
   /// - [newContent] 新的内容
@@ -45,6 +51,8 @@ class ReaderContentView extends StatefulWidget {
     required this.isAutoScrolling,
     this.annotations = const {},
     this.onParagraphLongPress,
+    this.pendingReveals = const {},
+    this.onParagraphRevealStart,
     required this.onContentChanged,
     required this.scrollController,
     required this.onPointerDown,
@@ -170,6 +178,7 @@ class _ReaderContentViewState extends State<ReaderContentView> {
             }
 
             final paragraph = widget.paragraphs[index];
+            final reveal = widget.pendingReveals[index];
 
             return ParagraphWidget(
               paragraph: paragraph,
@@ -178,6 +187,9 @@ class _ReaderContentViewState extends State<ReaderContentView> {
               textBrightness: widget.textBrightness,
               isEditMode: widget.isEditMode,
               hasAnnotation: widget.annotations.containsKey(index),
+              revealNewText: reveal,
+              onRevealStart:
+                  widget.onParagraphRevealStart == null ? null : (i) => widget.onParagraphRevealStart!(i),
               onLongPress: widget.onParagraphLongPress == null
                   ? null
                   : () => widget.onParagraphLongPress!(index, paragraph),

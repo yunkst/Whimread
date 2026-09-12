@@ -255,29 +255,9 @@ class _MediaTile extends StatelessWidget {
         child: const Icon(Icons.play_circle_outline),
       );
     }
-    return FutureBuilder<File?>(
-      future: MediaStore.instance.getFile(item.mediaId, MediaKind.image),
-      builder: (context, snap) {
-        final f = snap.data;
-        if (f != null) {
-          return GestureDetector(
-            onTap: () => _openImage(context, f),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Hero(
-                tag: 'media_cache_image_${item.mediaId}',
-                child: Image.file(
-                  f,
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-          );
-        }
-        return const Icon(Icons.image_outlined);
-      },
+    return _MediaThumbImage(
+      mediaId: item.mediaId,
+      onOpen: _openImage,
     );
   }
 
@@ -352,6 +332,54 @@ class _MediaImagePreviewScreenState extends State<MediaImagePreviewScreen> {
           child: builder(context, widget.file),
         ),
       ),
+    );
+  }
+}
+
+/// 缩略图（StatefulWidget 持有 future，避免 build 重复触发 IO 查询）
+///
+/// 2026-09 审查 P2：原实现在 StatelessWidget._thumb 里内联
+/// FutureBuilder(future: MediaStore.getFile(...))，父级每次 rebuild 都会
+/// 重新发起文件查询；列表 N 项 = N 次重复 IO。
+class _MediaThumbImage extends StatefulWidget {
+  final String mediaId;
+  final void Function(BuildContext, File) onOpen;
+
+  const _MediaThumbImage({required this.mediaId, required this.onOpen});
+
+  @override
+  State<_MediaThumbImage> createState() => _MediaThumbImageState();
+}
+
+class _MediaThumbImageState extends State<_MediaThumbImage> {
+  late final Future<File?> _future =
+      MediaStore.instance.getFile(widget.mediaId, MediaKind.image);
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<File?>(
+      future: _future,
+      builder: (context, snap) {
+        final f = snap.data;
+        if (f != null) {
+          return GestureDetector(
+            onTap: () => widget.onOpen(context, f),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Hero(
+                tag: 'media_cache_image_${widget.mediaId}',
+                child: Image.file(
+                  f,
+                  width: 44,
+                  height: 44,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+          );
+        }
+        return const Icon(Icons.image_outlined);
+      },
     );
   }
 }

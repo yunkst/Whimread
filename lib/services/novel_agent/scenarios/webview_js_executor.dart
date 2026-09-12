@@ -64,7 +64,94 @@ class WebViewJsExecutor {
           '请统一使用 PAGE_URL 变量（从 {{URL}} 占位符获取）';
     }
 
+    // 4. 禁止数据外发通道（2026-09 审查 P1：脚本运行在目标站 origin，
+    //    能拿到用户在该站的登录态；凭 Cookie/存储/beacon 外发即窃取会话）。
+    //    提取任务只需读 DOM，任何跨域外发/凭据访问都没有正当用途。
+    for (final entry in _exfiltrationPatterns.entries) {
+      for (final token in entry.value) {
+        if (script.contains(token)) {
+          return '脚本中禁止使用 ${entry.key}（检测到 "$token"）。'
+              '提取脚本只允许读取页面 DOM 并 return 结果，'
+              '不允许访问 Cookie/存储或向任何地址发送数据。';
+        }
+      }
+    }
+
     return null;
+  }
+
+  /// 数据外发通道静态拒绝清单：类别 → token 列表。
+  /// 子串匹配与规则 3 同强度；运行期另有同源守卫兜底（见
+  /// [buildSandboxPreamble]），两层独立生效。
+  static const Map<String, List<String>> _exfiltrationPatterns = {
+    'Cookie 访问': ['document.cookie', "document['cookie']", 'document[ "cookie" ]'],
+    '本地存储': [
+      'localStorage',
+      'sessionStorage',
+      'indexedDB',
+      'caches.open',
+    ],
+    '数据外发': [
+      'sendBeacon',
+      'new WebSocket',
+      'WebSocket(',
+      'new EventSource',
+      'EventSource(',
+      'import(',
+    ],
+    '页面跳转': ['window.open'],
+  };
+
+  /// 运行时同源守卫前导代码（叠加在脚本函数体最前面执行）。
+  ///
+  /// 静态清单可被字符串拼接等手段绕过，这里在执行环境内再拦一层：
+  /// - fetch / XMLHttpRequest：仅允许与 PAGE_URL 同源的请求
+  ///   （提取站自身接口可用，第三方域一律抛错）
+  /// - sendBeacon：直接禁用
+  /// PAGE_URL 由脚本自身声明（校验规则 1 强制），守卫在**调用时**才读取，
+  /// 因此前导代码可以放在声明之前。
+  static String buildSandboxPreamble() {
+    return '''
+/* ==== Whimread 沙箱守卫（自动注入，请勿修改/删除） ==== */
+(() => {
+  const __wrGuard = (u) => {
+    try {
+      if (typeof PAGE_URL === 'undefined') return;
+      const target = new URL(String(u), PAGE_URL);
+      const origin = new URL(PAGE_URL).origin;
+      if (target.origin !== origin) {
+        throw new Error('WHIMREAD_SANDBOX: 跨域请求被禁止: ' + target.origin);
+      }
+    } catch (e) {
+      if (String(e && e.message || '').startsWith('WHIMREAD_SANDBOX')) throw e;
+    }
+  };
+  try {
+    if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+      const __wrFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const u = typeof input === 'string' ? input
+          : (input && typeof input === 'object' && input.url) ? input.url : '';
+        __wrGuard(u);
+        return __wrFetch(input, init);
+      };
+    }
+    if (typeof XMLHttpRequest !== 'undefined') {
+      const __wrOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (m, u) {
+        __wrGuard(u);
+        return __wrOpen.apply(this, arguments);
+      };
+    }
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon = () => {
+        throw new Error('WHIMREAD_SANDBOX: sendBeacon 被禁止');
+      };
+    }
+  } catch (e) { /* 守卫自身失败不阻断提取 */ }
+})();
+/* ==== 沙箱守卫结束 ==== */
+''';
   }
 
   /// 将 Agent 生成的 IIFE 脚本转换为 callAsyncJavaScript 函数体
@@ -76,6 +163,8 @@ class WebViewJsExecutor {
   ///   1. async IIFE: `(async function() { ... })()` → 提取内部函数体
   ///   2. 同步 IIFE: `(function() { ... })()` → 提取内部函数体
   ///   3. 非包裹的函数体 → 原样返回（兼容）
+  ///
+  /// 返回的函数体首部注入同源守卫前导（[buildSandboxPreamble]）。
   static String extractAsyncFunctionBody(String script) {
     final trimmed = script.trim();
 
@@ -108,9 +197,9 @@ class WebViewJsExecutor {
 
     if (lastBrace == -1) return script;
 
-    // 提取 { } 之间的内容（去掉外层花括号）
+    // 提取 { } 之间的内容（去掉外层花括号），首部注入同源守卫前导
     final body = trimmed.substring(firstBrace + 1, lastBrace).trim();
-    return body;
+    return buildSandboxPreamble() + body;
   }
 
   /// 将 callAsyncJavaScript 返回值统一转为 JSON 字符串

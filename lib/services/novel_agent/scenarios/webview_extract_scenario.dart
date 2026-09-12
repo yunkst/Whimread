@@ -136,6 +136,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln('## JS 脚本规范');
     buf.writeln('- 脚本是 async IIFE: (async function() { ... return JSON.stringify(result); })()');
     buf.writeln('- 首行必须声明 `const PAGE_URL = \'{{URL}}\';`，禁止 window.location.href');
+    buf.writeln('- 安全边界（违反会被拒绝执行）：禁止 document.cookie / localStorage / sessionStorage / indexedDB；禁止 sendBeacon / WebSocket / EventSource / window.open / import()；fetch 与 XMLHttpRequest 仅允许请求与 PAGE_URL 同源的地址（执行时已注入同源守卫，跨域会抛 WHIMREAD_SANDBOX 错误）。提取只需读 DOM 并 return 结果');
     buf.writeln('- 目录返回: { "title": "...", "cover_url": "...", "chapters": [{ "title": "...", "url": "..." }] }');
     buf.writeln('- chapters 必须按章节顺序从小到大排列（第一章 → 最新章），不要倒序');
     buf.writeln('- cover_url（必填字段，缺失会拒绝落库）：优先 <meta property="og:image" content="...">，其次目录页书籍封面 <img> 的 src / data-src；取绝对 URL（相对路径用 new URL(src, PAGE_URL).href 补全）；确实无封面时返回空串 ""');

@@ -51,6 +51,22 @@ abstract class IChatSessionRepository {
   /// 失败时整体回滚。返回新插入的 message 行 id。
   Future<int> appendMessage(ChatMessageRecord record);
 
+  /// 批量追加 agent 消息（单事务，回合结束 finalize 用）。
+  ///
+  /// 与逐条调 [appendMessage] 的区别：整批在同一事务内提交，中途失败全部
+  /// 回滚，不会留下"前半已落库"的断裂会话（断裂的 ReAct 链会让 hydrate
+  /// 后的 assistant/tool 消息错位）。[records] 必须同属一个 session；
+  /// 空批直接返回 0，不动 DB。返回最后一条的行 id（空批 0）。
+  Future<int> appendMessages(List<ChatMessageRecord> records);
+
+  /// 原子重写会话全部消息（单事务：清空 + 按序批量写入）。
+  ///
+  /// 用于 retry/rollback/压缩后的 DB 重写：先删该 session 全部消息，再整批
+  /// 写入，同一事务内提交或回滚——崩溃/失败不会留下"旧的删了、新的没写全"
+  /// 的中间态。[records] 必须同属 [sessionId]；传入空列表等价于清空。
+  /// 返回写入条数。
+  Future<int> replaceMessages(int sessionId, List<ChatMessageRecord> records);
+
   /// 更新单条已落库消息的 content（用于工具重试原地覆盖结果）。
   ///
   /// 仅刷新 message 自身的 timestamp，**不**刷新 session.updatedAt——

@@ -131,17 +131,24 @@ class LlmLogger extends ChangeNotifier {
   ///
   /// 由 IoLlmHttpClient 在发送请求前调用。
   /// 仅更新内存缓存，不写入文件；等响应完成后统一写入完整记录。
+  ///
+  /// ⚠️ 请求体脱敏（2026-09 审查 P2）：requestBody 的 messages 含用户小说
+  /// 正文，落盘 JSONL 属明文持久化。这里只保留 model / messages 条数 /
+  /// 字节数摘要，正文不落盘也不进内存缓存。
   String logRequest({
     required String id,
     required String endpoint,
     required String requestBody,
     bool isStreaming = false,
   }) {
-    // 尝试提取 model
+    // 尝试提取 model 与 messages 条数（用于摘要）
     String? model;
+    int messageCount = 0;
     try {
       final body = jsonDecode(requestBody) as Map<String, dynamic>;
       model = body['model'] as String?;
+      final messages = body['messages'];
+      if (messages is List) messageCount = messages.length;
     } catch (e, st) {
       LoggerService.instance.w(
         'LLM日志: 解析请求body model字段失败: $e',
@@ -151,13 +158,20 @@ class LlmLogger extends ChangeNotifier {
       );
     }
 
+    final redactedBody = jsonEncode({
+      '_redacted': '请求正文不落盘（含用户内容）',
+      if (model != null) 'model': model,
+      'messages': messageCount,
+      'bytes': requestBody.length,
+    });
+
     final record = LlmCallRecord(
       id: id,
       timestamp: DateTime.now().toUtc(),
       endpoint: endpoint,
       model: model,
       isStreaming: isStreaming,
-      requestBody: requestBody,
+      requestBody: redactedBody,
       isSuccess: false, // 请求阶段标记为未完成
     );
 

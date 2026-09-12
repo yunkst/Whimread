@@ -157,7 +157,8 @@ class ChatSessionRepository extends BaseRepository
     try {
       final db = await database;
       final now = DateTime.now().millisecondsSinceEpoch;
-      return db.update(
+      // 必须 await：让 update 的异步异常进入下方 catch（否则既不记日志也不 rethrow）
+      return await db.update(
         _tableSessions,
         {'updatedAt': now},
         where: 'id = ?',
@@ -236,6 +237,76 @@ class ChatSessionRepository extends BaseRepository
         stackTrace: stackTrace.toString(),
         category: LogCategory.database,
         tags: ['chat_message', 'append', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<int> appendMessages(List<ChatMessageRecord> records) async {
+    if (records.isEmpty) return 0;
+    final sessionId = records.first.sessionId;
+    try {
+      final db = await database;
+      return await db.transaction((txn) async {
+        var lastId = 0;
+        for (final record in records) {
+          lastId = await txn.insert(_tableMessages, record.toMap());
+        }
+        await txn.update(
+          _tableSessions,
+          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+        return lastId;
+      });
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '批量追加消息失败: sessionId=$sessionId count=${records.length} - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['chat_message', 'append_batch', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  @override
+  Future<int> replaceMessages(
+      int sessionId, List<ChatMessageRecord> records) async {
+    // 防御：混入其他 session 的记录会污染对方会话，宁可提前抛错
+    final foreign =
+        records.where((r) => r.sessionId != sessionId).map((r) => r.sessionId);
+    if (foreign.isNotEmpty) {
+      throw ArgumentError.value(
+          foreign.toSet().toList(), 'records', 'records 含非 session $sessionId 的消息');
+    }
+    try {
+      final db = await database;
+      return await db.transaction((txn) async {
+        await txn.delete(
+          _tableMessages,
+          where: 'sessionId = ?',
+          whereArgs: [sessionId],
+        );
+        for (final record in records) {
+          await txn.insert(_tableMessages, record.toMap());
+        }
+        await txn.update(
+          _tableSessions,
+          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+        return records.length;
+      });
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '原子重写消息失败: sessionId=$sessionId count=${records.length} - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['chat_message', 'replace', 'failed'],
       );
       rethrow;
     }
@@ -358,7 +429,8 @@ class ChatSessionRepository extends BaseRepository
   Future<int> clearMessages(int sessionId) async {
     try {
       final db = await database;
-      return db.transaction((txn) async {
+      // 必须 await：让 transaction 的异步异常进入下方 catch（否则既不记日志也不 rethrow）
+      return await db.transaction((txn) async {
         final deleted = await txn.delete(
           _tableMessages,
           where: 'sessionId = ?',

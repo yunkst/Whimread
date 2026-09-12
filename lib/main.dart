@@ -19,9 +19,11 @@ import 'core/theme/app_colors.dart';
 import 'core/theme/app_typography.dart';
 import 'utils/toast_utils.dart';
 import 'services/device/device_auth_service.dart';
+import 'services/feedback_service.dart';
 import 'services/logger_service.dart';
 import 'services/llm_logger/llm_logger.dart';
 import 'services/log_reporter_service.dart';
+import 'services/managed_models/managed_model_service.dart';
 import 'services/native_crash_reporter.dart' show kGitHubRepo, NativeCrashReporter;
 import 'services/novel_agent/agent_scenario.dart';
 import 'services/star_prompt_service.dart';
@@ -123,6 +125,13 @@ void main() async {
       apiService.unauthorizedRecoveryProvider =
           DeviceAuthService.instance.renewAuthHeaders;
       await DeviceAuthService.instance.loadCached();
+
+      // 共享 Dio 拓扑收口：日志上报 / 反馈提交 / 托管模型目录都挂到
+      // apiService.dio，吃统一的 401 续签 + 拦截器链。
+      // Dio 上的 QuietLogInterceptor 会尊重上报 / 反馈请求里的 quiet 标记。
+      LogReporterService.instance.useDio(apiService.dio);
+      FeedbackService.instance.useDio(apiService.dio);
+      ManagedModelService.instance.useApiWrapper(apiService);
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         'API Service Error: $e',

@@ -5,7 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart'
     show debugPrint, visibleForTesting;
 
-import '../core/constants/build_config.dart';
+import '../core/backend/backend_config.dart';
 import 'device/device_auth_service.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
@@ -29,6 +29,26 @@ class LogReporterService {
   static final LogReporterService _instance = LogReporterService._internal();
   static LogReporterService get instance => _instance;
   LogReporterService._internal();
+
+  /// 外部注入的 Dio（通常来自 ApiServiceWrapper.dio，共享连接池与
+  /// 401 续签拦截器）。null 时 `_upload` 会用精简配置自建兜底。
+  ///
+  /// 由 APP 启动时注入，避免日志风暴：共享 Dio 的 QuietLogInterceptor
+  /// 会尊重本服务上报请求里的 `quiet` 标记。
+  Dio? _dioOverride;
+
+  /// 注入共享 Dio（APP 启动时由 main.dart 调用一次）
+  ///
+  /// 若此前的 `_upload` 已自建兜底 Dio（启动时序上 ApiServiceWrapper
+  /// 晚于本服务 init），这里替换为共享实例并关闭旧实例。
+  void useDio(Dio dio) {
+    final old = _dio;
+    _dioOverride = dio;
+    if (old != null && !identical(old, dio)) {
+      old.close(force: true);
+      _dio = dio;
+    }
+  }
 
   // ========== 常量 ==========
   /// 触发上报的缓冲数量阈值
@@ -262,24 +282,23 @@ class LogReporterService {
   /// 上报一批日志到后端
   Future<bool> _upload(List<LogEntry> batch) async {
     try {
-      // Host 与 ApiServiceWrapper 同源：托管模式取打包注入地址
-      final host = kHasBundledBackend
-          ? kBackendBaseUrl
-          : await PreferencesService.instance.getString('backend_host');
+      // Host 与 ApiServiceWrapper 同源（唯一解析入口：resolveBackendHost）
+      final host = await resolveBackendHost();
       if (host.isEmpty) return false;
 
       // 设备 JWT 鉴权（原 X-API-TOKEN 已移除）。
       // 凭证不可用（未配置后端/未注册成功）时静默放弃本轮上报。
       final authHeaders = await DeviceAuthService.instance.authedHeaders();
 
-      _dio ??= Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        sendTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 10),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      ));
+      _dio ??= _dioOverride ??
+          Dio(BaseOptions(
+            connectTimeout: const Duration(seconds: 10),
+            sendTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 10),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          ));
 
       final payload = {
         'logs': batch.map((e) => _entryToMap(e)).toList(),
@@ -288,7 +307,12 @@ class LogReporterService {
       final response = await _dio!.post(
         '$host/api/logs/upload',
         data: jsonEncode(payload),
-        options: Options(headers: authHeaders),
+        // quiet: 共享 Dio 的 QuietLogInterceptor 跳过本请求的日志打印，
+        // 避免「打日志 → 触发上报 → 上报又打日志」的日志风暴
+        options: Options(
+          headers: authHeaders,
+          extra: {'quiet': true},
+        ),
       );
 
       if (response.statusCode == 200) {

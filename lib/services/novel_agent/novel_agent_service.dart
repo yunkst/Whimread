@@ -154,6 +154,10 @@ class NovelAgentService {
     _runningByScenario[scenarioId] = true;
     final token = CancellationToken();
     _tokensByScenario[scenarioId] = token;
+    // 记录本次运行的注入队列身份：cancelFor 后新 run 可能换上自己的队列，
+    // 旧 run 的 finally 不能把新 run 的队列/token 一并清掉（2026-09 审查 P2 竞态）
+    final myInjections =
+        _pendingInjectionsByScenario.putIfAbsent(scenarioId, () => <String>[]);
 
     try {
       final env = await _buildAgentEnv(scenarioId, scenarioContext);
@@ -201,8 +205,10 @@ class NovelAgentService {
           tags: ['agent', 'service', 'complete', scenarioId],
         );
       } finally {
-        // 场景资源清理（如释放 HeadlessWebViewPool 使用权）
+        // 场景资源清理（如释放 HeadlessWebViewPool 使用权）+
+        // LLM 传输释放（io.HttpClient 连接池随消息累积，2026-09 审查 P1）
         await env.scenario.cleanup();
+        env.llm.dispose();
       }
     } catch (e, stack) {
       LoggerService.instance.e('Agent 请求处理失败: $e',
@@ -211,10 +217,16 @@ class NovelAgentService {
           tags: ['agent', 'service', 'error', scenarioId]);
       _controller.add(AgentErrorEvent(e.toString()));
     } finally {
-      _runningByScenario.remove(scenarioId);
-      _tokensByScenario.remove(scenarioId);
-      // loop 已退出，残余的排队补充消息永远不会被 drain → 清空避免孤狼
-      _pendingInjectionsByScenario.remove(scenarioId);
+      // 只清理仍属于本次运行的条目：cancelFor 后新 run 可能已换上自己的
+      // token/队列，旧 run 的 finally 不能把新 run 的一并清掉
+      //（否则新 run 不可取消、注入消息丢失，2026-09 审查 P2 竞态）
+      if (identical(_tokensByScenario[scenarioId], token)) {
+        _runningByScenario.remove(scenarioId);
+        _tokensByScenario.remove(scenarioId);
+      }
+      if (identical(_pendingInjectionsByScenario[scenarioId], myInjections)) {
+        _pendingInjectionsByScenario.remove(scenarioId);
+      }
     }
   }
 
@@ -241,6 +253,9 @@ class NovelAgentService {
     _runningByScenario[scenarioId] = true;
     final token = CancellationToken();
     _tokensByScenario[scenarioId] = token;
+    // 身份守卫用途同 sendMessage（旧 run finally 不得清新 run 的条目）
+    final myInjections =
+        _pendingInjectionsByScenario.putIfAbsent(scenarioId, () => <String>[]);
 
     try {
       final env = await _buildAgentEnv(scenarioId, scenarioContext);
@@ -268,6 +283,7 @@ class NovelAgentService {
         );
       } finally {
         await env.scenario.cleanup();
+        env.llm.dispose();
       }
     } catch (e, stack) {
       LoggerService.instance.e('Agent 续跑失败: $e',
@@ -276,10 +292,14 @@ class NovelAgentService {
           tags: ['agent', 'service', 'resume_error', scenarioId]);
       _controller.add(AgentErrorEvent(e.toString()));
     } finally {
-      _runningByScenario.remove(scenarioId);
-      _tokensByScenario.remove(scenarioId);
-      // 同 sendMessage：loop 退出后残余排队消息不会被 drain，清空避免孤狼
-      _pendingInjectionsByScenario.remove(scenarioId);
+      // 身份守卫用途同 sendMessage（旧 run finally 不得清新 run 的条目）
+      if (identical(_tokensByScenario[scenarioId], token)) {
+        _runningByScenario.remove(scenarioId);
+        _tokensByScenario.remove(scenarioId);
+      }
+      if (identical(_pendingInjectionsByScenario[scenarioId], myInjections)) {
+        _pendingInjectionsByScenario.remove(scenarioId);
+      }
     }
   }
 

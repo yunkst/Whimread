@@ -1,4 +1,5 @@
 import '../../../models/chapter_version.dart';
+import 'package:sqflite/sqflite.dart' show DatabaseExecutor;
 
 /// 章节版本仓库接口
 ///
@@ -7,8 +8,11 @@ abstract class IChapterVersionRepository {
   /// 保存一个历史版本
   ///
   /// [version] 版本对象，id 应为 null（自增）
+  /// [executor] 可选事务执行器：调用方（如 updateChapterContent）在
+  /// db.transaction 内传入 txn，让版本写入与正文更新同事务提交。
   /// 返回插入后的行 ID
-  Future<int> saveVersion(ChapterVersion version);
+  Future<int> saveVersion(ChapterVersion version,
+      {DatabaseExecutor? executor});
 
   /// 获取指定章节的所有版本（按创建时间降序，最新的在前）
   ///
@@ -47,6 +51,8 @@ abstract class IChapterVersionRepository {
   ///
   /// [chapterUrl] 章节URL
   /// [maxCount] 最大保留版本数，默认 5
+  /// [executor] 可选事务执行器（语义同 [saveVersion]）
   /// 返回被删除的版本数量
-  Future<int> evictOldestVersions(String chapterUrl, {int maxCount = 5});
+  Future<int> evictOldestVersions(String chapterUrl,
+      {int maxCount = 5, DatabaseExecutor? executor});
 }

@@ -37,11 +37,28 @@ class _StreamHandshake {
 }
 
 /// 基于 dart:io HttpClient 的 LlmHttpClient 实现
-class IoLlmHttpClient implements LlmHttpClient {
+class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
+  /// 响应体读取超时（close 后的 body join）。
+  ///
+  /// HttpClient 自身只有 connectionTimeout（建连）；服务方接了请求但
+  /// 不回包/回一半挂死时，join 会永远阻塞。TimeoutException 在 withRetry
+  /// 白名单内，会按瞬态错误走重试预算。
+  static const Duration _responseReadTimeout = Duration(minutes: 2);
+
   // connectionTimeout: TCP/TLS 建连超时；idleTimeout: 空闲连接超时
   final io.HttpClient _client = io.HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
     ..idleTimeout = const Duration(seconds: 60);
+
+  /// 释放底层连接池。
+  ///
+  /// LlmProvider 目前按消息粒度构建（每次 sendMessage 一个），不 close 的
+  /// HttpClient 连接池要等 idleTimeout(60s) 才缓慢释放，Agent 高频对话下
+  /// 会持续累积（2026-09 审查 P1）。
+  @override
+  void dispose() {
+    _client.close(force: false);
+  }
 
   /// 重试预算（传输层 maxAttempts 单一真理源，可由 [AiServiceFactory] 注入）
   final LlmRetryBudget _budget;
@@ -91,7 +108,13 @@ class IoLlmHttpClient implements LlmHttpClient {
     request.add(utf8.encode(body));
     final response = await request.close();
     final statusCode = response.statusCode;
-    final responseBody = await response.transform(utf8.decoder).join();
+    final responseBody = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(_responseReadTimeout, onTimeout: () {
+      throw TimeoutException(
+          'LLM 响应读取超时($_responseReadTimeout)', _responseReadTimeout);
+    });
 
     stopwatch.stop();
     final isSuccess = statusCode < 400;
@@ -157,7 +180,13 @@ class IoLlmHttpClient implements LlmHttpClient {
     final response = await request.close();
     final statusCode = response.statusCode;
     if (statusCode >= 400) {
-      final errorBody = await response.transform(utf8.decoder).join();
+      final errorBody = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(_responseReadTimeout, onTimeout: () {
+        throw TimeoutException(
+            'LLM 错误响应读取超时($_responseReadTimeout)', _responseReadTimeout);
+      });
       stopwatch.stop();
       LlmLogger.instance.logResponse(
         id: logId, responseBody: errorBody,

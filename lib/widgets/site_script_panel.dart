@@ -361,7 +361,7 @@ class _ScriptCard extends ConsumerWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(urlController.dispose);
   }
 
   /// 执行验证：注入 URL → 在 WebView 中执行脚本 → 展示结果

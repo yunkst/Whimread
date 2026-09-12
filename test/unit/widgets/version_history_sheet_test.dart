@@ -4,11 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/interfaces/repositories/i_chapter_version_repository.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
+import 'package:novel_app/core/providers/reader_settings_state.dart';
 import 'package:novel_app/models/chapter.dart';
+import 'package:sqflite/sqflite.dart' as sqflite;
 import 'package:novel_app/models/chapter_version.dart';
 import 'package:novel_app/repositories/chapter_repository.dart'
     show IChapterWriter;
 import 'package:novel_app/widgets/reader/version_history_sheet.dart';
+import 'package:novel_app/widgets/reader/version_preview_page.dart';
 
 /// 记录写调用的假 IChapterWriter（仅需验证 updateChapterContent 是否被收口调用）
 class _RecordingWriter implements IChapterWriter {
@@ -84,7 +87,7 @@ class _RecordingVersionRepo implements IChapterVersionRepository {
   _RecordingVersionRepo(this.versions);
 
   @override
-  Future<int> saveVersion(ChapterVersion version) async => 1;
+  Future<int> saveVersion(ChapterVersion version, {sqflite.DatabaseExecutor? executor}) async => 1;
 
   @override
   Future<List<ChapterVersion>> getVersions(String chapterUrl) async => versions;
@@ -114,8 +117,17 @@ class _RecordingVersionRepo implements IChapterVersionRepository {
 
   @override
   Future<int> evictOldestVersions(String chapterUrl,
-      {int maxCount = 5}) async =>
+      {int maxCount = 5, sqflite.DatabaseExecutor? executor}) async =>
       0;
+}
+
+/// 假阅读器设置 Notifier：避免测试环境读取 SharedPreferences
+class _FakeReaderSettingsNotifier extends ReaderSettingsStateNotifier {
+  @override
+  Future<ReaderSettingsState> build() async => const ReaderSettingsState(
+        fontSize: 18.0,
+        textBrightness: 1.0,
+      );
 }
 
 /// 版本历史面板 · 还原/删除生命周期测试
@@ -251,5 +263,98 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(deps.versionRepo.deletedIds, [7]);
+  });
+
+  group('VersionPreviewPage 全屏预览', () {
+    /// 推入预览页所需的最小依赖：versionRepo（sheet 用）+ settingsNotifier +
+    /// writerProvider（mutation 链路收口）。
+    Future<_RecordingWriter> pushPreview(
+      WidgetTester tester, {
+      required ChapterVersion version,
+      required ValueChanged<bool> onRestored,
+    }) async {
+      final writer = _RecordingWriter();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chapterWriterProvider.overrideWithValue(writer),
+            readerSettingsStateNotifierProvider
+                .overrideWith(_FakeReaderSettingsNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: FilledButton(
+                    onPressed: () => VersionPreviewPage.push(
+                      context,
+                      version: version,
+                      chapterUrl: 'url1',
+                      novelUrl: 'novel1',
+                      onRestored: () => onRestored(true),
+                    ),
+                    child: const Text('open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return writer;
+    }
+
+    testWidgets('渲染：按 \\n 拆段展示全文，不截断', (tester) async {
+      final longContent = '第一段。\n\n第二段内容比较长，'
+              '用来确认不会被截断。\n第三段。' *
+          50;
+      final version = buildVersion(content: longContent);
+
+      await pushPreview(tester, version: version, onRestored: (_) {});
+
+      // AppBar 标题包含来源标签 + 时间
+      expect(find.textContaining('用户编辑'), findsOneWidget);
+
+      // 段落渲染：每段都是独立 SelectableText，且显示总字数 + 「全文可滚动」
+      expect(find.byType(SelectableText), findsWidgets);
+      expect(find.textContaining('全文可滚动'), findsOneWidget);
+      expect(find.textContaining('${longContent.length} 字'), findsOneWidget);
+    });
+
+    testWidgets('还原：点击底部「还原此版本」走完整链路并触发 onRestored',
+        (tester) async {
+      var restoredFlag = false;
+      final writer = await pushPreview(
+        tester,
+        version: buildVersion(content: '历史内容B'),
+        onRestored: (_) => restoredFlag = true,
+      );
+
+      // 点底部还原按钮（FilledButton.icon 在 Flutter 内部是 _FilledButtonWithIcon
+      // 私有子类，不能用 widgetWithText，按文本匹配更稳）
+      await tester.tap(find.text('还原此版本'));
+      await tester.pumpAndSettle();
+
+      // 二次确认框
+      expect(find.text('还原到历史版本'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '还原'));
+      await tester.pumpAndSettle();
+
+      expect(writer.updateContentCalls, hasLength(1));
+      expect(writer.updateContentCalls.first.source, 'restore');
+      expect(writer.updateContentCalls.first.content, '历史内容B');
+      expect(restoredFlag, isTrue);
+    });
+
+    testWidgets('空内容：渲染占位文案，不崩溃', (tester) async {
+      final version = buildVersion(content: '');
+      await pushPreview(tester, version: version, onRestored: (_) {});
+
+      expect(find.text('（该版本内容为空）'), findsOneWidget);
+    });
   });
 }

@@ -148,7 +148,9 @@ class ChapterRepository extends BaseRepository
         category: LogCategory.database,
         tags: ['chapter', 'cache', 'batch_query_failed'],
       );
-      return {};
+      // 失败必须上抛：返回 {} 会让调用方把"查询失败"当成"全部未缓存"，
+      // 触发整本书重抓（2026-09 审查 P2）
+      rethrow;
     }
   }
 
@@ -209,46 +211,57 @@ class ChapterRepository extends BaseRepository
       {String source = 'edit'}) async {
     final db = await database;
 
-    // 1. 读取旧内容
-    final oldRows = await db.query(
-      'chapter_cache',
-      columns: ['content'],
-      where: 'chapterUrl = ?',
-      whereArgs: [chapterUrl],
-    );
+    // 读旧内容 → 存版本 → 淘汰 → 更新正文，四步同一事务提交：
+    // 旧实现分离执行，中途失败会残留与正文不符的"幽灵版本"，
+    // 或版本写入失败中断导致用户编辑丢失（2026-09 审查 P2）。
+    return db.transaction<int>((txn) async {
+      // 1. 读取旧内容
+      final oldRows = await txn.query(
+        'chapter_cache',
+        columns: ['content'],
+        where: 'chapterUrl = ?',
+        whereArgs: [chapterUrl],
+      );
 
-    // 2. 如果旧内容存在且与新内容不同，保存到版本表
-    if (oldRows.isNotEmpty) {
-      final oldContent = oldRows.first['content'] as String?;
-      if (oldContent != null && oldContent.isNotEmpty && oldContent != content) {
-        await _versionRepo.saveVersion(ChapterVersion(
-          chapterUrl: chapterUrl,
-          content: oldContent,
-          source: source,
-          createdAt: DateTime.now().millisecondsSinceEpoch,
-          contentLength: oldContent.length,
-        ));
-        // 3. 版本淘汰
-        await _versionRepo.evictOldestVersions(chapterUrl, maxCount: 5);
+      // 2. 如果旧内容存在且与新内容不同，保存到版本表
+      if (oldRows.isNotEmpty) {
+        final oldContent = oldRows.first['content'] as String?;
+        if (oldContent != null &&
+            oldContent.isNotEmpty &&
+            oldContent != content) {
+          await _versionRepo.saveVersion(
+            ChapterVersion(
+              chapterUrl: chapterUrl,
+              content: oldContent,
+              source: source,
+              createdAt: DateTime.now().millisecondsSinceEpoch,
+              contentLength: oldContent.length,
+            ),
+            executor: txn,
+          );
+          // 3. 版本淘汰
+          await _versionRepo.evictOldestVersions(chapterUrl,
+              maxCount: 5, executor: txn);
+        }
       }
-    }
 
-    // 4. 执行原有的 UPDATE
-    final affected = await db.update(
-      'chapter_cache',
-      {
-        'content': content,
-        'cachedAt': DateTime.now().millisecondsSinceEpoch,
-      },
-      where: 'chapterUrl = ?',
-      whereArgs: [chapterUrl],
-    );
-    LoggerService.instance.i(
-      '更新章节内容: $chapterUrl (len=${content.length})',
-      category: LogCategory.database,
-      tags: ['chapter', 'update_content'],
-    );
-    return affected;
+      // 4. 执行原有的 UPDATE
+      final affected = await txn.update(
+        'chapter_cache',
+        {
+          'content': content,
+          'cachedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'chapterUrl = ?',
+        whereArgs: [chapterUrl],
+      );
+      LoggerService.instance.i(
+        '更新章节内容: $chapterUrl (len=${content.length})',
+        category: LogCategory.database,
+        tags: ['chapter', 'update_content'],
+      );
+      return affected;
+    });
   }
 
   /// 删除章节缓存
@@ -315,7 +328,7 @@ class ChapterRepository extends BaseRepository
 
   /// 删除小说的所有缓存章节
   ///
-  /// 同时清理内存缓存和版本历史，防止"幻读"
+  /// 同时清理内存缓存、版本历史和段落标注，防止"幻读"
   @override
   Future<int> deleteCachedChapters(String novelUrl) async {
     try {

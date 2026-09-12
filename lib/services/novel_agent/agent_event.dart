@@ -224,7 +224,7 @@ class CompactionEvent extends AgentEvent {
   /// 1. 内存 _agentMessages.removeRange(0, droppedAgentFromIndex)
   /// 2. 对 rewrittenContent 中 index>=droppedAgentFromIndex 的 entry，
   ///    把 _agentMessages[index-droppedAgentFromIndex].content 改成 newContent
-  /// 3. DB deleteMessagesBefore(sessionId, droppedAgentFromIndex) 后重写保留段
+  /// 3. DB 以重写后的内存为基准原子重写（replaceMessages 单事务）
   /// 内存与 DB 同步裁剪 + 改写，跨会话不再"复活"已压缩内容。
   final int droppedAgentFromIndex;
 

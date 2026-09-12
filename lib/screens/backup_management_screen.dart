@@ -199,7 +199,9 @@ class _BackupManagementScreenState
     if (success && mounted) {
       // 更新备份时间显示
       final backupService = ref.read(backupServiceProvider);
-      _lastBackupTime = await backupService.getLastBackupTimeText();
+      final timeText = await backupService.getLastBackupTimeText();
+      if (!mounted) return;
+      _lastBackupTime = timeText;
       setState(() {});
     }
   }

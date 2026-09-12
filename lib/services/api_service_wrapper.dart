@@ -4,7 +4,7 @@ import 'package:novel_api/novel_api.dart';
 import 'package:built_value/serializer.dart';
 import 'dart:io';
 import 'dart:typed_data';
-import '../core/constants/build_config.dart';
+import '../core/backend/backend_config.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
 
@@ -26,8 +26,6 @@ import 'preferences_service.dart';
 /// final apiService = ref.watch(apiServiceWrapperProvider);
 /// ```
 class ApiServiceWrapper {
-  static const String _prefsHostKey = 'backend_host';
-
   /// 公共构造函数 - 通过依赖注入创建实例
   ///
   /// [dio] Dio HTTP 客户端实例（可选，用于自定义配置）
@@ -137,13 +135,22 @@ class ApiServiceWrapper {
       tags: ['success', 'api'],
     );
 
-    // 清理已有 LogInterceptor（防止重复 add 累积），再添加新的
+    // 清理已有日志拦截器（防止重复 add 累积），再添加新的。
+    // 同时清理 dio 自带 LogInterceptor 与 QuietLogInterceptor——防御性，
+    // 应对旧版本残留或测试重复注入同一 Dio 实例。
+    // 使用 QuietLogInterceptor 而非 dio 自带 LogInterceptor：
+    // 上报型请求（日志上报 / 反馈提交）在 Options.extra 里带 `quiet: true`
+    // 时跳过打印，避免「打日志 → 触发上报 → 上报又打日志」的日志风暴。
     _dio.interceptors
         .whereType<LogInterceptor>()
         .toList()
         .forEach(_dio.interceptors.remove);
-    _dio.interceptors.add(LogInterceptor(
-      requestBody: true,
+    _dio.interceptors
+        .whereType<QuietLogInterceptor>()
+        .toList()
+        .forEach(_dio.interceptors.remove);
+    _dio.interceptors.add(QuietLogInterceptor(
+      requestBody: false, // 请求体含凭证/证书链/用户日志，不打印（2026-09 审查）
       responseBody: false, // 减少日志输出
       logPrint: (obj) => LoggerService.instance.d(
         '[API] $obj',
@@ -178,18 +185,13 @@ class ApiServiceWrapper {
 // 统一错误处理
 // ========================================================================
 
-  /// 获取配置的 Host
-  Future<String?> getHost() async {
-    // 打包注入的托管后端优先（Whimread AI 托管模式）
-    if (kHasBundledBackend) return kBackendBaseUrl;
-    return await PreferencesService.instance.getString(_prefsHostKey);
-  }
+  /// 获取配置的 Host（统一走 [resolveBackendHost]，不要直接读 prefs key）
+  Future<String?> getHost() => resolveBackendHost();
 
   /// 设置后端配置（本地开发自定义 Host 用；托管模式 Host 以打包注入为准）
   Future<void> setConfig({required String host}) async {
-    await PreferencesService.instance.setString(_prefsHostKey, host.trim());
-
-    // 重新初始化
+    await PreferencesService.instance
+        .setString(kPrefsBackendHostKey, host.trim());
     await init();
   }
 
@@ -644,5 +646,79 @@ class _AuthRetryInterceptor extends Interceptor {
       // 重试出现非 Dio 异常（如反序列化失败）：保持原始 401 语义
       return handler.next(err);
     }
+  }
+}
+
+/// 支持「按请求静默」的日志拦截器（dio 自带 [LogInterceptor] 的替代品）。
+///
+/// 请求在 `Options.extra` 里带 `quiet: true` 时，onRequest / onResponse /
+/// onError 全程跳过日志打印。`extra` 会随请求透传到响应与错误阶段
+/// （`err.requestOptions.extra` 也能取到），三处统一判断。
+///
+/// 背景：日志上报（LogReporterService）/ 反馈提交挂到共享 Dio 后，若沿用
+/// dio 自带 LogInterceptor，每条上报请求又会打日志进 LoggerService 缓冲区、
+/// 再被上报——形成日志风暴。上报型请求带 `quiet` 标记即可切断。
+class QuietLogInterceptor extends Interceptor {
+  QuietLogInterceptor({
+    this.requestBody = false,
+    this.responseBody = false,
+    required this.logPrint,
+  });
+
+  /// 是否打印请求体（默认关，避免上传内容刷屏）
+  final bool requestBody;
+
+  /// 是否打印响应体（默认关，减少日志输出）
+  final bool responseBody;
+
+  final void Function(Object object) logPrint;
+
+  static const String _quietKey = 'quiet';
+
+  bool _isQuiet(RequestOptions options) => options.extra[_quietKey] == true;
+
+  @override
+  void onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) {
+    if (!_isQuiet(options)) {
+      logPrint('*** Request ***');
+      logPrint('uri: ${options.uri}');
+      logPrint('method: ${options.method}');
+      if (requestBody && options.data != null) {
+        logPrint('data: ${options.data}');
+      }
+      logPrint('');
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    if (!_isQuiet(response.requestOptions)) {
+      logPrint('*** Response ***');
+      logPrint('uri: ${response.realUri}');
+      logPrint('statusCode: ${response.statusCode}');
+      if (responseBody) {
+        logPrint('Response Text: ${response.data}');
+      }
+      logPrint('');
+    }
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (!_isQuiet(err.requestOptions)) {
+      logPrint('*** DioException ***');
+      logPrint('uri: ${err.requestOptions.uri}');
+      logPrint('$err');
+      if (err.response != null) {
+        logPrint('statusCode: ${err.response?.statusCode}');
+      }
+      logPrint('');
+    }
+    handler.next(err);
   }
 }

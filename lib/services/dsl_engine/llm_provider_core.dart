@@ -22,6 +22,14 @@ abstract class LlmHttpClient {
       String url, Map<String, String> headers, String body);
 }
 
+/// 具备可释放资源的传输层（可选能力接口）。
+///
+/// [LlmProvider.dispose] 据此把释放转发给真实传输实现，
+/// 测试 fake 不实现即自动 no-op，不被迫加方法。
+abstract class DisposableTransport {
+  void dispose();
+}
+
 /// LLM 响应 usage 统计（OpenAI 兼容 `usage` 字段的被动解析结果）
 ///
 /// 部分 OpenAI 兼容网关（DeepSeek 等）在流式末帧默认附带 usage；
@@ -82,6 +90,15 @@ class LlmProvider {
   /// 杜绝运行时才发现 httpClient 缺失（替代原 _requireHttpClient null 检查）。
   LlmProvider(this.config, {required LlmHttpClient httpClient})
       : _httpClient = httpClient;
+
+  /// 释放底层传输资源（io.HttpClient 连接池）。
+  ///
+  /// [LlmHttpClient] 是接口，为不影响测试 fake 的实现面，这里按可选能力
+  /// 接口向下转发：未实现 [DisposableTransport] 的（mock/fake）为 no-op。
+  void dispose() {
+    final Object transport = _httpClient;
+    if (transport is DisposableTransport) transport.dispose();
+  }
 
   /// chat completions 端点 URL
   String get chatCompletionsUrl {

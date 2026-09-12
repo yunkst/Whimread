@@ -53,6 +53,8 @@ import '../core/providers/reading_context_providers.dart';
 import '../widgets/agent_chat/agent_floating_button.dart';
 import '../widgets/reader/version_history_sheet.dart';
 import '../widgets/reader/paragraph_annotation_sheet.dart'; // 段落标注编辑弹层
+import '../widgets/reader/annotation_rewrite_button.dart'; // 按标注重写悬浮按钮
+import '../services/novel_agent/scenarios/annotation_rewrite_agent.dart'; // 标注重写 agent
 import '../models/chapter_version.dart';
 import '../models/paragraph_annotation.dart';
 import '../core/theme/app_colors.dart';
@@ -112,6 +114,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   // 当前章节的段落标注（key = 段落序号）
   Map<int, ParagraphAnnotation> _annotations = {};
+
+  // ========== 按标注重写（独立 headless agent）==========
+  bool _isRewriteRunning = false;
+  RewriteStatus _rewriteStatus = RewriteStatus.idle;
+  String _rewriteProgress = '';
+
+  // 段落级延迟揭示动画：
+  // - agent 写库 → ref.listen diff 新旧段落 → 待揭示段落登记到 _pendingReveals
+  // - 显示层对该段落保留旧文本；滚动进入视口后 ParagraphWidget 启动
+  //   淡出+打字机，并回调 onParagraphRevealStart 把索引记入 _revealedParas
+  // - 切章/退出即丢（不持久化），重新进入直接显示新文本
+  final Map<int, String> _pendingReveals = {};
+  final Set<int> _revealedParas = {};
+  List<String> _oldParasCache = const [];
+
+  // 重写完成后顶部 banner（5s 自动消失）
+  bool _showRewriteBanner = false;
+  Timer? _bannerTimer;
+
+  // done 状态自动回 idle
+  Timer? _rewriteDoneTimer;
 
   @override
   void initState() {
@@ -185,6 +208,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void dispose() {
     disposeAutoScroll(); // 清理自动滚动资源（AutoScrollMixin）
     _scrollController.dispose();
+    _bannerTimer?.cancel();
+    _rewriteDoneTimer?.cancel();
     super.dispose();
   }
 
@@ -628,6 +653,239 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
+  // ===================== 按标注重写（独立 headless agent）=====================
+
+  /// 启动按标注重写。点击入口前：`_annotations.isNotEmpty` 由父组件保证；
+  /// 运行中：禁止重复点击，编辑模式下拒绝启动。
+  Future<void> _startAnnotationRewrite() async {
+    if (_isRewriteRunning) return;
+    if (_annotations.isEmpty) return;
+    final isEditMode = ref.read(readerEditModeProvider);
+    if (isEditMode) {
+      ToastUtils.showError('编辑模式下不可重写，请先退出编辑', context: context);
+      return;
+    }
+
+    // 锁定章节在 widget.chapters 列表里的 1-based position。
+    // 真实写库走 _currentChapter.url，与 position 无关（仅在 list_chapters
+    // 返回结果里标注给 LLM 看）。list_chapters 走 DB getCachedNovelChapters
+    // 按 chapterIndex ASC 排序，与 widget.chapters 在阅读页保持一致。
+    final lockedPosition = _currentChapterIndex + 1;
+
+    final agent = AnnotationRewriteAgent(
+      ref: ref,
+      novel: widget.novel,
+      chapter: _currentChapter,
+      lockedPosition: lockedPosition,
+      annotations: _annotations.values.toList(),
+    );
+
+    setState(() {
+      _isRewriteRunning = true;
+      _rewriteStatus = RewriteStatus.idle;
+      _rewriteProgress = '启动 agent...';
+    });
+
+    LoggerService.instance.i(
+      '启动按标注重写: chapter=${_currentChapter.title} '
+      'annotations=${_annotations.length} position=$lockedPosition',
+      category: LogCategory.ai,
+      tags: ['reader', 'rewrite', 'start'],
+    );
+
+    try {
+      final result = await agent.run(
+        onProgress: (round, toolCallsDone, status) {
+          if (!mounted) return;
+          setState(() {
+            _rewriteProgress = status.isEmpty
+                ? '已完成 $toolCallsDone 步'
+                : status;
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isRewriteRunning = false;
+        if (result.success) {
+          _rewriteStatus = RewriteStatus.done;
+          _rewriteProgress = '已完成 ${result.toolCalls} 步';
+        } else {
+          _rewriteStatus = RewriteStatus.error;
+          _rewriteProgress = result.error ?? '重写失败';
+        }
+      });
+
+      if (result.success) {
+        ToastUtils.showSuccess(
+          '已按标注重写本章（${result.toolCalls} 处修改）',
+          context: context,
+        );
+        // 顶部 banner 4s 后自动消失
+        _bannerTimer?.cancel();
+        setState(() => _showRewriteBanner = true);
+        _bannerTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) setState(() => _showRewriteBanner = false);
+        });
+        // done 状态自动回 idle
+        _rewriteDoneTimer?.cancel();
+        _rewriteDoneTimer = Timer(const Duration(milliseconds: 1800), () {
+          if (mounted) {
+            setState(() {
+              _rewriteStatus = RewriteStatus.idle;
+              _rewriteProgress = '';
+            });
+          }
+        });
+      } else {
+        ErrorHelper.showErrorWithLog(
+          context,
+          '按标注重写失败: ${result.error}',
+          category: LogCategory.ai,
+          tags: ['reader', 'rewrite', 'failed'],
+        );
+      }
+    } catch (e, st) {
+      LoggerService.instance.e(
+        '按标注重写异常: $e',
+        stackTrace: st.toString(),
+        category: LogCategory.ai,
+        tags: ['reader', 'rewrite', 'exception'],
+      );
+      if (!mounted) return;
+      setState(() {
+        _isRewriteRunning = false;
+        _rewriteStatus = RewriteStatus.error;
+        _rewriteProgress = e.toString();
+      });
+      ErrorHelper.showErrorWithLog(
+        context,
+        '按标注重写异常: $e',
+        category: LogCategory.ai,
+        tags: ['reader', 'rewrite', 'exception'],
+      );
+    }
+  }
+
+  /// ref.listen 回调：agent 写库 → diff 新旧段落 → 登记待揭示段落
+  ///
+  /// 段落数量不变：逐项比对，变化段落登记 pending（若已被揭示过则先移出
+  /// revealed 以允许再次动画）。
+  /// 段落数量变化（合并/拆分段落）：无法对齐索引 → 回退为瞬时替换（不动画，
+  /// 显示层直接用新内容，因为 pending 为空时 display == new）。
+  void _onContentChangedForRewrite(
+      ChapterContentState? prev, ChapterContentState next) {
+    if (!_isRewriteRunning) {
+      // 非 agent 期间的内容变化（用户编辑保存/切章/刷新）：清空揭示状态
+      if (_pendingReveals.isNotEmpty || _revealedParas.isNotEmpty) {
+        _pendingReveals.clear();
+        _revealedParas.clear();
+        _oldParasCache = const [];
+      }
+      return;
+    }
+    if (prev == null || prev.content == next.content) return;
+
+    final oldParas =
+        prev.content.split('\n').where((p) => p.trim().isNotEmpty).toList();
+    final newParas =
+        next.content.split('\n').where((p) => p.trim().isNotEmpty).toList();
+
+    if (oldParas.length != newParas.length) {
+      LoggerService.instance.d(
+        '标注重写 段落数变化 (${oldParas.length} → ${newParas.length})，回退瞬时替换',
+        category: LogCategory.ai,
+        tags: ['reader', 'rewrite', 'fallback_instant'],
+      );
+      _pendingReveals.clear();
+      _revealedParas.clear();
+      return;
+    }
+
+    _oldParasCache = oldParas;
+    var changed = 0;
+    for (var i = 0; i < newParas.length; i++) {
+      if (oldParas[i] == newParas[i]) continue;
+      changed++;
+      // 允许已揭示段落再次动画（agent 又改了一次）
+      _revealedParas.remove(i);
+      _pendingReveals[i] = newParas[i];
+    }
+    if (changed > 0 && mounted) {
+      setState(() {}); // 触发显示层按 pending 重建（未揭示段落显示旧文本）
+    }
+    LoggerService.instance.d(
+      '标注重写 内容变化: $changed 段待揭示 (pending=${_pendingReveals.length})',
+      category: LogCategory.ai,
+      tags: ['reader', 'rewrite', 'pending'],
+    );
+  }
+
+  /// ParagraphWidget 启动揭示动画时回调。**不 setState**：
+  /// ListView.builder 的 itemBuilder 闭包持有 Set 引用，滚动重建时读到的
+  /// 是最新内容；可见项动画不受重建打断，滚走再滚回直接静态显示新文本。
+  void _onParagraphRevealStart(int index) {
+    _revealedParas.add(index);
+  }
+
+  /// 顶部 banner：重写成功后短暂展示，可一键打开版本历史还原
+  Widget _buildRewriteBanner(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.auto_fix_high,
+              size: 18,
+              color: theme.colorScheme.onPrimary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '本章已按标注重写',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                _bannerTimer?.cancel();
+                setState(() => _showRewriteBanner = false);
+                _showVersionHistory();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: theme.colorScheme.onPrimary,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('还原'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // 显示阅读设置对话框（合并字体大小、文字亮度、滚动速度）
   void _showReaderSettingsDialog() {
     showDialog(
@@ -701,6 +959,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // ⭐ 关键修复：监听章节内容状态，确保内容加载后UI重建（修复空白页面问题）
     final contentState = ref.watch(chapterContentStateNotifierProvider);
 
+    // 监听内容变化 → agent 写库时 diff 段落并登记待揭示
+    ref.listen<ChapterContentState>(
+      chapterContentStateNotifierProvider,
+      _onContentChangedForRewrite,
+    );
+
     // ⭐ 关键修复：直接使用 contentState.content，而不是 _content getter
     // _content getter 内部使用 ref.read()，不会触发 UI 重建
     // 这里已经通过 ref.watch(chapterContentStateNotifierProvider) 建立了响应式依赖
@@ -773,9 +1037,23 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final hasNext =
         currentIndex != -1 && currentIndex < widget.chapters.length - 1;
 
+    // 计算待揭示段落：未揭示的索引 → 旧文本占位 + revealNewText 触发子 Widget 动画
+    final activeReveals = <int, String>{};
+    if (!isEditMode) {
+      for (final entry in _pendingReveals.entries) {
+        final i = entry.key;
+        if (_revealedParas.contains(i)) continue;
+        if (i >= paragraphs.length) continue;
+        if (i < _oldParasCache.length) {
+          paragraphs[i] = _oldParasCache[i];
+        }
+        activeReveals[i] = entry.value;
+      }
+    }
+
     return Stack(
       children: [
-        // 主要内容区域
+        // 主要内容区域（段落级延迟揭示：进入视口才淡出+打字机替换）
         ReaderContentView(
           paragraphs: paragraphs,
           fontSize: _fontSize ?? 18.0,
@@ -784,6 +1062,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           isAutoScrolling: isAutoScrolling,
           annotations: _annotations,
           onParagraphLongPress: _showAnnotationEditor,
+          pendingReveals: activeReveals,
+          onParagraphRevealStart: _onParagraphRevealStart,
           onContentChanged: (index, newContent) {
             // 仅支持全文编辑模式（index=-1）
             assert(index == -1, '只支持全文编辑模式，段落编辑模式已废弃');
@@ -810,6 +1090,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             return handleScrollNotification(notification);
           },
         ),
+        // 顶部「已按标注重写」banner（重写成功后短暂展示，可一键还原）
+        if (_showRewriteBanner)
+          Positioned(
+            top: 8,
+            left: 16,
+            right: 16,
+            child: _buildRewriteBanner(context),
+          ),
+        // 按标注重写悬浮入口（有标注才显示；编辑模式隐藏）
+        if (_annotations.isNotEmpty && !isEditMode)
+          Positioned(
+            left: 16,
+            bottom: 90,
+            child: AnnotationRewriteButton(
+              annotationCount: _annotations.length,
+              isRunning: _isRewriteRunning,
+              status: _rewriteStatus,
+              progressText: _rewriteProgress,
+              onTap: _startAnnotationRewrite,
+            ),
+          ),
         // 固定在底部的章节切换按钮
         Positioned(
           left: 0,

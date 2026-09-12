@@ -23,10 +23,9 @@ import 'package:flutter/foundation.dart'
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../core/constants/build_config.dart';
+import '../core/backend/backend_config.dart';
 import 'device/device_auth_service.dart';
 import 'logger_service.dart';
-import 'preferences_service.dart';
 
 /// 反馈来源(与服务端 feedback_reports.kind 枚举对齐)
 enum FeedbackKind {
@@ -92,6 +91,25 @@ class FeedbackService {
 
   Dio? _dio;
 
+  /// 外部注入的 Dio（通常来自 ApiServiceWrapper.dio，共享连接池与
+  /// 401 续签拦截器）。null 时 `submit` 会用精简配置自建兜底。
+  ///
+  /// 由 APP 启动时注入，避免日志风暴：共享 Dio 的 QuietLogInterceptor
+  /// 会尊重本服务提交请求里的 `quiet` 标记。
+  Dio? _dioOverride;
+
+  /// 注入共享 Dio（APP 启动时由 main.dart 调用一次）
+  ///
+  /// 若此前的 `submit` 已自建兜底 Dio，这里替换为共享实例并关闭旧实例。
+  void useDio(Dio dio) {
+    final old = _dio;
+    _dioOverride = dio;
+    if (old != null && !identical(old, dio)) {
+      old.close(force: true);
+      _dio = dio;
+    }
+  }
+
   /// 日志附加上限(与云函数 MAX_LOG_ENTRIES_PER_REPORT 对齐)
   static const int maxAttachedLogs = 300;
 
@@ -111,7 +129,7 @@ class FeedbackService {
     bool includeLogs = false,
     FeedbackKind kind = FeedbackKind.userReport,
   }) async {
-    final host = await _resolveHost();
+    final host = await resolveBackendHost();
     if (host.isEmpty) {
       throw const FeedbackSubmitException(
           'NO_BACKEND', '未配置后端地址,无法提交反馈');
@@ -140,19 +158,25 @@ class FeedbackService {
       deviceModel: deviceModel,
     );
 
-    _dio ??= Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      sendTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 10),
-      headers: {'Content-Type': 'application/json'},
-    ));
+    _dio ??= _dioOverride ??
+        Dio(BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 10),
+          headers: {'Content-Type': 'application/json'},
+        ));
 
     final Response response;
     try {
       response = await _dio!.post(
         '$host/api/v1/feedback/submit',
         data: payload,
-        options: Options(headers: authHeaders),
+        // quiet: 共享 Dio 的 QuietLogInterceptor 跳过本请求的日志打印，
+        // 避免反馈附带日志再触发一轮上报
+        options: Options(
+          headers: authHeaders,
+          extra: {'quiet': true},
+        ),
       );
     } on DioException catch (e) {
       // 服务端业务错误(4xx 带 code/message)透出给 UI
@@ -172,12 +196,6 @@ class FeedbackService {
       throw const FeedbackSubmitException('BAD_RESPONSE', '响应格式异常');
     }
     return FeedbackSubmitResult.fromJson(data);
-  }
-
-  /// 解析后端 host(与 LogReporterService 同源)
-  Future<String> _resolveHost() async {
-    if (kHasBundledBackend) return kBackendBaseUrl;
-    return await PreferencesService.instance.getString('backend_host');
   }
 
   /// 从 LoggerService 内存队列采集近期日志

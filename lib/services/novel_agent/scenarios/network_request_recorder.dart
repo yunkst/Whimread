@@ -43,6 +43,20 @@ class NetworkRequestRecorder {
   final int maxCapacity;
   final int maxHeaderValueBytes;
 
+  /// 敏感请求头（2026-09 审查 P2）：值含用户登录态 Cookie / Bearer 凭证，
+  /// 会被 list_network_requests 喂给 LLM 上下文并写入持久化会话——
+  /// 保留 header 名（供推断接口模式），值统一 redact。
+  static const _sensitiveHeaderNames = <String>{
+    'cookie',
+    'authorization',
+    'proxy-authorization',
+    'set-cookie',
+    'x-api-key',
+    'api-key',
+    'x-csrf-token',
+    'x-xsrf-token',
+  };
+
   final List<NetworkRequestRecord> _records = [];
   int _nextIndex = 0;
   bool _disposed = false;
@@ -59,7 +73,8 @@ class NetworkRequestRecorder {
     if (_disposed) return;
 
     final parsed = _parseQueryParams(url);
-    final truncatedHeaders = _truncateHeaders(headers ?? const {});
+    final redactedHeaders = _redactSensitiveHeaders(headers ?? const {});
+    final truncatedHeaders = _truncateHeaders(redactedHeaders);
 
     final record = NetworkRequestRecord(
       index: _nextIndex++,
@@ -141,6 +156,19 @@ class NetworkRequestRecorder {
     } catch (_) {
       return const {};
     }
+  }
+
+  /// 敏感头值 redact（header 名大小写不敏感），其余原样返回。
+  Map<String, String> _redactSensitiveHeaders(Map<String, String> headers) {
+    final result = <String, String>{};
+    headers.forEach((key, value) {
+      if (_sensitiveHeaderNames.contains(key.toLowerCase())) {
+        result[key] = '<redacted>';
+      } else {
+        result[key] = value;
+      }
+    });
+    return result;
   }
 
   /// 截断单个 header 值(按 UTF-8 字节数计),超长标 `_truncated`。

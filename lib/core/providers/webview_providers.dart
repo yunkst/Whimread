@@ -678,7 +678,15 @@ Future<bool> handleImageModelDownloadStart(
       if (raw is String && raw.isNotEmpty && raw != 'null') {
         cookieHeader = raw;
       }
-    } catch (_) {}
+    } catch (e) {
+      // 尽力而为,但要可排查:静默吞掉会让"下载缺 Cookie 被站点拒"
+      // 这类问题无从定位
+      LoggerService.instance.w(
+        '读取 webview cookie 失败(下载请求头将缺 Cookie): $e',
+        category: LogCategory.network,
+        tags: ['webview', 'cookie', 'read_failed'],
+      );
+    }
   }
 
   final saved = await repo.getById(id);

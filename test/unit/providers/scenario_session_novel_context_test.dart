@@ -217,9 +217,9 @@ void main() {
       expect(session.currentNovel?.title, '凡人修仙传');
       expect(session.state.currentNovel?.id, 7,
           reason: 'UI 投影（AgentChatHeader 依赖）同步恢复');
-      expect(container.read(currentNovelProvider), isNull,
-          reason: '恢复走 loadNovel 纯查询，不得写全局 currentNovelProvider'
-              '（issue #24：恢复不是"用户主动选书"）');
+      expect(container.read(currentNovelProvider)?.id, 7,
+          reason: '恢复即选择：全局 currentNovelProvider 跟随会话恢复同步'
+              '（打开历史会话时应看到上次选的小说）');
     });
 
     test('loadNovel await 期间被 selectNovel 抢先时以内存为准（issue #22）', () async {
@@ -279,7 +279,7 @@ void main() {
   });
 
   group('adoptSession 小说上下文跟随会话', () {
-    test('切到含持久小说的会话恢复该小说，且不污染全局 provider（issue #24）', () async {
+    test('切到含持久小说的会话恢复该小说，全局选择同步跟随', () async {
       final sid1 = await seedSession(novelId: 7, novelTitle: '凡人修仙传');
       final sid2 = await seedSession(novelId: 8, novelTitle: '诡秘之主');
       final session = buildSession(sid1);
@@ -291,12 +291,76 @@ void main() {
       await session.adoptSession(sid2);
       expect(session.currentNovel?.id, 8,
           reason: '切换历史会话后小说上下文应跟随目标会话');
-      expect(container.read(currentNovelProvider)?.id, 7,
-          reason: '会话恢复是查询不是"用户主动选书"，全局不得被覆盖（issue #24）');
+      expect(container.read(currentNovelProvider)?.id, 8,
+          reason: '打开历史会话 = 同时选择该会话的小说，全局应同步为 8');
 
       await session.adoptSession(null);
       expect(session.currentNovel, isNull,
           reason: '开启全新会话时无上下文可恢复，应清空');
+      expect(container.read(currentNovelProvider), isNull,
+          reason: '全新会话无小说上下文，全局选择一并清空保持一致');
+    });
+  });
+
+  group('会话标题自动跟随小说（2026-09-12）', () {
+    test('发首条消息新建会话时以当前小说命名', () async {
+      final session = buildSession(null);
+
+      await session.selectNovel(7);
+      await session.sendMessage(content: '继续写第一章');
+
+      final sessions = await repo.listSessionsByScenario(ScenarioIds.writing);
+      expect(sessions, hasLength(1));
+      expect(sessions.first.title, '凡人修仙传',
+          reason: '新建会话名 = 当前选中的小说');
+      expect(sessions.first.currentNovelId, 7);
+    });
+
+    test('空标题会话首次选书后自动命名', () async {
+      // 模拟「+ 新建会话」先建了空标题行，用户随后才选书
+      final sid = await repo.createSession(ChatSession(
+        scenarioId: ScenarioIds.writing,
+        title: '',
+      ));
+      final session = buildSession(sid);
+
+      await session.selectNovel(7);
+
+      final row = await repo.getSession(sid);
+      expect(row?.title, '凡人修仙传');
+    });
+
+    test('自动命名的会话切书后标题跟随最后一本', () async {
+      final sid = await repo.createSession(ChatSession(
+        scenarioId: ScenarioIds.writing,
+        title: '凡人修仙传',
+        currentNovelId: 7,
+        currentNovelTitle: '凡人修仙传',
+      ));
+      final session = buildSession(sid);
+
+      await session.selectNovel(8);
+
+      final row = await repo.getSession(sid);
+      expect(row?.title, '诡秘之主',
+          reason: '旧标题 == 旧 currentNovelTitle（自动命名）→ 跟随新书');
+      expect(row?.currentNovelId, 8);
+    });
+
+    test('用户手动重命名后标题不再自动跟随', () async {
+      final sid = await repo.createSession(ChatSession(
+        scenarioId: ScenarioIds.writing,
+        title: '我的创作会话',
+        currentNovelId: 7,
+        currentNovelTitle: '凡人修仙传',
+      ));
+      final session = buildSession(sid);
+
+      await session.selectNovel(8);
+
+      final row = await repo.getSession(sid);
+      expect(row?.title, '我的创作会话',
+          reason: '旧标题 ≠ 旧 currentNovelTitle（手动改过）→ 不覆盖');
     });
   });
 

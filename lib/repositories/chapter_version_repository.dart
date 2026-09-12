@@ -14,9 +14,10 @@ class ChapterVersionRepository extends BaseRepository
   ChapterVersionRepository({required super.dbConnection});
 
   @override
-  Future<int> saveVersion(ChapterVersion version) async {
+  Future<int> saveVersion(ChapterVersion version,
+      {DatabaseExecutor? executor}) async {
     try {
-      final db = await database;
+      final db = executor ?? await database;
       final id = await db.insert(_table, version.toMap());
       LoggerService.instance.i(
         '保存版本: chapterUrl=${version.chapterUrl} source=${version.source} id=$id',
@@ -121,8 +122,9 @@ class ChapterVersionRepository extends BaseRepository
   }
 
   @override
-  Future<int> evictOldestVersions(String chapterUrl, {int maxCount = 5}) async {
-    final db = await database;
+  Future<int> evictOldestVersions(String chapterUrl,
+      {int maxCount = 5, DatabaseExecutor? executor}) async {
+    final db = executor ?? await database;
     // 查询超出限制的版本 ID（按时间升序，最老的在前）
     final overflow = await db.rawQuery('''
       SELECT id FROM $_table

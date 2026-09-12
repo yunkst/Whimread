@@ -189,6 +189,7 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
 
     if (confirmed == true && mounted) {
       await ref.read(loggerServiceProvider).clearLogs();
+      if (!mounted) return;
       setState(() {
         _loadLogs();
       });
@@ -590,7 +591,7 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 
   /// 应用搜索

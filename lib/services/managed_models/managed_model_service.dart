@@ -187,11 +187,20 @@ class ManagedModelService {
 
   static final ManagedModelService instance = ManagedModelService._();
 
-  /// 单测/特殊场景注入自定义 wrapper
+  /// 单测/特殊场景注入自定义 wrapper（APP 启动时由 main.dart 调用一次）
   ApiServiceWrapper? _apiOverride;
-  @visibleForTesting
   void useApiWrapper(ApiServiceWrapper wrapper) => _apiOverride = wrapper;
-  ApiServiceWrapper get _api => _apiOverride ?? ApiServiceWrapper();
+
+  /// 必须由 APP 启动时经 [useApiWrapper] 注入；未注入即抛错，
+  /// 避免「每次访问都 new 一个未 init 的 wrapper」的隐性 bug。
+  ApiServiceWrapper get _api {
+    final override = _apiOverride;
+    if (override == null) {
+      throw StateError(
+          'ManagedModelService 未注入 ApiServiceWrapper（main.dart 启动时调 useApiWrapper）');
+    }
+    return override;
+  }
 
   static const String _kSelectedKey = 'managed_model_selection';
 

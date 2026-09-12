@@ -7,6 +7,8 @@
 library;
 
 import 'package:flutter/material.dart';
+
+import 'common/text_prompt_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/providers/bookshelf_mutation_provider.dart';
@@ -138,36 +140,15 @@ class _SiteBookshelfRefreshSheetState
 
   /// 旧版脚本无 sampleUrl 时，让用户输入书架页 URL（预填 https://domain/）
   Future<String?> _askUrlForLegacyScript(SiteScript script) async {
-    final ctrl = TextEditingController(text: 'https://${script.domain}/');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('输入 ${script.domain} 的「我的书架」URL'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '书架页 URL',
-            hintText: 'https://example.com/my/favorites',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('开始同步'),
-          ),
-        ],
-      ),
+    // TextPromptDialog: 空输入返回 null,与原"空 URL toast"路径等价
+    final result = await TextPromptDialog.show(
+      context,
+      title: '输入 ${script.domain} 的「我的书架」URL',
+      label: '书架页 URL',
+      initialValue: 'https://${script.domain}/',
+      confirmText: '开始同步',
     );
     if (result == null) return null;
-    if (result.isEmpty) {
-      if (mounted) _toast('URL 不能为空', isError: true);
-      return null;
-    }
     return result;
   }
 

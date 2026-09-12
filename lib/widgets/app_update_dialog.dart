@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+
+import '../core/theme/app_colors.dart';
 import '../models/app_version.dart';
 import '../services/app_update_service.dart';
 import '../services/logger_service.dart';
@@ -79,16 +82,23 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
               ),
               const SizedBox(height: 4),
               Container(
-                constraints: const BoxConstraints(maxHeight: 150),
-                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(maxHeight: 240),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: SingleChildScrollView(
-                  child: Text(
-                    widget.version.changelog!,
-                    style: theme.textTheme.bodySmall,
+                child: Scrollbar(
+                  child: SingleChildScrollView(
+                    child: MarkdownBody(
+                      data: widget.version.changelog!,
+                      selectable: true,
+                      shrinkWrap: true,
+                      styleSheet: _buildChangelogStyle(context),
+                    ),
                   ),
                 ),
               ),
@@ -142,6 +152,81 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
         ),
       ),
       actions: _buildActions(context),
+    );
+  }
+
+  MarkdownStyleSheet _buildChangelogStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = context.appColors;
+    final base = theme.textTheme.bodySmall ?? const TextStyle();
+    return MarkdownStyleSheet(
+      p: base.copyWith(height: 1.5, color: colors.ink),
+      h1: base.copyWith(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        color: colors.ink,
+        height: 1.6,
+      ),
+      h2: base.copyWith(
+        fontSize: 16,
+        fontWeight: FontWeight.bold,
+        color: colors.ink,
+        height: 1.6,
+      ),
+      h3: base.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        color: colors.ink,
+        height: 1.5,
+      ),
+      h4: base.copyWith(
+        fontSize: 13,
+        fontWeight: FontWeight.bold,
+        color: colors.ink,
+        height: 1.5,
+      ),
+      strong: base.copyWith(fontWeight: FontWeight.bold, color: colors.ink),
+      em: base.copyWith(fontStyle: FontStyle.italic, color: colors.ink),
+      del: base.copyWith(
+        decoration: TextDecoration.lineThrough,
+        color: colors.inkSoft,
+      ),
+      a: base.copyWith(
+        color: theme.colorScheme.primary,
+        decoration: TextDecoration.underline,
+      ),
+      listBullet: base.copyWith(color: colors.inkSoft, height: 1.5),
+      code: base.copyWith(
+        fontFamily: 'monospace',
+        fontSize: 12,
+        backgroundColor: theme.colorScheme.surfaceContainerHigh,
+        color: theme.colorScheme.primary,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      codeblockPadding: const EdgeInsets.all(8),
+      blockquote: base.copyWith(
+        fontStyle: FontStyle.italic,
+        color: colors.inkSoft,
+      ),
+      blockquoteDecoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(4),
+        border: Border(
+          left: BorderSide(
+            color: theme.colorScheme.primary,
+            width: 3,
+          ),
+        ),
+      ),
+      blockquotePadding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: colors.divider, width: 1),
+        ),
+      ),
     );
   }
 

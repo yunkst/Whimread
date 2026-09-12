@@ -473,6 +473,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   // 关闭预览版通道不需要确认，直接关闭
                   if (!value) {
                     await AppUpdateService.setPreviewChannelEnabled(false);
+                    if (!mounted) return;
                     setState(() {
                       _isPreviewChannel = false;
                     });
@@ -505,6 +506,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   if (confirmed != true) return;
 
                   await AppUpdateService.setPreviewChannelEnabled(true);
+                  if (!mounted) return;
                   setState(() {
                     _isPreviewChannel = true;
                   });

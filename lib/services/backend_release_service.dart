@@ -1,6 +1,5 @@
 import 'package:dio/dio.dart';
 
-import '../../core/constants/build_config.dart';
 import '../models/backend_release.dart';
 import 'app_update_check_exception.dart';
 import 'logger_service.dart';
@@ -21,13 +20,15 @@ class BackendReleaseService {
   final Dio _dio;
   final String _baseUrl;
 
-  BackendReleaseService({Dio? dio, String? baseUrl})
+  /// [baseUrl] 后端地址（由调用方经 `resolveBackendHost()` 解析后传入）；
+  /// 末尾斜杠在此统一裁剪。
+  BackendReleaseService({Dio? dio, required String baseUrl})
       : _dio = dio ??
             Dio(BaseOptions(
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 15),
             )),
-        _baseUrl = (baseUrl ?? kBackendBaseUrl).replaceAll(RegExp(r'/+$'), '');
+        _baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
 
   /// 获取最新 Release 信息
   ///

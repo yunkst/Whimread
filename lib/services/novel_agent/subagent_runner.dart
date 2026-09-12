@@ -215,6 +215,8 @@ class SubagentRunner {
     run.state = SubagentRunState.running;
     run.token = CancellationToken();
 
+    // 声明在 try 外:finally 释放传输时要可达(loop.run 抛错同样要释放)
+    LlmProvider? llm;
     try {
       final scenario = SubagentScenario(
         task: run.task,
@@ -225,7 +227,7 @@ class SubagentRunner {
             name, args, onProgress, run, parentCurrentNovelId);
       });
 
-      final llm = await _buildLlmForScenario('writing');
+      llm = await _buildLlmForScenario('writing');
       final loop = AgentLoop(
         llm: llm,
         scenario: scenario,
@@ -263,6 +265,8 @@ class SubagentRunner {
       run.completeDone();
       await run.eventSub?.cancel();
       run.eventSub = null;
+      // LLM 传输释放（mock provider 的 dispose 为 no-op）
+      llm?.dispose();
     }
   }
 

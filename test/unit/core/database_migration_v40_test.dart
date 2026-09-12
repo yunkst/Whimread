@@ -67,7 +67,7 @@ void main() {
     await db.close();
   });
 
-  test('currentVersion == 42', () {
-    expect(DatabaseMigrations.currentVersion, 42);
+  test('currentVersion >= 44（v40 bookshelf_js 迁移已包含）', () {
+    expect(DatabaseMigrations.currentVersion, greaterThanOrEqualTo(44));
   });
 }

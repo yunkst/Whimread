@@ -6,7 +6,7 @@ part of 'bookshelf_mutation_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$bookshelfMutationHash() => r'24eb4e1746627f83c9e26ef6522f707f211b8188';
+String _$bookshelfMutationHash() => r'823c377ec07f270dbb447b0b19fd681987ae95bb';
 
 /// 书架写操作聚合 Notifier（无状态）。
 ///

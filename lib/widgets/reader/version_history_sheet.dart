@@ -7,6 +7,7 @@ import '../../models/chapter_version.dart';
 import '../../utils/toast_utils.dart';
 import '../common/bottom_sheet_header.dart';
 import '../empty_states/empty_state_view.dart';
+import 'version_preview_page.dart';
 
 /// 版本历史底部面板
 ///
@@ -223,43 +224,26 @@ class _VersionHistorySheetState extends ConsumerState<VersionHistorySheet> {
     }
   }
 
-  /// 预览版本内容
+  /// 预览版本内容（全屏页）
+  ///
+  /// 旧实现是嵌在 BottomSheet 上的 AlertDialog，content 区被 AlertDialog
+  /// 内边距和最大宽度严重挤压，长章节根本看不清。改为推入全屏路由
+  /// [VersionPreviewPage]，排版与阅读器正文一致（衬线 / 字号 / 行高 /
+  /// 字间距 / 段落间距），全文可滚动、可选中复制。
   void _previewVersion(ChapterVersion version) {
-    final previewText = version.content.length > 2000
-        ? '${version.content.substring(0, 2000)}\n\n... (共${version.contentLength}字)'
-        : version.content;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(version.sourceIcon, size: 20,
-                color: _sourceColor(version.source)),
-            const SizedBox(width: 8),
-            Text('${version.sourceLabel} · ${version.formattedTime}'),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Text(previewText, style: const TextStyle(fontSize: 14, height: 1.6)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _restoreVersion(version);
-            },
-            child: const Text('还原此版本'),
-          ),
-        ],
-      ),
+    VersionPreviewPage.push(
+      context,
+      version: version,
+      chapterUrl: widget.chapterUrl,
+      novelUrl: widget.novelUrl,
+      // 预览页还原成功后：由面板收尾（关闭自己 + 通知阅读器刷新）。
+      // 此处捕获 sheet 的 BuildContext，pop 时仍可访问（sheet 一直挂载）。
+      onRestored: () {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+        widget.onRestored();
+      },
     );
   }
 

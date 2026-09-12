@@ -390,6 +390,10 @@ class _VideoContentState extends State<_VideoContent> {
           _initialized = true;
         });
         _applyPlayState(); // 用父级当前决策，而非无脑 play
+      } else {
+        // 初始化期间组件已销毁：无人持有 controller，必须就地释放，
+        // 否则 native 解码器句柄泄漏（2026-09 审查 P2）
+        await c.dispose();
       }
     } catch (e) {
       LoggerService.instance.d(
@@ -397,7 +401,11 @@ class _VideoContentState extends State<_VideoContent> {
         category: LogCategory.ai,
         tags: ['media_view', 'video', 'init_failed'],
       );
-      if (mounted) setState(() => _failed = true);
+      if (mounted) {
+        setState(() => _failed = true);
+      } else {
+        await c.dispose();
+      }
     }
   }
 

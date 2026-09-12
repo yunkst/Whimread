@@ -85,13 +85,35 @@ void main() {
     r.add(
       method: 'GET',
       url: 'https://x.com/a',
-      headers: {'cookie': 'a-very-long-cookie-value-that-exceeds-limit'},
+      headers: {'x-custom': 'a-very-long-custom-value-that-exceeds-limit'},
     );
     final snap = r.snapshot(limit: 100);
     final headers = (((snap['requests'] as List).single
         as Map<String, dynamic>)['request_headers']) as Map<String, dynamic>;
-    expect(headers['_cookie_truncated'], 'true');
-    expect((headers['cookie'] as String).endsWith('...'), isTrue);
+    expect(headers['_x-custom_truncated'], 'true');
+    expect((headers['x-custom'] as String).endsWith('...'), isTrue);
+  });
+
+  test('敏感请求头值 redact（cookie/authorization 等），header 名保留', () {
+    final r = NetworkRequestRecorder();
+    r.add(
+      method: 'GET',
+      url: 'https://x.com/a',
+      headers: const {
+        'Cookie': 'session=secret-login-state',
+        'Authorization': 'Bearer jwt-token',
+        'X-Api-Key': 'key-123',
+        'Referer': 'https://x.com/',
+      },
+    );
+    final snap = r.snapshot(limit: 100);
+    final headers = (((snap['requests'] as List).single
+        as Map<String, dynamic>)['request_headers']) as Map<String, dynamic>;
+    expect(headers['Cookie'], '<redacted>');
+    expect(headers['Authorization'], '<redacted>');
+    expect(headers['X-Api-Key'], '<redacted>');
+    expect(headers['Referer'], 'https://x.com/', reason: '非敏感头原样保留');
+    expect(headers.values.any((v) => '$v'.contains('secret')), isFalse);
   });
 
   test('query_params 多值取末个(Uri.queryParameters 行为)', () {

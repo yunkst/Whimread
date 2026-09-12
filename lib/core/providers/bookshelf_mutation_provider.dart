@@ -124,11 +124,15 @@ class BookshelfMutation extends _$BookshelfMutation {
 
   /// 统一收口：写库 + invalidate(bookshelfNovelsProvider)。
   ///
+  /// 同时 invalidate `onlineNovelsProvider`——站点 Tab 列表
+  /// （`bookshelfShelvesProvider`）依赖它级联刷新。
+  ///
   /// **失败不 invalidate**：若 [op] 抛异常，异常向上抛，`ref.invalidate`
   /// 不执行——避免 UI 显示"写了但没刷干净"的半真半假状态。
   Future<T> _wrap<T>(Future<T> Function() op) async {
     final result = await op();
     ref.invalidate(bookshelfNovelsProvider);
+    ref.invalidate(onlineNovelsProvider);
     return result;
   }
 }

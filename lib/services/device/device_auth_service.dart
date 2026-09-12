@@ -19,6 +19,7 @@ import 'package:dio/dio.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/build_config.dart';
@@ -77,7 +78,17 @@ class DeviceAuthService {
   /// 测试/特殊场景注入自定义 wrapper；默认走全局单例
   void useWrapper(ApiServiceWrapper wrapper) => _apiOverride = wrapper;
 
-  ApiServiceWrapper get _api => _apiOverride ?? ApiServiceWrapper();
+  /// 必须由 APP 启动时经 [useWrapper] 注入；未注入即抛错，
+  /// 避免「每次访问都 new 一个未 init 的 wrapper」的隐性 bug（连接池泄漏
+  /// + 没有 baseUrl/401 续签）。
+  ApiServiceWrapper get _api {
+    final override = _apiOverride;
+    if (override == null) {
+      throw StateError(
+          'DeviceAuthService 未注入 ApiServiceWrapper（main.dart 启动时调 useWrapper）');
+    }
+    return override;
+  }
 
   final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
 
@@ -88,6 +99,41 @@ class DeviceAuthService {
   static const String _kDeviceToken = 'device_jwt';
   static const String _kAndroidId = 'device_android_id_fallback';
 
+  /// JWT 安全存储（Android EncryptedSharedPreferences/Keystore）。
+  ///
+  /// 2026-09 审查 P1：JWT 是 30 天期会话凭证，明文 SharedPreferences 可被
+  /// 备份/调试/root 读取，迁移到安全存储；平台不支持/底层异常时降级回
+  /// SharedPreferences（保持旧可用性），并从旧键迁移后清除明文副本。
+  static const FlutterSecureStorage _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  Future<String?> _readTokenSecure() async {
+    try {
+      return await _secure.read(key: _kDeviceToken);
+    } catch (e) {
+      LoggerService.instance.w(
+        '安全存储读取 JWT 失败，降级 SharedPreferences: $e',
+        category: LogCategory.ai,
+        tags: ['device', 'secure_storage', 'read_fallback'],
+      );
+      return null;
+    }
+  }
+
+  Future<void> _writeTokenSecure(String token) async {
+    try {
+      await _secure.write(key: _kDeviceToken, value: token);
+    } catch (e) {
+      LoggerService.instance.w(
+        '安全存储写入 JWT 失败，降级 SharedPreferences: $e',
+        category: LogCategory.ai,
+        tags: ['device', 'secure_storage', 'write_fallback'],
+      );
+      await PreferencesService.instance.setString(_kDeviceToken, token);
+    }
+  }
+
   String? _cachedToken;
 
   /// 当前可用 token（null = 尚未注册）
@@ -95,11 +141,26 @@ class DeviceAuthService {
 
   /// APP 启动时恢复本地缓存的 JWT（无网络请求）。
   ///
+  /// 优先安全存储；安全存储无值时把旧版 SharedPreferences 里的明文 JWT
+  /// 迁移过去并清除明文副本（一次性迁移，失败不阻塞启动）。
   /// 空串归一化为 null（getString 缺省返回 ''，不归一会让
   /// [ensureRegistered]/[fetchQuota] 的空值守卫被穿透，发出空 Bearer 请求）。
   Future<void> loadCached() async {
-    final token = await PreferencesService.instance.getString(_kDeviceToken);
-    _cachedToken = token.isEmpty ? null : token;
+    var token = await _readTokenSecure();
+    if (token == null || token.isEmpty) {
+      final legacy = await PreferencesService.instance.getString(_kDeviceToken);
+      if (legacy.isNotEmpty) {
+        token = legacy;
+        await _writeTokenSecure(legacy);
+        await PreferencesService.instance.remove(_kDeviceToken);
+        LoggerService.instance.i(
+          '设备 JWT 已从 SharedPreferences 迁移到安全存储',
+          category: LogCategory.ai,
+          tags: ['device', 'secure_storage', 'migrated'],
+        );
+      }
+    }
+    _cachedToken = (token == null || token.isEmpty) ? null : token;
   }
 
   /// 确保持有有效 JWT；有缓存用缓存，否则走注册。
@@ -149,9 +210,10 @@ class DeviceAuthService {
       throw DeviceAuthException('REGISTER_FAILED', '服务器未返回设备凭证');
     }
 
-    // 4. 缓存 JWT
+    // 4. 缓存 JWT（安全存储；SharedPreferences 明文副本清除）
     _cachedToken = token;
-    await PreferencesService.instance.setString(_kDeviceToken, token);
+    await _writeTokenSecure(token);
+    await PreferencesService.instance.remove(_kDeviceToken);
 
     LoggerService.instance.i(
       '设备注册成功: id=${data['device_id']} '

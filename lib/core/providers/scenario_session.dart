@@ -7,7 +7,7 @@
 /// - UI 通过 _projectUiMessages 把 agent messages 投影为 AgentChatMessage（含 segments）。
 /// - 落库时机：user 消息即时落库；assistant 回合（含 tool 调用/结果）在
 ///   AgentDoneEvent/cancel 时从 _pendingSegments 重建并批量落库。
-/// - 压缩 / retry / rollback 同步删 DB（deleteMessagesBefore），保证内存与 DB 一致。
+/// - 压缩 / retry / rollback 以内存为基准原子重写 DB（replaceMessages 单事务），保证内存与 DB 一致。
 ///
 /// 隔离设计（保留）：
 /// - 每个 scenarioId → 独立的 ScenarioSession
@@ -24,6 +24,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/chat_session.dart';
 import '../../models/chat_message_record.dart';
+import '../../repositories/chat_session_repository.dart';
 import '../../services/logger_service.dart';
 import '../../services/novel_agent/agent_event.dart';
 import '../../services/novel_agent/compaction_note_parser.dart';
@@ -260,8 +261,6 @@ class ScenarioSession {
             .getSession(newSessionId);
         final novelId = row?.currentNovelId;
         if (novelId != null) {
-          // loadNovel 纯查询：恢复历史会话不写全局 currentNovelProvider，
-          // 避免跨 session 污染（issue #24）
           restoredNovel = await loadNovel(_ref, novelId);
         }
       } catch (e, st) {
@@ -273,6 +272,11 @@ class ScenarioSession {
         );
       }
     }
+    // 打开历史会话 = 切换工作上下文：恢复的小说同时写入全局选择，
+    // 让「当前选择的小说」始终等于用户正在操作的会话的小说
+    //（原 issue #24 的「恢复不写全局」决策已按新需求反转；
+    // 工具读取仍走会话私有的 _currentNovel，全局仅作为 UI/选择状态）。
+    _ref.read(currentNovelProvider.notifier).state = restoredNovel;
     _currentNovel = restoredNovel;
     _state = _state.copyWith(
       messages: const [],
@@ -315,6 +319,11 @@ class ScenarioSession {
       if (novel == null && session.currentNovelId != null) {
         final restored = await loadNovel(_ref, session.currentNovelId!);
         novel = _currentNovel ?? restored;
+        // 从 DB 恢复成功且未被并发选书抢占 → 全局选择跟随会话
+        //（与 adoptSession 一致；identical 排除了"内存已有值"分支）
+        if (identical(novel, restored)) {
+          _ref.read(currentNovelProvider.notifier).state = novel;
+        }
       }
       _currentNovel = novel;
       _state = _state.copyWith(
@@ -384,9 +393,10 @@ class ScenarioSession {
     }
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);
+      // 会话名 = 当前选中的小说（用户可随时手动重命名覆盖）
       final id = await repo.createSession(ChatSession(
         scenarioId: scenarioId,
-        title: '',
+        title: _currentNovel?.title ?? '',
         currentNovelId: _currentNovel?.id,
         currentNovelTitle: _currentNovel?.title,
       ));
@@ -847,7 +857,9 @@ class ScenarioSession {
       _currentNovel = novel;
       _state = _state.copyWith(currentNovel: novel);
       _notifyStateChanged();
-      unawaited(_persistCurrentNovel());
+      // await 而非 fire-and-forget：返回时保证 DB（含自动命名）与内存一致，
+      // 内部已 try/catch，持久化失败不影响本次选择结果。
+      await _persistCurrentNovel();
     }
     return novel;
   }
@@ -1284,8 +1296,8 @@ class ScenarioSession {
       category: LogCategory.ai,
       tags: ['session', 'compaction', 'trim', scenarioId],
     );
-    // 4) 重写 DB：_deleteAgentMessagesBeforeDb 内部 clearMessages + appendMessage
-    //    整段重写 _agentMessages（已含 marker 头部 + 改写后的 content），故
+    // 4) 重写 DB：_deleteAgentMessagesBeforeDb 用 replaceMessages 单事务整段
+    //    重写 _agentMessages（已含 marker 头部 + 改写后的 content），故
     //    marker 自然落到 agentMsgIndex = 0。
     unawaited(_deleteAgentMessagesBeforeDb(cut));
   }
@@ -1327,6 +1339,7 @@ class ScenarioSession {
   /// 批量落库多条 agent 消息（回合结束 finalize 用）
   ///
   /// agentMsgIndex 基于 _agentMessages 的最终位置计算（消息已 addAll 进去）。
+  /// 整批单事务提交：中途失败全部回滚，不会留下断裂的 ReAct 链。
   Future<void> _persistAgentMessages(List<ChatMessage> msgs,
       {bool partial = false}) async {
     final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider);
@@ -1334,13 +1347,11 @@ class ScenarioSession {
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);
       final startIdx = _agentMessages.length - msgs.length;
-      for (var i = 0; i < msgs.length; i++) {
-        await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid,
-          startIdx + i,
-          msgs[i],
-        ));
-      }
+      final records = [
+        for (var i = 0; i < msgs.length; i++)
+          ChatMessageRecord.fromAgentMessage(sid, startIdx + i, msgs[i]),
+      ];
+      await repo.appendMessages(records);
       _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
       LoggerService.instance.d(
         'ScenarioSession [$scenarioId] 落库 ${msgs.length} 条 agent 消息 '
@@ -1367,11 +1378,16 @@ class ScenarioSession {
     final sid = _sessionId;
     if (sid == null) return;
     try {
-      await _ref.read(chatSessionRepositoryProvider).updateCurrentNovel(
-            sid,
-            novelId: _currentNovel?.id,
-            novelTitle: _currentNovel?.title,
-          );
+      final repo = _ref.read(chatSessionRepositoryProvider);
+      // 先读旧行：标题自动同步策略需要参照旧的 currentNovelTitle，
+      // 区分「自动命名（=旧小说标题）」与「用户手动重命名」。
+      final oldRow = await repo.getSession(sid);
+      await repo.updateCurrentNovel(
+        sid,
+        novelId: _currentNovel?.id,
+        novelTitle: _currentNovel?.title,
+      );
+      await _maybeSyncSessionTitle(repo, sid, oldRow);
     } catch (e, st) {
       LoggerService.instance.e(
         'ScenarioSession [$scenarioId] 同步 currentNovel 失败: $e',
@@ -1382,24 +1398,64 @@ class ScenarioSession {
     }
   }
 
-  /// 删 DB 中 agentMsgIndex >= [fromIndex] 的消息（retry/rollback 用）
+  /// 会话标题自动同步：跟随当前小说变化，但尊重用户手动重命名。
   ///
-  /// 当前 repo 只有 deleteMessagesBefore（删 < beforeIndex）和 clearMessages，
-  /// 这里用 clearMessages + 重写保留段实现"删尾部"。
+  /// 判定规则（用旧行做参照，无状态、无需额外字段）：
+  /// - 旧标题为空 或 旧标题 == 旧 currentNovelTitle → 视为自动命名 → 改写
+  /// - 否则视为用户手动改过名 → 保留
+  ///
+  /// 改写后失效 sessions 列表缓存，让历史面板刷新显示新标题。
+  Future<void> _maybeSyncSessionTitle(
+    ChatSessionRepository repo,
+    int sid,
+    ChatSession? oldRow,
+  ) async {
+    final newTitle = _currentNovel?.title.trim();
+    if (newTitle == null || newTitle.isEmpty) return;
+    if (oldRow == null) return;
+    final current = oldRow.title.trim();
+    final prevAutoTitle = oldRow.currentNovelTitle?.trim();
+    final wasAutoNamed = current.isEmpty || current == prevAutoTitle;
+    if (!wasAutoNamed) return;
+    if (newTitle == current) return;
+    try {
+      await repo.renameSession(sid, newTitle);
+      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
+      LoggerService.instance.d(
+        'ScenarioSession [$scenarioId] 会话标题自动同步 → "$newTitle" '
+        '(sessionId=$sid)',
+        category: LogCategory.ai,
+        tags: ['session', 'auto_rename', scenarioId],
+      );
+    } catch (e, st) {
+      LoggerService.instance.e(
+        'ScenarioSession [$scenarioId] 自动同步会话标题失败: $e',
+        stackTrace: st.toString(),
+        category: LogCategory.ai,
+        tags: ['session', 'auto_rename', 'failed', scenarioId],
+      );
+    }
+  }
+
+  /// 以内存为基准原子重写 DB（retry/rollback 用）
+  ///
+  /// 内存 [_agentMessages] 是事实来源：调用方先截断内存，这里把 DB 重写成
+  /// 与内存一致（replaceMessages 单事务：清空 + 按序整批写入）。
+  /// [fromIndex] 不参与删除范围计算，仅用于日志定位触发点。
+  /// 中途崩溃/失败由事务保证回滚到重写前的完整状态，不会留下断裂会话。
   Future<void> _deleteAgentMessagesFromDb(int fromIndex) async {
     final sid = _sessionId;
     if (sid == null) return;
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);
-      final retained = List<ChatMessage>.from(_agentMessages);
-      await repo.clearMessages(sid);
-      for (var i = 0; i < retained.length; i++) {
-        await repo.appendMessage(
-            ChatMessageRecord.fromAgentMessage(sid, i, retained[i]));
-      }
+      final records = [
+        for (var i = 0; i < _agentMessages.length; i++)
+          ChatMessageRecord.fromAgentMessage(sid, i, _agentMessages[i]),
+      ];
+      await repo.replaceMessages(sid, records);
       _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
       LoggerService.instance.i(
-        'ScenarioSession [$scenarioId] DB 重写: 保留 ${retained.length} 条 (fromIndex=$fromIndex)',
+        'ScenarioSession [$scenarioId] DB 重写: 保留 ${records.length} 条 (fromIndex=$fromIndex)',
         category: LogCategory.ai,
         tags: ['session', 'db_rewrite', scenarioId],
       );
@@ -1413,23 +1469,25 @@ class ScenarioSession {
     }
   }
 
-  /// 删 DB 中 agentMsgIndex < [beforeIndex] 的消息（压缩用）
+  /// 压缩后以内存为基准原子重写 DB
+  ///
+  /// 压缩会截断内存前段，agentMsgIndex 由此产生空洞；重写让索引重新紧凑。
+  /// replaceMessages 单事务完成"清空 + 按序写入"，替代原先
+  /// deleteMessagesBefore → clearMessages → 逐条 append 的三步非原子路径
+  /// （原先第一步纯属白做，且中途崩溃会留下索引断裂的会话）。
   Future<void> _deleteAgentMessagesBeforeDb(int beforeIndex) async {
     final sid = _sessionId;
     if (sid == null) return;
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);
-      await repo.deleteMessagesBefore(sid, beforeIndex);
-      // 压缩后 agentMsgIndex 有空洞，重写保留段让索引紧凑
-      final retained = List<ChatMessage>.from(_agentMessages);
-      await repo.clearMessages(sid);
-      for (var i = 0; i < retained.length; i++) {
-        await repo.appendMessage(
-            ChatMessageRecord.fromAgentMessage(sid, i, retained[i]));
-      }
+      final records = [
+        for (var i = 0; i < _agentMessages.length; i++)
+          ChatMessageRecord.fromAgentMessage(sid, i, _agentMessages[i]),
+      ];
+      await repo.replaceMessages(sid, records);
       _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
       LoggerService.instance.i(
-        'ScenarioSession [$scenarioId] 压缩后 DB 重写: 保留 ${retained.length} 条',
+        'ScenarioSession [$scenarioId] 压缩后 DB 重写: 保留 ${records.length} 条 (beforeIndex=$beforeIndex)',
         category: LogCategory.ai,
         tags: ['session', 'compaction_db', scenarioId],
       );

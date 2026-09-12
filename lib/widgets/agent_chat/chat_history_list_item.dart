@@ -1,3 +1,4 @@
+import '../../widgets/common/text_prompt_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_app/core/providers/chat_session_providers.dart';
@@ -109,30 +110,12 @@ class ChatHistoryListItem extends ConsumerWidget {
   }
 
   Future<void> _showRenameDialog(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController(text: session.title);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('重命名会话'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '输入新标题',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+    final result = await TextPromptDialog.show(
+      context,
+      title: '重命名会话',
+      label: '输入新标题',
+      initialValue: session.title,
+      confirmText: '保存',
     );
     if (result != null && result.isNotEmpty && result != session.title) {
       await ref.read(chatSessionRepositoryProvider).renameSession(session.id!, result);

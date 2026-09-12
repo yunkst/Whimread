@@ -45,11 +45,16 @@ class NovelRepository extends BaseRepository
   NovelRepository({required super.dbConnection});
 
   /// 添加小说到书架
+  ///
+  /// URL 已存在时**不删旧插新**（旧 ConflictAlgorithm.replace 会静默清空
+  /// lastReadChapter/lastReadTime/coverMediaId，2026-09 审查 P1）：
+  /// 只刷新内容元数据；coverMediaId 仅在新值非空时覆盖；
+  /// 返回既有行的 id，调用方（Agent create_novel 等）拿到的 id 语义不变。
   @override
   Future<int> addToBookshelf(Novel novel) async {
     try {
       final db = await database;
-      final result = await db.insert(
+      final inserted = await db.insert(
         'bookshelf',
         {
           'title': novel.title,
@@ -61,16 +66,51 @@ class NovelRepository extends BaseRepository
           'backgroundSetting': novel.backgroundSetting,
           'addedAt': DateTime.now().millisecondsSinceEpoch,
         },
-        conflictAlgorithm: ConflictAlgorithm.replace,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+
+      if (inserted != 0) {
+        LoggerService.instance.i(
+          '添加小说到书架: ${novel.title}',
+          category: LogCategory.database,
+          tags: ['novel', 'add', 'success'],
+        );
+        return inserted;
+      }
+
+      // 已存在:刷新元数据,阅读进度字段(lastReadChapter/lastReadTime)不触碰
+      final updateMap = <String, dynamic>{
+        'title': novel.title,
+        'author': novel.author,
+        'coverUrl': novel.coverUrl,
+        'description': novel.description,
+        'backgroundSetting': novel.backgroundSetting,
+      };
+      if (novel.coverMediaId != null) {
+        updateMap['coverMediaId'] = novel.coverMediaId;
+      }
+      await db.update(
+        'bookshelf',
+        updateMap,
+        where: 'url = ?',
+        whereArgs: [novel.url],
+      );
+
+      final rows = await db.query(
+        'bookshelf',
+        columns: ['id'],
+        where: 'url = ?',
+        whereArgs: [novel.url],
+        limit: 1,
+      );
+      final existingId = rows.isEmpty ? 0 : (rows.first['id'] as int? ?? 0);
 
       LoggerService.instance.i(
-        '添加小说到书架: ${novel.title}',
+        '小说已存在,刷新元数据: ${novel.title} (id=$existingId)',
         category: LogCategory.database,
-        tags: ['novel', 'add', 'success'],
+        tags: ['novel', 'add', 'existing_refreshed'],
       );
-
-      return result;
+      return existingId;
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         '添加小说到书架失败: ${novel.title} - $e',

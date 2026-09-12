@@ -132,19 +132,19 @@ void main() {
     test('async IIFE → 提取函数体', () {
       const script = "(async function() {\n  return 42;\n})()";
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, equals('return 42;'));
+      expect(body, endsWith('return 42;'));
     });
 
     test('sync IIFE → 提取函数体', () {
       const script = "(function() {\n  return 'hello';\n})()";
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, equals("return 'hello';"));
+      expect(body, endsWith("return 'hello';"));
     });
 
     test('带参数的 async IIFE → 提取函数体', () {
       const script = "(async function(x, y) {\n  return x + y;\n})()";
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, equals('return x + y;'));
+      expect(body, endsWith('return x + y;'));
     });
 
     test('非 IIFE 格式 → 原样返回', () {
@@ -165,11 +165,15 @@ void main() {
 })()
 """;
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script).trim();
-      expect(body, contains('if (true)'));
-      expect(body, contains('for (let i'));
-      expect(body, contains("return 'done';"));
+      // 前导守卫之后才是脚本体;守卫自身的 IIFE 结尾含 })()，先剥离再断言
+      final codeOnly = body
+          .substring(body.indexOf('/* ==== 沙箱守卫结束 ==== */'))
+          .trim();
+      expect(codeOnly, contains('if (true)'));
+      expect(codeOnly, contains('for (let i'));
+      expect(codeOnly, contains("return 'done';"));
       // 不应包含外层的 })()
-      expect(body, isNot(contains('})()')));
+      expect(codeOnly, isNot(contains('})()')));
     });
 
     test('Agent 实际生成的脚本格式 → 正确提取', () {
@@ -192,20 +196,85 @@ void main() {
       expect(body, contains("const PAGE_URL = '{{URL}}';"));
       expect(body, contains('querySelectorAll'));
       expect(body, contains('return JSON.stringify'));
-      expect(body, isNot(contains('(async function')));
-      expect(body, isNot(contains('})()')));
+      final codeOnly = body
+          .substring(body.indexOf('/* ==== 沙箱守卫结束 ==== */'))
+          .trim();
+      expect(codeOnly, isNot(contains('(async function')));
+      expect(codeOnly, isNot(contains('})()')));
     });
 
     test('前后有空白字符 → 正确处理', () {
       const script = '  \n (async function() {\n  return 1;\n })()  \n ';
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, equals('return 1;'));
+      expect(body, endsWith('return 1;'));
     });
 
-    test('空函数体 → 返回空字符串', () {
+    test('空函数体 → 返回沙箱前导', () {
       const script = '(async function() {})()';
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, isEmpty);
+      expect(body, isNotEmpty);
+    });
+  });
+
+  // ===================================================================
+  // 沙箱守卫（2026-09 审查 P1：数据外发/凭据访问防线）
+  // ===================================================================
+  group('WebViewJsExecutor 沙箱', () {
+    test('validateScript: document.cookie → 拒绝', () {
+      const script = """
+        (async function() {
+          const PAGE_URL = '{{URL}}';
+          const c = document.cookie;
+          return JSON.stringify({c: c});
+        })()
+      """;
+      final error = WebViewJsExecutor.validateScript(script);
+      expect(error, isNotNull);
+      expect(error, contains('禁止'));
+    });
+
+    test('validateScript: localStorage / sessionStorage / indexedDB → 拒绝', () {
+      for (final token in ['localStorage', 'sessionStorage', 'indexedDB']) {
+        final script = """
+        (async function() {
+          const PAGE_URL = '{{URL}}';
+          return JSON.stringify({v: window.$token.length});
+        })()
+      """;
+        expect(WebViewJsExecutor.validateScript(script), isNotNull,
+            reason: '$token 应被拒绝');
+      }
+    });
+
+    test('validateScript: sendBeacon / WebSocket / EventSource → 拒绝', () {
+      for (final token in ['navigator.sendBeacon', 'new WebSocket(', 'new EventSource(']) {
+        final script = """
+        (async function() {
+          const PAGE_URL = '{{URL}}';
+          $token;
+          return JSON.stringify({});
+        })()
+      """;
+        expect(WebViewJsExecutor.validateScript(script), isNotNull,
+            reason: '$token 应被拒绝');
+      }
+    });
+
+    test('extractAsyncFunctionBody: 注入同源守卫前导', () {
+      const script = "(async function() {\n  const PAGE_URL = '{{URL}}';\n  return 1;\n})()";
+      final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
+      expect(body, contains('WHIMREAD_SANDBOX'));
+      expect(body.indexOf('WHIMREAD_SANDBOX'),
+          lessThan(body.indexOf("const PAGE_URL")),
+          reason: '守卫前导必须在脚本体之前');
+    });
+
+    test('守卫前导独立可执行（不依赖 PAGE_URL 声明即可定义）', () {
+      final preamble = WebViewJsExecutor.buildSandboxPreamble();
+      expect(preamble, contains('__wrGuard'));
+      expect(preamble, contains('sendBeacon'));
+      expect(preamble, contains('XMLHttpRequest'));
+      expect(preamble, contains('fetch'));
     });
   });
 

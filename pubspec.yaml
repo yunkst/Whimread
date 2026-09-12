@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.0.0-preview.7+126
+version: 3.0.0-preview.8+127
 
 repository: https://github.com/yunkst/Whimread
 homepage: https://github.com/yunkst/Whimread
@@ -86,6 +86,9 @@ dependencies:
 
   # 共享偏好设置
   shared_preferences: ^2.2.2
+
+  # 安全存储（Android Keystore/EncryptedSharedPreferences）：设备 JWT 等凭证
+  flutter_secure_storage: ^9.2.4
 
   # ZIP 打包/解包（用于备份包：DB + SharedPreferences 一起打包）
   archive: ^3.6.1

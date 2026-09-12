@@ -133,6 +133,18 @@ class HeadlessWebViewContentService {
           );
           return FetchContentResult.busy();
         }
+        // 唤醒后重查锁：并发的另一个抢占者可能已先被唤醒并同步拿到锁
+        //（两个高优等同一个让出信号时会一起醒来），本请求让位返回 busy 可重试
+        //（2026-09 审查 P2：原实现双唤醒后同时置 _isFetching，WebView 被并发 load）
+        if (_isFetching) {
+          LoggerService.instance.w(
+            'HeadlessWebView: 让出后被并发抢占者抢先，返回 busy '
+            'newUrl=$chapterUrl currentUrl=$_currentFetchingUrl',
+            category: LogCategory.cache,
+            tags: ['headless-webview', 'preempt', 'lost_race'],
+          );
+          return FetchContentResult.busy();
+        }
       } else {
         // 无法抢占（同级或低抢高），返回 busy
         LoggerService.instance.w(

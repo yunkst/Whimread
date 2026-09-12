@@ -143,7 +143,7 @@ class ChapterList extends _$ChapterList {
 
   /// 初始化API并加载章节
   Future<void> _initApiAndLoadChapters() async {
-    final chapterLoader = ref.watch(chapterLoaderProvider);
+    final chapterLoader = ref.read(chapterLoaderProvider);
 
     // 对于本地创建的小说，不需要初始化API
     if (novel.url.startsWith('custom://')) {
@@ -173,7 +173,7 @@ class ChapterList extends _$ChapterList {
   }) async {
     // 在方法开始时保存 context 引用，避免跨异步边界使用
     final savedContext = context;
-    final chapterLoader = ref.watch(chapterLoaderProvider);
+    final chapterLoader = ref.read(chapterLoaderProvider);
 
     state = state.copyWith(isLoading: true, errorMessage: '');
 
@@ -231,7 +231,7 @@ class ChapterList extends _$ChapterList {
     bool forceRefresh = false,
     BuildContext? context,
   }) async {
-    final chapterLoader = ref.watch(chapterLoaderProvider);
+    final chapterLoader = ref.read(chapterLoaderProvider);
 
     // 对于本地创建的小说，不需要从后端获取，直接从数据库加载
     if (novel.url.startsWith('custom://')) {
@@ -374,7 +374,7 @@ class ChapterList extends _$ChapterList {
 
   /// 加载最后阅读章节
   Future<void> _loadLastReadChapter() async {
-    final chapterLoader = ref.watch(chapterLoaderProvider);
+    final chapterLoader = ref.read(chapterLoaderProvider);
     try {
       final lastReadIndex = await chapterLoader.loadLastReadChapter(novel.url);
       state = state.copyWith(lastReadChapterIndex: lastReadIndex);
@@ -475,7 +475,7 @@ class ChapterList extends _$ChapterList {
 
   /// 重排章节
   Future<void> reorderChapters(int oldIndex, int newIndex) async {
-    final reorderController = ref.watch(chapterReorderControllerProvider);
+    final reorderController = ref.read(chapterReorderControllerProvider);
 
     final reorderedChapters = reorderController.onReorder(
       oldIndex: oldIndex,
@@ -520,7 +520,7 @@ class ChapterList extends _$ChapterList {
   /// 只读取本地数据库的 getCachedNovelChapters（LEFT JOIN），
   /// 不触发网络请求，不重置 loading/分页等其他状态。
   Future<void> refreshCacheStatus() async {
-    final chapterLoader = ref.watch(chapterLoaderProvider);
+    final chapterLoader = ref.read(chapterLoaderProvider);
     try {
       final freshChapters = await chapterLoader.loadChapters(novel.url);
       state = state.copyWith(chapters: freshChapters);

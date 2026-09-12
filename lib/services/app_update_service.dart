@@ -5,7 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../core/constants/build_config.dart';
+import '../core/backend/backend_config.dart';
 import '../models/app_version.dart';
 import '../utils/device_arch.dart';
 import 'app_update_check_exception.dart';
@@ -29,7 +29,10 @@ class AppUpdateService {
 
   final GithubReleaseService _githubService;
   final BackendReleaseService? _backendService;
-  final String _backendBaseUrl;
+
+  /// 测试注入的后端地址覆盖；null 时走统一入口 [resolveBackendHost]。
+  /// 显式传 `''` 可禁用后端路径（测试「未配置后端」场景）。
+  final String? _backendBaseUrlOverride;
   final Future<PackageInfo> Function()? _packageInfoGetter;
 
   AppUpdateService({
@@ -39,8 +42,12 @@ class AppUpdateService {
     Future<PackageInfo> Function()? packageInfoGetter,
   })  : _githubService = githubService ?? GithubReleaseService(),
         _backendService = backendReleaseService,
-        _backendBaseUrl = backendBaseUrl ?? kBackendBaseUrl,
+        _backendBaseUrlOverride = backendBaseUrl,
         _packageInfoGetter = packageInfoGetter;
+
+  /// 解析后端地址（测试覆盖优先，否则统一走 resolveBackendHost）
+  Future<String> _resolveBackendBaseUrl() async =>
+      _backendBaseUrlOverride ?? await resolveBackendHost();
 
   /// 获取当前APP版本信息
   Future<PackageInfo> getCurrentVersion() async {
@@ -133,10 +140,11 @@ class AppUpdateService {
     required bool includePrerelease,
   }) async {
     Object? backendError;
-    if (_backendBaseUrl.isNotEmpty) {
+    final backendBaseUrl = await _resolveBackendBaseUrl();
+    if (backendBaseUrl.isNotEmpty) {
       try {
         final service =
-            _backendService ?? BackendReleaseService(baseUrl: _backendBaseUrl);
+            _backendService ?? BackendReleaseService(baseUrl: backendBaseUrl);
         final fromBackend = await _appVersionFromBackend(
           service,
           includePrerelease: includePrerelease,

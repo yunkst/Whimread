@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'common/text_prompt_dialog.dart';
 import '../../core/providers/webview_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -417,38 +418,12 @@ class _GroupSectionTile extends StatelessWidget {
 
   Future<String?> _showRenameGroupDialog(
       BuildContext context, String currentName) async {
-    final controller = TextEditingController(text: currentName);
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('重命名分组'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分组名',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) {
-            final t = v.trim();
-            if (t.isNotEmpty) Navigator.pop(ctx, t);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final t = controller.text.trim();
-              if (t.isNotEmpty) Navigator.pop(ctx, t);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+    return TextPromptDialog.show(
+      context,
+      title: '重命名分组',
+      label: '分组名',
+      initialValue: currentName,
+      confirmText: '保存',
     );
   }
 
@@ -675,38 +650,12 @@ class _BookmarkTile extends StatelessWidget {
 
   /// 重命名对话框。返回 null 表示取消；非空字符串为新标题。
   Future<String?> _showRenameDialog(BuildContext context, String current) {
-    final controller = TextEditingController(text: current);
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('重命名收藏'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '标题',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) {
-            final t = v.trim();
-            if (t.isNotEmpty) Navigator.pop(ctx, t);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final t = controller.text.trim();
-              if (t.isNotEmpty) Navigator.pop(ctx, t);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+    return TextPromptDialog.show(
+      context,
+      title: '重命名收藏',
+      label: '标题',
+      initialValue: current,
+      confirmText: '保存',
     );
   }
 
@@ -942,38 +891,12 @@ class _AddBookmarkDialogState extends ConsumerState<_AddBookmarkDialog> {
   }
 
   Future<String?> _showCreateGroupInline(BuildContext context) {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('新建分组'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分组名',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) {
-            final t = v.trim();
-            if (t.isNotEmpty) Navigator.pop(ctx, t);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final t = controller.text.trim();
-              if (t.isNotEmpty) Navigator.pop(ctx, t);
-            },
-            child: const Text('创建'),
-          ),
-        ],
-      ),
+    return TextPromptDialog.show(
+      context,
+      title: '新建分组',
+      label: '分组名',
+      initialValue: null,
+      confirmText: '创建',
     );
   }
 }
@@ -1168,74 +1091,22 @@ class _GroupManagementSheet extends ConsumerWidget {
   }
 
   Future<String?> _showInlineCreate(BuildContext context) {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('新建分组'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分组名',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) {
-            final t = v.trim();
-            if (t.isNotEmpty) Navigator.pop(ctx, t);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final t = controller.text.trim();
-              if (t.isNotEmpty) Navigator.pop(ctx, t);
-            },
-            child: const Text('创建'),
-          ),
-        ],
-      ),
+    return TextPromptDialog.show(
+      context,
+      title: '新建分组',
+      label: '分组名',
+      initialValue: null,
+      confirmText: '创建',
     );
   }
 
   Future<String?> _showInlineRename(BuildContext context, String current) {
-    final controller = TextEditingController(text: current);
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('重命名分组'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分组名',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (v) {
-            final t = v.trim();
-            if (t.isNotEmpty) Navigator.pop(ctx, t);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final t = controller.text.trim();
-              if (t.isNotEmpty) Navigator.pop(ctx, t);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+    return TextPromptDialog.show(
+      context,
+      title: '重命名分组',
+      label: '分组名',
+      initialValue: current,
+      confirmText: '保存',
     );
   }
 }

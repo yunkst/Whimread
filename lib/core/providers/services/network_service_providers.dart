@@ -87,15 +87,8 @@ Dio dio(Ref ref) {
     },
   );
 
-  // 添加日志拦截器
-  dio.interceptors.add(LogInterceptor(
-    requestBody: true,
-    responseBody: false, // 减少日志输出
-    logPrint: (obj) => LoggerService.instance.d(
-      '[Dio] $obj',
-      category: LogCategory.network,
-    ),
-  ));
+  // 拦截器（日志 / 401 续签）统一由 ApiServiceWrapper.init() 添加，
+  // 此处不再自加 LogInterceptor，避免与 init() 里的拦截器重复。
 
   return dio;
 }

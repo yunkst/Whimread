@@ -456,6 +456,7 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
                 return RefreshIndicator(
                   onRefresh: () async {
                     ref.invalidate(bookshelfNovelsProvider);
+                    ref.invalidate(onlineNovelsProvider);
                     ref.invalidate(bookshelfCacheStatsProvider);
                   },
                   child: CustomScrollView(

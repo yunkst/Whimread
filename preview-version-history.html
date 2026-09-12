@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>版本历史预览 · 改进效果</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f0f1f5;
+    padding: 32px 16px 48px;
+    min-height: 100vh;
+    color: #1d1d1f;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  header p {
+    color: #6e6e73;
+    font-size: 13px;
+  }
+
+  .compare {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .phone {
+    width: 380px;
+    background: #1d1d1f;
+    border-radius: 36px;
+    padding: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.15);
+    position: relative;
+  }
+
+  .label {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 16px;
+    white-space: nowrap;
+  }
+  .label.bad {
+    background: #ffebee;
+    color: #c62828;
+  }
+  .label.good {
+    background: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  .screen {
+    background: #ffffff;
+    border-radius: 26px;
+    overflow: hidden;
+    min-height: 640px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- dialog chrome (shared) ---- */
+  .dialog {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+  }
+  .dialog-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #1d1d1f;
+  }
+  .dialog-header .icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    background: #fff3e0;
+    color: #f57c00;
+  }
+  .dialog-header .meta {
+    color: #6e6e73;
+    font-weight: 400;
+    margin-left: auto;
+    font-size: 12px;
+  }
+  .dialog-body {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+    min-height: 420px;
+    max-height: 460px;
+    cursor: text;
+    user-select: text;
+  }
+  .dialog-footer {
+    padding: 12px 16px;
+    border-top: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafafa;
+  }
+  .word-count {
+    font-size: 12px;
+    color: #6e6e73;
+  }
+  .dialog-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: #1976d2;
+  }
+  .btn-primary {
+    background: #1976d2;
+    color: #fff;
+  }
+
+  /* ============================================ */
+  /* BAD: current implementation                  */
+  /* ============================================ */
+  .bad .dialog-body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #1d1d1f;
+    white-space: pre-wrap; /* raw \n only — no visual paragraph spacing */
+    word-break: break-all;
+  }
+  .bad .truncation {
+    text-align: center;
+    color: #999;
+    font-size: 12px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px dashed #ddd;
+    white-space: normal;
+  }
+  .bad .word-count { color: #c62828; }
+
+  /* ============================================ */
+  /* GOOD: improved                               */
+  /* ============================================ */
+  .good .dialog-body {
+    font-family: "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+    font-size: 18px;
+    line-height: 2.0;
+    letter-spacing: 0.2px;
+    color: #2c2c2e;
+  }
+  .good .paragraph {
+    margin: 0 0 4px;
+    padding: 6px 10px;
+    background: #fafafa;
+    border-radius: 8px;
+  }
+
+  /* legend below */
+  .legend {
+    margin-top: 36px;
+    max-width: 820px;
+    margin-left: auto;
+    margin-right: auto;
+    background: #fff;
+    border-radius: 14px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+  .legend h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #1d1d1f;
+  }
+  .legend table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .legend th, .legend td {
+    text-align: left;
+    padding: 8px 6px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .legend th {
+    font-weight: 600;
+    color: #6e6e73;
+    font-size: 12px;
+  }
+  .legend td.bad { color: #c62828; }
+  .legend td.good { color: #2e7d32; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>版本历史预览对话框 · 改进效果</h1>
+  <p>左：当前实现（视觉与阅读器正文割裂） · 右：改进后（沿用阅读器排版）</p>
+</header>
+
+<div class="compare">
+
+  <!-- ============== BAD ============== -->
+  <div class="phone">
+    <div class="label bad">改进前 · 当前实现</div>
+    <div class="screen">
+      <div class="dialog">
+        <div class="dialog-header">
+          <span class="icon">✏️</span>
+          <span>用户编辑</span>
+          <span class="meta">9/12 14:32 · 4258字</span>
+        </div>
+        <div class="dialog-body bad">第一章 相遇
+
+雨还在下。林晚站在图书馆的屋檐下，看着手机屏幕上不断跳动的消息，手指微微发抖。她刚刚收到了一封来自多年未联系的高中同学的信，信里只有一句话：「你还记得那个夏天的约定吗？」她的思绪一下子被拉回到了七年前的那个夏天，那时候的她还是个什么都不懂的高中生，刚刚转学到这所陌生的学校，第一天就因为迷路走进了学校后面的小花园，遇见了正在那里读书的少年。
+
+那个少年抬起头看了她一眼，阳光正好落在他翻开的书页上，她愣了一下，然后听到了自己心跳的声音。「同学，你迷路了？」少年合上书，朝她笑了笑。她点点头，紧张得说不出话来。少年从书包里掏出一张纸，在上面画了一张简易的地图，指给她看：「从这边一直走，第二个路口左转，然后再右转，就到教学楼了。」
+
+「谢谢。」她接过地图，却发现自己根本记不住他画的那些线条。少年似乎看出了她的窘迫，笑着说：「要不我带你过去吧？反正我现在也没事。」她点点头，跟着他穿过花园的小径，雨后的泥土散发出一种清新的味道，她偷偷地看了他一眼，发现他长得挺好看的，眉毛很浓，眼睛很亮，说话的时候声音很温和。
+
+她突然觉得自己的心脏又开始剧烈地跳动了。很多年以后她回想起这一天，才明白所有的相遇都是久别重逢，她和他之间，隔着七年的时光，隔着一千多个日夜的思念。
+<div class="truncation">... (共 4258 字，仅显示前 2000 字)</div></div>
+        <div class="dialog-footer">
+          <span class="word-count">⚠ 已截断</span>
+          <div class="dialog-actions">
+            <button class="btn btn-secondary">关闭</button>
+            <button class="btn btn-primary">还原此版本</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== GOOD ============== -->
+  <div class="phone">
+    <div class="label good">改进后 · 沿用阅读器排版</div>
+    <div class="screen">
+      <div class="dialog">
+        <div class="dialog-header">
+          <span class="icon">✏️</span>
+          <span>用户编辑</span>
+          <span class="meta">9/12 14:32 · 共 4258 字</span>
+        </div>
+        <div class="dialog-body good">
+          <p class="paragraph">第一章 相遇</p>
+          <p class="paragraph">雨还在下。林晚站在图书馆的屋檐下，看着手机屏幕上不断跳动的消息，手指微微发抖。她刚刚收到了一封来自多年未联系的高中同学的信，信里只有一句话：「你还记得那个夏天的约定吗？」她的思绪一下子被拉回到了七年前的那个夏天，那时候的她还是个什么都不懂的高中生，刚刚转学到这所陌生的学校，第一天就因为迷路走进了学校后面的小花园，遇见了正在那里读书的少年。</p>
+          <p class="paragraph">那个少年抬起头看了她一眼，阳光正好落在他翻开的书页上，她愣了一下，然后听到了自己心跳的声音。「同学，你迷路了？」少年合上书，朝她笑了笑。她点点头，紧张得说不出话来。少年从书包里掏出一张纸，在上面画了一张简易的地图，指给她看：「从这边一直走，第二个路口左转，然后再右转，就到教学楼了。」</p>
+          <p class="paragraph">「谢谢。」她接过地图，却发现自己根本记不住他画的那些线条。少年似乎看出了她的窘迫，笑着说：「要不我带你过去吧？反正我现在也没事。」她点点头，跟着他穿过花园的小径，雨后的泥土散发出一种清新的味道，她偷偷地看了他一眼，发现他长得挺好看的，眉毛很浓，眼睛很亮，说话的时候声音很温和。</p>
+          <p class="paragraph">她突然觉得自己的心脏又开始剧烈地跳动了。很多年以后她回想起这一天，才明白所有的相遇都是久别重逢，她和他之间，隔着七年的时光，隔着一千多个日夜的思念，隔着无数次的擦肩而过和欲言又止。但她始终相信，只要心里有一个人，就永远不会孤单。</p>
+          <p class="paragraph">她把那张地图小心翼翼地折好，放进了自己的铅笔盒里。七年后的今天，她依然留着那张已经泛黄的纸，纸上的线条已经模糊，但她闭上眼睛，还能想起那个少年画图时认真的侧脸。窗外的雨还在下，手机屏幕上的消息还在跳动，她终于鼓起勇气，回复了那句等了七年的话：「我记得。我一直都记得。」</p>
+          <p class="paragraph">发完消息的那一刻，她感觉到心里某个尘封已久的角落被轻轻推开，阳光透进来，照亮了那些被时间掩埋的回忆。她知道，从这一刻起，她的人生将翻开新的一页——而那个少年，那个叫沈屿的少年，也终于要回到她的生命里了。</p>
+        </div>
+        <div class="dialog-footer">
+          <span class="word-count" style="color:#2e7d32;">共 4258 字 · 全文可滚动 · 可选中复制</span>
+          <div class="dialog-actions">
+            <button class="btn btn-secondary">关闭</button>
+            <button class="btn btn-primary">还原此版本</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <h3>关键差异（与阅读器正文对齐）</h3>
+  <table>
+    <thead>
+      <tr><th>维度</th><th>改进前</th><th>改进后</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>字体</td>
+        <td class="bad">系统默认无衬线</td>
+        <td class="good">NotoSerifSC 衬线 + 完整 fallback 链</td>
+      </tr>
+      <tr>
+        <td>字号</td>
+        <td class="bad">硬编码 14px</td>
+        <td class="good">跟随阅读器设置（默认 18px）</td>
+      </tr>
+      <tr>
+        <td>行高</td>
+        <td class="bad">1.6（偏挤）</td>
+        <td class="good">2.0（阅读器一致）</td>
+      </tr>
+      <tr>
+        <td>字间距</td>
+        <td class="bad">无</td>
+        <td class="good">letterSpacing 0.2px</td>
+      </tr>
+      <tr>
+        <td>段落处理</td>
+        <td class="bad">\n 仅作空白，段落挤在一起</td>
+        <td class="good">每段独立 Container，间距 + 圆角背景</td>
+      </tr>
+      <tr>
+        <td>长度</td>
+        <td class="bad">硬截 2000 字，章节读不完</td>
+        <td class="good">全文滚动，底部显示总字数</td>
+      </tr>
+      <tr>
+        <td>文本可选</td>
+        <td class="bad">Text 不可选</td>
+        <td class="good">SelectableText / Text.rich 可选中复制</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>

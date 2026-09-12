@@ -9,6 +9,8 @@ import 'package:mockito/mockito.dart';
 
 // 生成Mock类
 @GenerateMocks([IDatabaseConnection])
+import 'package:sqflite/sqflite.dart' as sqflite;
+
 import 'chapter_repository_test.mocks.dart';
 
 /// 测试用 no-op 版本仓库实现
@@ -17,7 +19,7 @@ import 'chapter_repository_test.mocks.dart';
 /// 因此版本仓库方法返回空值即可。
 class _FakeChapterVersionRepository implements IChapterVersionRepository {
   @override
-  Future<int> saveVersion(ChapterVersion version) async => 0;
+  Future<int> saveVersion(ChapterVersion version, {sqflite.DatabaseExecutor? executor}) async => 0;
   @override
   Future<List<ChapterVersion>> getVersions(String chapterUrl) async => [];
   @override
@@ -31,7 +33,7 @@ class _FakeChapterVersionRepository implements IChapterVersionRepository {
   @override
   Future<int> deleteVersionsByNovel(String novelUrl) async => 0;
   @override
-  Future<int> evictOldestVersions(String chapterUrl, {int maxCount = 5}) async => 0;
+  Future<int> evictOldestVersions(String chapterUrl, {int maxCount = 5, sqflite.DatabaseExecutor? executor}) async => 0;
 }
 
 void main() {

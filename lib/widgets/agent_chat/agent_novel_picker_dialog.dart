@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
+import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/novel.dart';
 
 import '../empty_states/empty_state_view.dart';
@@ -35,6 +36,9 @@ class _AgentNovelPickerDialogState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 当前会话的工作小说——打开历史会话后此处会跟随目标会话恢复，
+    // 让用户能直接看到「正在写哪一本」。
+    final selectedNovelId = ref.watch(currentChatStateProvider).currentNovel?.id;
 
     return Dialog(
       child: ConstrainedBox(
@@ -96,14 +100,19 @@ class _AgentNovelPickerDialogState
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final n = novels[i];
+                      final isSelected = n.id == selectedNovelId;
                       return ListTile(
+                        selected: isSelected,
                         leading: CircleAvatar(
-                          backgroundColor:
-                              theme.colorScheme.primaryContainer,
+                          backgroundColor: isSelected
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.primaryContainer,
                           child: Text(
                             n.title.isNotEmpty ? n.title[0] : '?',
                             style: TextStyle(
-                              color: theme.colorScheme.onPrimaryContainer,
+                              color: isSelected
+                                  ? theme.colorScheme.onPrimary
+                                  : theme.colorScheme.onPrimaryContainer,
                             ),
                           ),
                         ),
@@ -111,12 +120,21 @@ class _AgentNovelPickerDialogState
                           n.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
                         ),
                         subtitle: Text(
                           n.author,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        trailing: isSelected
+                            ? Icon(Icons.check_circle,
+                                size: 18, color: theme.colorScheme.primary)
+                            : null,
                         onTap: () => Navigator.pop(context, n.id),
                       );
                     },

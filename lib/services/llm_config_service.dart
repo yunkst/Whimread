@@ -7,6 +7,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/backend/backend_config.dart';
 import '../core/constants/build_config.dart';
 import '../core/providers/database_providers.dart';
 import '../core/providers/managed_model_provider.dart';
@@ -125,6 +126,8 @@ class LlmConfigService {
   /// [scenarioId] 仅用于缓存绑定场景(当前各场景共用同一后端配置)。
   Future<llm.LlmProvider?> buildManagedProvider(String scenarioId) async {
     if (!kHasBundledBackend) return null; // 未注入托管后端 → 走旧用户自配路径
+    final baseHost = await resolveBackendHost();
+    if (baseHost.isEmpty) return null;
     final token = await DeviceAuthService.instance.ensureRegistered();
     // 用户选择的模型:复用 managedModelProvider 的 5min 内存缓存,
     // 避免每个 Agent 消息都触发一次 /v1/models 网络往返 + SharedPreferences 读。
@@ -139,7 +142,7 @@ class LlmConfigService {
     );
     return AiServiceFactory.buildLlmProvider(
       llm.LlmConfig(
-        baseUrl: '$kBackendBaseUrl/v1',
+        baseUrl: '$baseHost/v1',
         apiKey: token,                        // ⚠️ 这里传的是设备 JWT,不是 LLM Key
         defaultModel: modelId ?? '',         // 空 → LlmProvider 不发 model 字段
       ),

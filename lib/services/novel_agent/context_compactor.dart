@@ -8,7 +8,7 @@
 /// 可关闭：通过 [CompactorConfig.enabled] 控制
 ///
 /// v32 变更：DB 也存 agent 消息，压缩时返回 [CompactionResult.droppedAgentFromIndex]，
-/// ScenarioSession 据此同步裁剪内存 + 删 DB（deleteMessagesBefore）。
+/// ScenarioSession 据此同步裁剪内存 + 以内存为基准原子重写 DB（replaceMessages）。
 /// 不再需要 messageOwners / droppedHermesRange 的 UI 反推逻辑。
 ///
 /// 工具结果截断不在本组件负责：实时工具结果在 agent_loop.dart 已被
@@ -150,7 +150,7 @@ class CompactionResult {
   /// agent 内部 messages 中被丢弃的起始索引 [0, droppedAgentFromIndex)
   ///
   /// = 压缩前的 splitIndex。ScenarioSession 据此：
-  /// 内存 removeRange(0, droppedAgentFromIndex) + DB deleteMessagesBefore(sid, droppedAgentFromIndex)。
+  /// 内存 removeRange(0, droppedAgentFromIndex) + DB 以内存为基准原子重写（replaceMessages）。
   final int droppedAgentFromIndex;
 
   /// P1 预剪枝改写记录（基于压缩前 messages 索引）
