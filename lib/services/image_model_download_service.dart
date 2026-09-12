@@ -24,6 +24,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/interfaces/repositories/i_image_model_repository.dart';
 import '../models/image_model.dart';
+import 'conversion/gguf_writer.dart' show kGgufMagic;
 import 'conversion/model_converter.dart';
 import 'image_model_import_service.dart';
 import 'logger_service.dart';
@@ -168,6 +169,21 @@ class ImageModelDownloadService {
     final id = model.id!;
 
     if (ext == 'gguf') {
+      // magic 校验：拒绝 URL 是 .gguf 扩展名但实际下到 HTML 错误页 / 登录跳转 /
+      // 任何非 GGUF 文件的场景（避免垃圾文件被静默置 ready 占用 image_models 空间）
+      if (!await _hasGgufMagic(partPath)) {
+        final garbage = File(partPath);
+        if (await garbage.exists()) await garbage.delete();
+        await _repo.updateStatus(id, ImageModelStatus.failed,
+            errorMessage:
+                '下载内容不是有效的 GGUF 模型文件（可能下载到了错误页面或登录跳转），请检查下载链接后重试');
+        _emitById(id);
+        LoggerService.instance.w(
+            '模型下载 magic 校验失败: id=$id, url=${model.sourceUrl}',
+            category: LogCategory.ai,
+            tags: ['image_model', 'download', 'magic_failed']);
+        return;
+      }
       final dest = await ImageModelImportService.finalizedModelPath('gguf');
       await File(partPath).rename(dest);
       final size = await File(dest).length();
@@ -355,6 +371,21 @@ class ImageModelDownloadService {
     unawaited(_repo.getById(modelId).then((m) {
       if (m != null) _changed.add(m);
     }));
+  }
+
+  /// 读取文件前 4 字节并与 GGUF magic 比较（[kGgufMagic] = "GGUF" little-endian）
+  Future<bool> _hasGgufMagic(String path) async {
+    final raf = await File(path).open(mode: FileMode.read);
+    try {
+      final header = await raf.read(4);
+      if (header.length < 4) return false;
+      for (var i = 0; i < 4; i++) {
+        if (header[i] != kGgufMagic[i]) return false;
+      }
+      return true;
+    } finally {
+      await raf.close();
+    }
   }
 
   String _extensionOf(String url, {String fallback = ''}) {

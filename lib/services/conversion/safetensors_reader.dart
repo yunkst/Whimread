@@ -17,7 +17,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+// 纯 Dart 依赖（不 import flutter）：本模块要能在宿主机 `dart run` 下被
+// tool/ 脚本复用（真实 checkpoint 的架构识别 / 转换验证），不能引入 dart:ui。
+import 'package:meta/meta.dart' show visibleForTesting;
 
 /// safetensors 支持的 dtype
 enum StDtype {

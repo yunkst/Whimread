@@ -8,9 +8,23 @@ library;
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/device/device_auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('hasRedeemedStarQuota（本地一次性标记契约）', () {
+    test('未标记（默认）-> false', () async {
+      SharedPreferences.setMockInitialValues({});
+      expect(await DeviceAuthService.instance.hasRedeemedStarQuota(), isFalse);
+    });
+
+    test('标记为 true 后读取 -> true（模拟兑换成功后的本地记录）', () async {
+      SharedPreferences.setMockInitialValues(
+          {'star_quota_redeemed': true});
+      expect(await DeviceAuthService.instance.hasRedeemedStarQuota(), isTrue);
+    });
+  });
 
   group('parseStarRedeemResponse', () {
     test('完整字段 → 正确解析', () {

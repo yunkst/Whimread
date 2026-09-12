@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/agent_chat_state.dart';
+import '../../core/providers/device_quota_provider.dart';
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/theme/app_colors.dart';
+import '../../services/device/device_auth_service.dart';
 import '../../services/dsl_engine/retry_signals.dart';
-import '../star_quota_redeem_dialog.dart';
+import '../../widgets/star_quota_redeem_dialog.dart';
 import 'agent_icons.dart';
 
 /// 状态条种类
@@ -41,18 +43,25 @@ class AgentStatus {
 /// [onQuotaAction]：额度耗尽错误（`chatState.quotaExhausted`）时挂到
 /// [AgentStatus.onAction] 的回调——UI 层弹「点 Star 补充免费额度」对话框。
 /// 纯函数本身不依赖 BuildContext，便于单测。
+///
+/// [hasRedeemedStar]：本机是否已完成过 Star 兑换（一次性权益）。已兑换过
+/// 的用户额度再耗尽时不再挂 Star 动作（后端必回 ALREADY_REDEEMED，引导是
+/// 死胡同），错误文案保持原样引导去设置页查看；未兑换过则改写文案明确
+/// 指向 Star 补充。
 AgentStatus? selectStatus(
   AgentChatState chatState,
   RetryState? retry, {
   VoidCallback? onQuotaAction,
+  bool hasRedeemedStar = false,
 }) {
   if (chatState.error != null && !chatState.isLoading) {
     final isQuota = chatState.quotaExhausted;
+    final canGuideStar = isQuota && !hasRedeemedStar;
     return AgentStatus(
       AgentStatusKind.error,
-      chatState.error!,
-      actionLabel: isQuota ? '去 Star 补额度' : null,
-      onAction: isQuota ? onQuotaAction : null,
+      canGuideStar ? '免费额度已用完 · 去 GitHub 点 ⭐ 可免费补充一次' : chatState.error!,
+      actionLabel: canGuideStar ? '去 Star 补额度' : null,
+      onAction: canGuideStar ? onQuotaAction : null,
     );
   }
   if (retry != null) {
@@ -128,12 +137,17 @@ class _AgentStatusStripState extends ConsumerState<AgentStatusStrip> {
 
   /// 额度耗尽时弹出 Star 兑换对话框。闭包里拿 context（widget 已 mounted），
   /// 用 mount 守卫防止 widget 在异步对话框生命周期内被卸载。
-  void _openStarRedeemDialog() {
+  ///
+  /// 兑换成功（result 非 null）→ 强刷共享额度状态（绕过 60s 缓存，与设置页
+  /// 入口行为一致）；余额与已兑换标记一并更新，错误条上的 Star 动作随即消失。
+  Future<void> _openStarRedeemDialog() async {
     if (!mounted) return;
-    showDialog<void>(
+    final result = await showDialog<StarRedeemResult>(
       context: context,
       builder: (_) => const StarQuotaRedeemDialog(),
     );
+    if (result == null || !mounted) return;
+    await ref.read(deviceQuotaProvider.notifier).refresh(force: true);
   }
 
   @override
@@ -144,6 +158,9 @@ class _AgentStatusStripState extends ConsumerState<AgentStatusStrip> {
       chatState,
       retry,
       onQuotaAction: _openStarRedeemDialog,
+      // 已兑换标记与余额同源（quota 刷新时一并加载）；未拉到前按
+      // false 处理——宁可多引导一次，也不漏引导
+      hasRedeemedStar: ref.watch(deviceQuotaProvider).hasRedeemedStar,
     );
 
     if (status?.kind == AgentStatusKind.retry) {

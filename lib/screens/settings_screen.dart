@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../services/native_crash_reporter.dart' show kGitHubRepo;
 import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
 import 'image_model_management_screen.dart';
-import 'log_report_settings_screen.dart';
 import 'feedback_submit_screen.dart';
 import 'log_viewer_screen.dart';
 import 'managed_model_picker_screen.dart';
@@ -19,7 +16,6 @@ import '../widgets/app_update_dialog.dart';
 import '../widgets/star_quota_redeem_dialog.dart';
 import '../utils/toast_utils.dart';
 import '../core/providers/theme_provider.dart';
-import '../core/providers/service_providers.dart';
 import '../core/providers/device_quota_provider.dart';
 import '../core/providers/managed_model_provider.dart';
 import '../core/constants/build_config.dart';
@@ -27,7 +23,6 @@ import '../core/database/database_connection.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 import '../screens/onboarding/onboarding_screen.dart';
-import 'backup_management_screen.dart';
 import 'media_cache_screen.dart';
 import '../widgets/diagnostics/attestation_chain_sheet.dart';
 
@@ -42,7 +37,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   PackageInfo? _packageInfo;
   bool _isCheckingUpdate = false;
   bool _isPreviewChannel = false;
-  String? _lastBackupTime;
   bool _isRepairing = false;
 
   // 7-tap 关于应用 触发 attestation 证书链诊断面板(供用户遇到安全相关问题时
@@ -71,7 +65,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     _loadPackageInfo();
-    _loadLastBackupTime();
     _loadPreviewChannel();
     // 「点 Star 补充 AI 额度」副标题的余额查询统一走 deviceQuotaProvider
     // （与 Agent Chat 顶部 QuotaBadge 同一数据源 + 60s 缓存）
@@ -95,11 +88,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.read(deviceQuotaProvider.notifier).refresh(force: true);
   }
 
-  /// 「点 Star 补充 AI 额度」副标题：余额已知时展示具体数字，
-  /// 未配置托管后端 / 未注册 / 查询失败时回退通用文案。
+  /// 「点 Star 补充 AI 额度」副标题：余额已知时展示具体数字；
+  /// 已完成过 Star 兑换（一次性权益）后不再说「可补充」；未配置托管后端 /
+  /// 未注册 / 查询失败时回退通用文案。
   String _quotaSubtitle(DeviceQuotaState state) {
     final info = state.info;
     if (info == null) return 'Star 项目可免费补充一次 AI 托管额度';
+    if (state.hasRedeemedStar) return '当前余额 ${info.quotaBalance} 点';
     return '当前余额 ${info.quotaBalance} 点 · Star 可补充一次';
   }
 
@@ -132,17 +127,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (mounted) {
       setState(() {
         _packageInfo = info;
-      });
-    }
-  }
-
-  /// 加载上次备份时间
-  Future<void> _loadLastBackupTime() async {
-    final backupService = ref.read(backupServiceProvider);
-    final timeText = await backupService.getLastBackupTimeText();
-    if (mounted) {
-      setState(() {
-        _lastBackupTime = timeText;
       });
     }
   }
@@ -522,72 +506,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ],
           ),
-
-          // ── 支持项目组 ────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.star_outline,
-            title: '支持项目',
-            accentColor: appColors.warning,
-            subtitle: '去 GitHub 点 Star',
-            children: [
-              ListTile(
-                leading: Icon(Icons.star_outline, color: appColors.warning),
-                title: const Text('支持项目 · 去 GitHub 点 Star'),
-                subtitle: const Text('「随心阅读」是开源免费项目，欢迎点 Star 支持'),
-                trailing: const Icon(Icons.open_in_new, size: 18),
-                onTap: () async {
-                  try {
-                    await launchUrl(Uri.parse(kGitHubRepo),
-                        mode: LaunchMode.externalApplication);
-                  } catch (_) {
-                    // 异常吞掉（无浏览器等）
-                  }
-                },
-              ),
-            ],
-          ),
-
-          // ── 进阶服务组（默认折叠）─────────────────────────────
-          _SettingsSection(
-            icon: Icons.cloud_outlined,
-            title: '进阶服务',
-            accentColor: appColors.neutral,
-            subtitle: '数据备份 · 远程日志',
-            badgeLabel: '进阶',
-            initiallyExpanded: false,
-            children: [
-              ListTile(
-                leading: Icon(Icons.backup_rounded, color: appColors.neutral),
-                title: const Text('数据备份'),
-                subtitle: Text(_lastBackupTime != null
-                    ? '上次备份: $_lastBackupTime'
-                    : '上传/下载小说数据库到自建后端'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const BackupManagementScreen(),
-                    ),
-                  ).then((_) => _loadLastBackupTime());
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.cloud_upload_outlined, color: appColors.neutral),
-                title: const Text('日志上报'),
-                subtitle: const Text('诊断用，向自建后端匿名上报日志'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LogReportSettingsScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
         ],
       ),
     );
@@ -716,39 +634,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-/// 设置页分组标题旁的次级色小徽章，参考 onboarding "可选" 徽章样式
-class _AdvancedBadge extends StatelessWidget {
-  const _AdvancedBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: colorScheme.outline.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          color: colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 /// 设置页分组卡片（书馆美学风格）
 ///
 /// 顶部 section header（图标 + 衬线大字 + 可选副标题），
 /// 下方承载一组业务 ListTile，圆角 12，elevation 0。
-///
-/// 当 [initiallyExpanded] 非 null 时，启用折叠：用 ExpansionTile 承载，
-/// 默认折叠（false）或默认展开（true），标题右侧可挂 [badgeLabel] 小徽章。
 class _SettingsSection extends StatelessWidget {
   const _SettingsSection({
     required this.icon,
@@ -756,8 +645,6 @@ class _SettingsSection extends StatelessWidget {
     required this.accentColor,
     required this.children,
     this.subtitle,
-    this.initiallyExpanded,
-    this.badgeLabel,
   });
 
   final IconData icon;
@@ -766,94 +653,10 @@ class _SettingsSection extends StatelessWidget {
   final List<Widget> children;
   final String? subtitle;
 
-  /// 非 null 时启用折叠；true=默认展开，false=默认折叠。null=不折叠（向后兼容既有 6 个分组）
-  final bool? initiallyExpanded;
-
-  /// 非 null 时在标题右侧显示一个小徽章（次级色），用于标记「进阶」分组
-  final String? badgeLabel;
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
-    if (initiallyExpanded != null) {
-      // 折叠分组：用 ExpansionTile 直接作为容器（children 内放 ListTile + Divider 列表）
-      // 方案 B：不包 Card，避免与 ExpansionTile 自带形状产生双边框
-      final List<Widget> body = [];
-      for (var i = 0; i < children.length; i++) {
-        body.add(children[i]);
-        if (i != children.length - 1) {
-          body.add(Divider(
-            height: 0,
-            thickness: 0.4,
-            indent: 16,
-            endIndent: 16,
-            color: colorScheme.outlineVariant.withValues(alpha: 0.4),
-          ));
-        }
-      }
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
-            width: 0.6,
-          ),
-          color: colorScheme.surface,
-        ),
-        child: ExpansionTile(
-          initiallyExpanded: initiallyExpanded!,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-          childrenPadding: EdgeInsets.zero,
-          shape: const Border(),
-          collapsedShape: const Border(),
-          backgroundColor: Colors.transparent,
-          collapsedBackgroundColor: Colors.transparent,
-          iconColor: accentColor,
-          collapsedIconColor: accentColor,
-          title: Row(
-            children: [
-              Icon(icon, size: 16, color: accentColor),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: AppTypography.shelfTitle.copyWith(
-                  fontSize: 14,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              if (badgeLabel != null) ...[
-                const SizedBox(width: 6),
-                _AdvancedBadge(label: badgeLabel!),
-              ],
-              if (subtitle != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    subtitle!,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colorScheme.onSurfaceVariant,
-                      letterSpacing: 0.2,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          children: body,
-        ),
-      );
-    }
-
-    // 非折叠：原 Card 渲染（既有 6 个分组行为完全不变）
     final List<Widget> body = [];
     for (var i = 0; i < children.length; i++) {
       body.add(children[i]);
@@ -905,10 +708,6 @@ class _SettingsSection extends StatelessWidget {
                     color: colorScheme.onSurface,
                   ),
                 ),
-                if (badgeLabel != null) ...[
-                  const SizedBox(width: 6),
-                  _AdvancedBadge(label: badgeLabel!),
-                ],
                 if (subtitle != null) ...[
                   const SizedBox(width: 8),
                   Expanded(

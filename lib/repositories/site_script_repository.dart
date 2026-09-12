@@ -186,6 +186,34 @@ class SiteScriptRepository extends BaseRepository {
     }
   }
 
+  /// 查询所有域名的站点显示名（display_name 非空的行）。
+  ///
+  /// 返回 `domain -> display_name`；键统一小写，便于与 URL host（书架侧
+  /// 同为小写）对齐。用于书架页按站点拆分 Tab 的显示名解析。
+  Future<Map<String, String>> getDisplayNamesByDomain() async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        'site_scripts',
+        columns: ['domain', 'display_name'],
+        where: "display_name != ''",
+      );
+      return {
+        for (final row in results)
+          (row['domain'] as String).toLowerCase():
+              row['display_name'] as String,
+      };
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '查询站点显示名失败 - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'get_display_names', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
   /// 按 domain 去重保存：已存在则 UPDATE，不存在则 INSERT
   ///
   /// UPDATE 时保留 id / created_at / use_count，重置 verified=0，
@@ -298,6 +326,9 @@ class SiteScriptRepository extends BaseRepository {
   ///   （书架页无字体反爬需求），[ocr] 被忽略、不动两个 ocr 列。
   /// - [testUrl] 非 null 时写入 `sample_url`（脚本最近一次验证通过的页面
   ///   URL）。bookshelf 类型依赖此值定位「我的书架」页做刷新同步。
+  /// - [displayName] 非 null 且去空白后非空时写入 `display_name`（站点显示名，
+  ///   v45 起）；null 或空白表示本次不涉及，**保留原值**（save_script 按
+  ///   script_type 分次调用，不能互相覆盖）。
   /// - **若 domain 不存在会自动 INSERT** 一条新记录：本次 [scriptType] 列写
   ///   [scriptJs] + 对应 ocr 列（bookshelf 无 ocr 列），其余列留空串、ocr 为 0；
   ///   `verified=0` 标识尚未完成其余类型。这样无论 agent 第一次调的是哪种
@@ -310,7 +341,13 @@ class SiteScriptRepository extends BaseRepository {
     required String scriptJs,
     required bool ocr,
     String? testUrl,
+    String? displayName,
   }) async {
+    // 站点显示名：空白视为"未提供"，避免 agent 传空串清掉已有名字
+    final effectiveDisplayName =
+        (displayName != null && displayName.trim().isNotEmpty)
+            ? displayName.trim()
+            : null;
     try {
       final db = await database;
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -340,6 +377,7 @@ class SiteScriptRepository extends BaseRepository {
           'chapter_content_ocr':
               scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
           'sample_url': testUrl ?? '',
+          'display_name': effectiveDisplayName ?? '',
           'created_at': now,
           'last_used_at': now,
           'use_count': 0,
@@ -371,6 +409,10 @@ class SiteScriptRepository extends BaseRepository {
       updateValues['last_used_at'] = DateTime.now().millisecondsSinceEpoch;
       updateValues['verified'] = 0;
       if (testUrl != null) updateValues['sample_url'] = testUrl;
+      // 显示名仅在实际提供时覆盖，分次保存互不清空
+      if (effectiveDisplayName != null) {
+        updateValues['display_name'] = effectiveDisplayName;
+      }
       await db.update(
         'site_scripts',
         updateValues,

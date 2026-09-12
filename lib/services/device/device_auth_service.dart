@@ -99,6 +99,11 @@ class DeviceAuthService {
   static const String _kDeviceToken = 'device_jwt';
   static const String _kAndroidId = 'device_android_id_fallback';
 
+  /// 本机是否已完成过 Star 兑换（本地标记；服务端仍以 github_login
+  /// 全局一次性为准）。额度耗尽引导用：已兑换过的用户不再引导去 Star
+  /// （引导了也只能撞 ALREADY_REDEEMED）。
+  static const String _kStarRedeemed = 'star_quota_redeemed';
+
   /// JWT 安全存储（Android EncryptedSharedPreferences/Keystore）。
   ///
   /// 2026-09 审查 P1：JWT 是 30 天期会话凭证，明文 SharedPreferences 可被
@@ -421,16 +426,33 @@ class DeviceAuthService {
         category: LogCategory.ai,
         tags: ['device', 'star-redeem'],
       );
+      // 本地记一次性标记：额度耗尽引导（Agent 错误条「去 Star 补额度」）
+      // 以此判断用户是否已用过这次机会
+      try {
+        await PreferencesService.instance.setBool(_kStarRedeemed, true);
+      } catch (e) {
+        // 标记写失败只影响后续引导展示，不影响兑换结果
+        LoggerService.instance.w(
+          'Star 兑换标记写入失败: $e',
+          category: LogCategory.ai,
+          tags: ['device', 'star-redeem'],
+        );
+      }
       return result;
     } on DioException catch (e) {
       throw mapRedeemDioError(e);
     }
   }
 
+  /// 本机是否已完成过 Star 兑换（读本地标记，见 [_kStarRedeemed]）。
+  ///
+  /// getBool 内部兜底：读取失败返回 false —— 宁可多引导一次，也不漏引导。
+  Future<bool> hasRedeemedStarQuota() =>
+      PreferencesService.instance.getBool(_kStarRedeemed);
+
   /// 解析 /star/redeem 成功响应；字段缺失时抛 ArgumentError。
   @visibleForTesting
-  static StarRedeemResult parseStarRedeemResponse(dynamic data) {
-    if (data is! Map) {
+  static StarRedeemResult parseStarRedeemResponse(dynamic data) {    if (data is! Map) {
       throw ArgumentError('star/redeem 响应不是 JSON 对象: $data');
     }
     final granted = data['granted'];

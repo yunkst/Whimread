@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -18,8 +19,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'package:novel_app/core/database/database_connection.dart';
-import 'package:novel_app/core/providers/image_model_providers.dart'
-    show imageModelRepositoryProvider;
 import 'package:novel_app/models/image_model.dart';
 import 'package:novel_app/repositories/image_model_repository.dart';
 import 'package:novel_app/services/image_model_download_service.dart';
@@ -141,6 +140,44 @@ void main() {
       expect(failed!.status, ImageModelStatus.failed);
       expect(failed.errorMessage, isNotEmpty);
     });
+
+    test('gguf URL 返回 HTML 错误页 → magic 校验失败 → failed + .part 清理',
+        () async {
+      // 内容不是 GGUF magic（HTML 错误页 / 登录跳转），扩展名是 .gguf 也应被拦下
+      servedBytes = Uint8List.fromList(utf8
+          .encode('<!DOCTYPE html><html><body>Unauthorized</body></html>'));
+      final model = await insertDownloadingModel(
+          serverUrl('m.gguf').toString(), 'fake.gguf');
+
+      await service.startDownload(model);
+
+      final failed = await repo.getById(model.id!);
+      expect(failed!.status, ImageModelStatus.failed);
+      expect(failed.errorMessage, contains('GGUF'));
+      // .part 已被清理（避免 resume 续传时重复下垃圾）
+      expect(
+          File('${tmpDocs.path}/model_downloads/${model.id}.part').existsSync(),
+          isFalse);
+      // image_models 目录里没有产物
+      expect(
+          Directory('${tmpDocs.path}/image_models').existsSync(), isFalse);
+    });
+
+    test('扩展名不明的 URL（默认走 gguf 分支）→ 内容非 GGUF → 同样被 magic 拦下',
+        () async {
+      // 不带 .gguf/.safetensors 扩展名的 URL，_extensionOf 默认按 gguf 走；
+      // 即便如此也应被 magic 校验挡住，避免之前的静默 ready 漏洞
+      servedBytes = Uint8List.fromList(
+          utf8.encode('not a real gguf, just some plain text bytes'));
+      final model = await insertDownloadingModel(
+          serverUrl('download?id=42').toString(), 'mystery_model');
+
+      await service.startDownload(model);
+
+      final failed = await repo.getById(model.id!);
+      expect(failed!.status, ImageModelStatus.failed);
+      expect(failed.errorMessage, contains('GGUF'));
+    });
   });
 
   group('safetensors 下载 → 转换链路', () {
@@ -180,7 +217,12 @@ void main() {
   group('Range 续传', () {
     test('预置 .part → resume 从 .part 大小续传（服务端收到 Range）', () async {
       final big = Uint8List(3 * 1024 * 1024 + 4096);
-      for (var i = 0; i < big.length; i++) {
+      // 首 4 字节必须为 GGUF magic，否则新加的下载完成 magic 校验会拒收
+      big[0] = 0x47;
+      big[1] = 0x47;
+      big[2] = 0x55;
+      big[3] = 0x46;
+      for (var i = 4; i < big.length; i++) {
         big[i] = i % 256;
       }
       servedBytes = big;

@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 44;
+  static const int currentVersion = 45;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -930,6 +930,17 @@ class DatabaseMigrations {
         await _createIndexIfNotExists(
             db, 'idx_paragraph_annotations_chapter', 'paragraph_annotations', 'chapterUrl');
         _log('迁移 v43 → v44: 创建 paragraph_annotations 表（段落标注）');
+        break;
+
+      // ========== 版本 45：站点显示名 ==========
+      // site_scripts 加 display_name 列：网站自身的名字（如「起点中文网」），
+      // 由提取 Agent 在 save_script 时从页面（logo/标题/品牌文案）推断填写。
+      // 书架页按站点拆分的 Tab 优先显示该名字，未填写时回退 host。
+      // 空串 = 未填写；仅存名字，不参与脚本匹配/去重（键仍是 domain）。
+      case 45:
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'display_name', 'TEXT NOT NULL DEFAULT \'\'');
+        _log('迁移 v44 → v45: site_scripts 加 display_name 列（站点显示名）');
         break;
     }
   }

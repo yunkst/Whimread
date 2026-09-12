@@ -139,20 +139,31 @@ class _StarQuotaRedeemDialogState extends State<StarQuotaRedeemDialog> {
         ),
       ),
       actions: [
-        TextButton.icon(
-          onPressed: _submitting ? null : _openGitHub,
-          icon: const Icon(Icons.open_in_new, size: 16),
-          label: const Text('去点 Star'),
-        ),
-        FilledButton.icon(
-          onPressed: _submitting ? null : _submit,
-          icon: _submitting
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.verified_outlined, size: 16),
-          label: Text(_submitting ? '验证中…' : '提交验证'),
+        // 「去点 Star」与「提交验证」并排等宽展示：先点 Star 再回来验证，
+        // 两个动作视觉等重，弱化主次顺序避免「去点 Star」被当成次要按钮忽略。
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _submitting ? null : _openGitHub,
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('去点 Star'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _submitting ? null : _submit,
+                icon: _submitting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.verified_outlined, size: 16),
+                label: Text(_submitting ? '验证中…' : '提交验证'),
+              ),
+            ),
+          ],
         ),
       ],
     );

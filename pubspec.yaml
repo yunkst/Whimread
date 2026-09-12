@@ -16,13 +16,13 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.0.0-preview.10+129
+version: 3.0.0-preview.11+130
 
 repository: https://github.com/yunkst/Whimread
 homepage: https://github.com/yunkst/Whimread
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ">=3.1.0 <4.0.0"
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -57,6 +57,12 @@ dependencies:
   sqflite: ^2.3.0
   path_provider: ^2.1.1
   path: ^1.8.3
+
+  # FFI 工具（sd.cpp 绑定层用 Utf8.toUtf8 / calloc；sqflite_common_ffi 已传递依赖但显式声明便于阅读）
+  ffi: ^2.1.0
+
+  # 注解（visibleForTesting 等）；conversion 模块刻意不依赖 flutter 以便宿主机 dart run 复用
+  meta: ^1.10.0
 
   # 状态管理 (已弃用，改用 Riverpod)
   # provider: ^6.1.1

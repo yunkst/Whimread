@@ -130,7 +130,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
     buf.writeln('## run_id 机制');
     buf.writeln('- 不要在上下文保留完整脚本 → 用 run_id 句柄引用');
-    buf.writeln('- 重跑: execute_js(run_id=<id>) → 保存: save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=...)');
+    buf.writeln('- 重跑: execute_js(run_id=<id>) → 保存: save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=..., display_name=<网站自身的名字，如「起点中文网」，仅在第一次传一次>)');
     buf.writeln();
 
     buf.writeln('## JS 脚本规范');
@@ -155,7 +155,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln('1. 当前已在目录页（chapter_list）：get_page_info 确认页面类型');
     buf.writeln('2. execute_js(script=...) 反复调试，确认返回 {title, cover_url, chapters:[{title,url}]} 且 chapters 非空、cover_url 字段存在（允许空串）');
     buf.writeln('3. 拿到 __meta.run_id 后立刻调用：');
-    buf.writeln('   save_script(domain, run_id, script_type="chapter_list", test_url=<目录页>, ocr=<true|false>)');
+    buf.writeln('   save_script(domain, run_id, script_type="chapter_list", test_url=<目录页>, ocr=<true|false>, display_name=<站点自身的名字>)');
     buf.writeln('4. save_script 返回 success=true 才能进入阶段二；返回 success=false 则按 diagnostic/suggestion 修 JS，重新 execute_js，再 save_script');
     buf.writeln();
     buf.writeln('### 阶段二：内容提取');
@@ -1348,6 +1348,8 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final (scriptType, e3) = parser.requireString('script_type');
     final (testUrl, e4) = parser.requireString('test_url');
     final (ocr, e5) = parser.requireBool('ocr');
+    // 可选：站点显示名（书架 Tab 优先显示，空/缺省回退 host）
+    final (displayName, _) = parser.optionalString('display_name');
 
     for (final err in [e1, e2, e3, e4, e5]) {
       if (err != null) return err; // 参数错误直接返回（错误 JSON 已构造好）
@@ -1459,6 +1461,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         repo: _ref.read(siteScriptRepositoryProvider),
         restoreService: restoreService,
         testUrl: testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
+        displayName: displayName,
       );
 
       if (outcome['success'] == true) {
@@ -1633,6 +1636,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     required SiteScriptRepository repo,
     OcrRestoreService? restoreService,
     String? testUrl,
+    String? displayName,
   }) async {
     // 1. 结构校验
     final structErr = _validateScriptResult(jsResult, scriptType, ocr);
@@ -1700,6 +1704,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       scriptJs: scriptJs,
       ocr: ocr,
       testUrl: testUrl,
+      displayName: displayName,
     );
     if (!saveResult.success) {
       // 防御性兜底：updateScriptPart 现在不再返回 domain_not_found（domain 不存在
@@ -2323,11 +2328,18 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
                 '若页面文本正常可读，必须传 false。\n'
                 '传 true 时，save_script 会先扫描文本中是否存在 PUA 码点；若无则直接拒绝落库并返回 reason=ocr_no_pua。\n'
                 '判定方法：在脚本探测阶段留意 execute_js 返回值里是否含 PUA 或乱码方块；可用 JS 码点扫描 console.log([...text].some(c => c >= 0xE000 && c <= 0xF8FF))。\n'
-                '对 chapter_content：还原 content 里的 PUA；'
-                '对 chapter_list：还原 title 字段里的 PUA（小说名 + 章名）。\n'
-                'chapter_list 与 chapter_content 的 ocr 各自独立判定，按各自页面是否真有 PUA 传值，'
-                '不必一致（典型如番茄小说：目录页 title/chapter.title 是正常汉字传 false，正文页 content 有 PUA 才传 true）。'
-                '落库后分别存为该 script_type 的 ocr 标记，互不覆盖。',
+'对 chapter_content：还原 content 里的 PUA；'
+              '对 chapter_list：还原 title 字段里的 PUA（小说名 + 章名）。'
+              'chapter_list 与 chapter_content 的 ocr 各自独立判定，按各自页面是否真有 PUA 传值，'
+              '不必一致（典型如番茄小说：目录页 title/chapter.title 是正常汉字传 false，正文页 content 有 PUA 才传 true）。'
+              '落库后分别存为该 script_type 的 ocr 标记，互不覆盖。',
+          },
+          'display_name': {
+            'type': 'string',
+            'description': '站点自身的名字（用户书页看到的品牌名，如「起点中文网」「番茄小说」）。'
+                '从页面 logo / 顶部品牌文案 / title 提取；拿不准就传空串或省略，'
+                '前端会回退到 host。save_script 按 script_type 分次调用时，'
+                '仅在第一次调用时传本参数（后续分次调用会保留该值不覆盖）。',
           },
         },
         'required': ['domain', 'run_id', 'script_type', 'test_url', 'ocr'],

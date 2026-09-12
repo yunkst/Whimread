@@ -14,6 +14,7 @@ import 'package:novel_app/core/providers/current_novel_provider.dart' as _i11;
 import 'package:novel_app/core/providers/scenario_session.dart' as _i2;
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart'
     as _i4;
+import 'package:novel_app/models/paragraph_annotation.dart' as _i12;
 import 'package:novel_app/services/novel_agent/agent_scenario.dart' as _i9;
 import 'package:state_notifier/state_notifier.dart' as _i7;
 
@@ -45,6 +46,17 @@ class _FakeScenarioSession_0 extends _i1.SmartFake
 class _FakeAgentChatState_1 extends _i1.SmartFake
     implements _i3.AgentChatState {
   _FakeAgentChatState_1(
+    Object parent,
+    Invocation parentInvocation,
+  ) : super(
+          parent,
+          parentInvocation,
+        );
+}
+
+class _FakeAnnotationRewriteOutcome_2 extends _i1.SmartFake
+    implements _i2.AnnotationRewriteOutcome {
+  _FakeAnnotationRewriteOutcome_2(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -406,6 +418,63 @@ class MockScenarioSession extends _i1.Mock implements _i2.ScenarioSession {
         returnValue: _i5.Future<void>.value(),
         returnValueForMissingStub: _i5.Future<void>.value(),
       ) as _i5.Future<void>);
+
+  @override
+  _i5.Future<_i2.AnnotationRewriteOutcome> startAnnotationRewrite({
+    required String? novelUrl,
+    required String? novelTitle,
+    required String? chapterUrl,
+    required String? chapterTitle,
+    required int? lockedPosition,
+    required List<_i12.ParagraphAnnotation>? annotations,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #startAnnotationRewrite,
+          [],
+          {
+            #novelUrl: novelUrl,
+            #novelTitle: novelTitle,
+            #chapterUrl: chapterUrl,
+            #chapterTitle: chapterTitle,
+            #lockedPosition: lockedPosition,
+            #annotations: annotations,
+          },
+        ),
+        returnValue: _i5.Future<_i2.AnnotationRewriteOutcome>.value(
+            _FakeAnnotationRewriteOutcome_2(
+          this,
+          Invocation.method(
+            #startAnnotationRewrite,
+            [],
+            {
+              #novelUrl: novelUrl,
+              #novelTitle: novelTitle,
+              #chapterUrl: chapterUrl,
+              #chapterTitle: chapterTitle,
+              #lockedPosition: lockedPosition,
+              #annotations: annotations,
+            },
+          ),
+        )),
+        returnValueForMissingStub:
+            _i5.Future<_i2.AnnotationRewriteOutcome>.value(
+                _FakeAnnotationRewriteOutcome_2(
+          this,
+          Invocation.method(
+            #startAnnotationRewrite,
+            [],
+            {
+              #novelUrl: novelUrl,
+              #novelTitle: novelTitle,
+              #chapterUrl: chapterUrl,
+              #chapterTitle: chapterTitle,
+              #lockedPosition: lockedPosition,
+              #annotations: annotations,
+            },
+          ),
+        )),
+      ) as _i5.Future<_i2.AnnotationRewriteOutcome>);
 
   @override
   _i5.Future<bool> rollbackToMessage(

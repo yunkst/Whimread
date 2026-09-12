@@ -6,13 +6,20 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers/database_providers.dart' show databaseConnectionProvider;
+import '../../core/providers/services/network_service_providers.dart' show apiServiceWrapperProvider;
 import '../../models/image_model.dart';
+import '../media/media_proxy.dart';
 import 'image_generation_backend.dart';
 import 'local_sd_backend.dart';
 
-/// 本地 sd.cpp 后端 Provider（阶段 A：stub；阶段 B：接入 FFI 后保持此签名）
+/// 本地 sd.cpp 后端 Provider（阶段 B：FFI 真实现；签名与阶段 A 一致）
 final localSdCppBackendProvider = Provider<LocalSdCppBackend>((ref) {
-  return LocalSdCppBackend();
+  final dbConn = ref.watch(databaseConnectionProvider);
+  final api = ref.watch(apiServiceWrapperProvider);
+  return LocalSdCppBackend(
+    mediaProxy: MediaProxy(dbConn: dbConn, api: api),
+  );
 });
 
 /// 后端实例映射（按 backendType 路由）

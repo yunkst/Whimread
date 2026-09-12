@@ -93,13 +93,27 @@ Future<List<String>> bookshelfSiteDomains(Ref ref) async {
   return bookshelfRepository.getOnlineSourceDomains();
 }
 
+/// 站点显示名映射（`domain -> display_name`）
+///
+/// 取自 `site_scripts.display_name`（提取 Agent 在 save_script 时从页面
+/// 推断登记，如 `www.qidian.com -> 起点中文网`）。与 [onlineNovelsProvider]
+/// 同生命周期：提取会话导入小说后随 Tab 列表一起刷新。
+@riverpod
+Future<Map<String, String>> siteDisplayNames(Ref ref) async {
+  await ref.watch(onlineNovelsProvider.future);
+  final siteScriptRepository = ref.watch(siteScriptRepositoryProvider);
+  return siteScriptRepository.getDisplayNamesByDomain();
+}
+
 /// 书架 Tab 列表
 ///
 /// 全部/原创固定 + 按来源站点拆分的联网书架（见 [Bookshelf.tabShelves]）。
+/// 站点 Tab 名优先用 [siteDisplayNamesProvider] 登记的站点名，回退 host。
 @riverpod
 Future<List<Bookshelf>> bookshelfShelves(Ref ref) async {
   final siteDomains = await ref.watch(bookshelfSiteDomainsProvider.future);
-  return Bookshelf.tabShelves(siteDomains);
+  final displayNames = await ref.watch(siteDisplayNamesProvider.future);
+  return Bookshelf.tabShelves(siteDomains, displayNames: displayNames);
 }
 
 /// 联网小说列表（全部站点聚合）

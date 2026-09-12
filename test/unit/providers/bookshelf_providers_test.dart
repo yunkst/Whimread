@@ -208,6 +208,20 @@ void main() {
       expect(Bookshelf.tabShelves([]), hasLength(2));
     });
 
+    test('tabShelves 有登记名时优先用站点显示名，未登记回退 host', () {
+      final shelves = Bookshelf.tabShelves(
+        [
+          'www.qidian.com',
+          'm.example.com',
+        ],
+        displayNames: {'www.qidian.com': '起点中文网'},
+      );
+      expect(shelves[2].domain, 'www.qidian.com');
+      expect(shelves[2].name, '起点中文网'); // 登记名优先
+      expect(shelves[3].domain, 'm.example.com');
+      expect(shelves[3].name, 'm.example.com'); // 未登记回退 host
+    });
+
     test('相等性按 kind + domain 判定', () {
       const a = Bookshelf(
         kind: BookshelfKind.online,

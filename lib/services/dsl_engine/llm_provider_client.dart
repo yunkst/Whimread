@@ -11,6 +11,7 @@ import 'dart:io' as io;
 import 'dart:math';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:novel_app/services/ai/llm_usage_notifier.dart';
 import 'package:novel_app/services/llm_logger/llm_logger.dart';
 import 'package:novel_app/services/dsl_engine/retry_signals.dart';
 import 'package:novel_app/services/logger_service.dart';
@@ -132,6 +133,7 @@ class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
       );
     }
     RetrySignals.instance.clear();
+    LlmUsageNotifier.instance.notify();
     return responseBody;
   }
 
@@ -229,6 +231,10 @@ class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
         durationMs: stopwatch.elapsedMilliseconds,
       );
       rethrow;
+    } finally {
+      // 流到达终态（成功走完 / 中途出错）都算一次 AI 使用，
+      // 供额度等消费方刷新（成功与失败各触发一次，由消费方防抖合流）
+      LlmUsageNotifier.instance.notify();
     }
   }
 
@@ -372,6 +378,9 @@ class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
         category: LogCategory.ai,
         tags: ['dsl', 'llm', 'http', tag, 'quota_exhausted'],
       );
+      // 402 已是终态：额度一定已用完（即便后端没扣减，也置 0）。
+      // 提前通知让徽标立刻翻成「额度已用完」，不等上层 catch。
+      LlmUsageNotifier.instance.notify();
     } else {
       LoggerService.instance.w(
         'LLM HTTP $statusCode$label (retryable): '

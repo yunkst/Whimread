@@ -34,6 +34,12 @@ class SiteScript {
   /// 空字符串表示该域名未配置书架脚本。
   final String bookshelfJs;
 
+  /// 站点显示名（v45 起），如「起点中文网」。
+  ///
+  /// 由提取 Agent 在 save_script 时从页面推断填写；空字符串 = 未填写，
+  /// 展示方（书架站点 Tab）回退 host。
+  final String displayName;
+
   const SiteScript({
     required this.id,
     required this.domain,
@@ -48,6 +54,7 @@ class SiteScript {
     this.chapterListOcr = false,
     this.chapterContentOcr = false,
     this.bookshelfJs = '',
+    this.displayName = '',
   });
 
   /// 从数据库 Map 构造
@@ -66,6 +73,7 @@ class SiteScript {
       chapterListOcr: (map['chapter_list_ocr'] as int?) == 1,
       chapterContentOcr: (map['chapter_content_ocr'] as int?) == 1,
       bookshelfJs: (map['bookshelf_js'] as String?) ?? '',
+      displayName: (map['display_name'] as String?) ?? '',
       // 注：旧 'ocr' 列 v39 起不再读取，保留在 DB 仅作历史兼容。
     );
   }
@@ -86,6 +94,7 @@ class SiteScript {
       'chapter_list_ocr': chapterListOcr ? 1 : 0,
       'chapter_content_ocr': chapterContentOcr ? 1 : 0,
       'bookshelf_js': bookshelfJs,
+      'display_name': displayName,
     };
   }
 
@@ -120,6 +129,7 @@ class SiteScript {
     bool? chapterListOcr,
     bool? chapterContentOcr,
     String? bookshelfJs,
+    String? displayName,
   }) {
     return SiteScript(
       id: id ?? this.id,
@@ -135,6 +145,7 @@ class SiteScript {
       chapterListOcr: chapterListOcr ?? this.chapterListOcr,
       chapterContentOcr: chapterContentOcr ?? this.chapterContentOcr,
       bookshelfJs: bookshelfJs ?? this.bookshelfJs,
+      displayName: displayName ?? this.displayName,
     );
   }
 }

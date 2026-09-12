@@ -14,8 +14,6 @@ import '../../core/theme/app_typography.dart';
 /// 4. 阅读增强亮点（AI 特写 / 插图 / 改写），含一行进阶功能提示
 /// 5. 完成
 ///
-/// 「进阶功能」入口在后续设置页 → 「进阶服务」→ 「后端服务配置」（本引导不再单设一步）。
-///
 /// 触发时机：首次安装后未标记 `onboarding_completed` 时，由 main.dart 路由到此页面。
 /// 完成或跳过后调用 [OnboardingNotifier.completeOnboarding]，状态变更会触发
 /// main.dart 重建到 HomePage。
@@ -325,10 +323,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 }
 
-/// 「阅读增强亮点」页底部的轻提示：一行引导新手知道还有进阶功能入口
+/// 「阅读增强亮点」页底部的轻提示：一行引导新手知道还有更多能力
 ///
-/// 居中、次级色、不喧宾夺主；路径「设置 → 进阶服务 → 后端服务配置」
-/// 与 Task 2 设置页的分组标题、Tile 标题字字对应。
+/// 居中、次级色、不喧宾夺主。
 class _AdvancedHintBanner extends StatelessWidget {
   const _AdvancedHintBanner();
 
@@ -338,8 +335,8 @@ class _AdvancedHintBanner extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 32, left: 32, right: 32),
       child: Text(
-        '还有 AI 出图、数据备份等进阶功能，'
-        '可在「设置 → 进阶服务」中按需开启。',
+        '还有 Agent 记忆、生图模型管理等进阶能力，'
+        '可在「设置 → AI」中按需配置。',
         style: TextStyle(
           fontSize: 12,
           color: colorScheme.onSurfaceVariant,

@@ -218,7 +218,7 @@ void main() {
       expect(json['message'], contains('已丢失'));
     });
 
-    test('模型文件存在 + gguf 头合法 → engine_not_ready（阶段 A stub）', () async {
+    test('模型文件存在 + gguf 头合法 → engine_not_ready（libsds.so 不可用）', () async {
       await insertModel(
         name: '本地模型',
         filePath: writeValidGguf(),
@@ -230,8 +230,10 @@ void main() {
         'modelName': '本地模型',
       }));
 
+      // 阶段 B 真实现：libsds.so 仅在 Android arm64-v8a 设备随包发布；
+      // 测试环境无 so → engine_not_ready，message 体现"libsds.so/不可用"语义
       expect(json['error'], 'engine_not_ready');
-      expect(json['message'], contains('尚未集成'));
+      expect(json['message'], contains('libsds.so'));
     });
   });
 

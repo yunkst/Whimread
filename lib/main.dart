@@ -14,10 +14,12 @@ import 'core/providers/theme_provider.dart';
 import 'core/providers/onboarding_providers.dart';
 import 'core/providers/ui_providers.dart';
 import 'core/providers/agent_scenario_provider.dart';
+import 'core/providers/device_quota_provider.dart';
 import 'core/providers/ocr_providers.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_typography.dart';
 import 'utils/toast_utils.dart';
+import 'services/ai/llm_usage_notifier.dart';
 import 'services/device/device_auth_service.dart';
 import 'services/feedback_service.dart';
 import 'services/logger_service.dart';
@@ -156,6 +158,13 @@ void main() async {
             tags: ['startup', 'image-model', 'recover']);
       }
     }());
+
+    // 额度自动刷新桥：任何 LLM 请求到达终态 → 1.5s 防抖后强刷额度。
+    // 注册在容器创建后、runApp 前后皆可；放 try 块外避免 apiService
+    // 初始化失败时桥也一起丢失。
+    LlmUsageNotifier.instance.addListener(() {
+      container.read(deviceQuotaProvider.notifier).onAiUsage();
+    });
 
     runApp(UncontrolledProviderScope(
       container: container,

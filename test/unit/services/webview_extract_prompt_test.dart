@@ -72,7 +72,8 @@ void main() {
     // 旧版保存示例必须已被替换
     expect(prompt, isNot(contains('save_script(domain, list_run_id=')));
     expect(prompt, isNot(contains('content_run_id=<id>')));
-    // 新版保存示例
-    expect(prompt, contains('save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=...)'));
+    // 新版保存示例（display_name 仅首次保存时传；其它字段每次都传）
+    expect(prompt,
+        contains('save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=..., display_name='));
   });
 }

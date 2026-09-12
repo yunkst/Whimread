@@ -16,12 +16,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/constants/build_config.dart';
+import '../core/providers/device_quota_provider.dart';
 import '../core/providers/managed_model_provider.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
+import '../services/device/device_auth_service.dart' show StarRedeemResult;
 import '../services/managed_models/managed_model_service.dart';
 import '../utils/toast_utils.dart';
 import '../widgets/common/library_app_bar.dart';
+import '../widgets/star_quota_redeem_dialog.dart';
 
 class ManagedModelPickerScreen extends ConsumerStatefulWidget {
   const ManagedModelPickerScreen({super.key});
@@ -39,6 +42,8 @@ class _ManagedModelPickerScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(managedModelProvider.notifier).refresh();
+      // 进页即拉一次最新余额（模型倍率与剩余额度一起看才有意义）
+      ref.read(deviceQuotaProvider.notifier).refresh(force: true);
     });
   }
 
@@ -52,6 +57,8 @@ class _ManagedModelPickerScreenState
 
   Future<void> _onRefresh() async {
     await ref.read(managedModelProvider.notifier).refresh(force: true);
+    // 下拉/手动刷新同时拉新余额（额度在别处用 AI 后可能已变化）
+    ref.read(deviceQuotaProvider.notifier).refresh(force: true);
     if (!mounted) return;
     final state = ref.read(managedModelProvider);
     if (state.catalog == null) {
@@ -142,6 +149,8 @@ class _ManagedModelPickerScreenState
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
+          const _QuotaCard(),
+          const SizedBox(height: 12),
           _Header(catalog: catalog, colors: colors),
           const SizedBox(height: 12),
           for (final m in catalog.models)
@@ -155,6 +164,115 @@ class _ManagedModelPickerScreenState
           const SizedBox(height: 12),
           _Footer(catalog: catalog, colors: colors),
         ],
+      ),
+    );
+  }
+}
+
+/// 顶部剩余额度卡片。
+///
+/// 数据源 [deviceQuotaProvider]（与 Agent 对话框顶部徽标同一真相源，
+/// AI 使用后自动刷新）；点击强刷。余额不可知时降级为浅色提示行，
+/// 不渲染警告色惊吓用户。
+class _QuotaCard extends ConsumerWidget {
+  const _QuotaCard();
+
+  /// 额度耗尽且未兑换过 → 点击弹 Star 兑换对话框；成功后强刷余额。
+  Future<void> _onTap(
+      BuildContext context, WidgetRef ref,
+      {required bool exhaustedNeedsGuide}) async {
+    if (exhaustedNeedsGuide) {
+      final result = await showDialog<StarRedeemResult>(
+        // 卡片常驻页面顶部，弹窗生命周期内不会离场，直接用 build context
+        context: context,
+        builder: (_) => const StarQuotaRedeemDialog(),
+      );
+      if (result == null) return;
+    }
+    ref.read(deviceQuotaProvider.notifier).refresh(force: true);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.appColors;
+    final state = ref.watch(deviceQuotaProvider);
+    final balance = state.info?.quotaBalance;
+
+    final Color tint;
+    final String valueLabel;
+    // 一次性 Star 引导：额度耗尽且还没用过兑换机会时，点击直接弹兑换框
+    // （已兑换过再引导只会撞后端 ALREADY_REDEEMED，退回强刷行为）
+    final exhaustedNeedsGuide =
+        balance != null && balance <= 0 && !state.hasRedeemedStar;
+    if (balance != null && balance <= 0) {
+      tint = colors.error;
+      valueLabel = exhaustedNeedsGuide ? '额度已用完 · 点⭐补' : '额度已用完';
+    } else if (balance != null && balance <= 20) {
+      tint = colors.warning;
+      valueLabel = '$balance 点 · 即将耗尽';
+    } else if (balance != null) {
+      tint = colors.chatButtonPrimary;
+      valueLabel = '$balance 点';
+    } else {
+      tint = colors.inkSoft;
+      valueLabel = '暂不可用';
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _onTap(context, ref,
+            exhaustedNeedsGuide: exhaustedNeedsGuide),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: tint.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: tint.withValues(alpha: 0.20), width: 0.6),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.savings_outlined, size: 18, color: tint),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '当前剩余额度',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colors.inkSoft,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          valueLabel,
+                          style: AppTypography.novelTitle.copyWith(
+                            fontSize: 16,
+                            color: tint,
+                          ),
+                        ),
+                        if (state.loading) ...[
+                          const SizedBox(width: 8),
+                          const SizedBox(
+                            width: 11,
+                            height: 11,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.refresh, size: 18, color: colors.inkSoft),
+            ],
+          ),
+        ),
       ),
     );
   }

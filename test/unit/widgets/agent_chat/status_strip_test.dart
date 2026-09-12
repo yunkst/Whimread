@@ -41,11 +41,28 @@ void main() {
     );
     expect(s?.kind, AgentStatusKind.error);
     expect(s?.hasAction, isTrue);
+    // 未兑换过时文案改写为 Star 引导（原 toString 文案不指向任何动作）
+    expect(s?.message, contains('GitHub'));
+    expect(s?.message, contains('⭐'));
     s?.onAction?.call();
     expect(tapped, isTrue);
   });
 
-  test('额度耗尽但未传 onQuotaAction -> 无回调（安全降级）', () {
+  test('额度耗尽但已 Star 兑换过（一次性权益）-> 不再挂 Star 动作', () {
+    final s = selectStatus(
+      const AgentChatState(error: '免费额度已用完,请联系管理员或在设置中查看设备额度',
+          quotaExhausted: true),
+      null,
+      onQuotaAction: () {},
+      hasRedeemedStar: true,
+    );
+    expect(s?.kind, AgentStatusKind.error);
+    expect(s?.hasAction, isFalse);
+    // 已兑换过 → 保持原始错误文案（引导去设置页），不误导用户再撞 ALREADY_REDEEMED
+    expect(s?.message, '免费额度已用完,请联系管理员或在设置中查看设备额度');
+  });
+
+  test('额度耗但未传 onQuotaAction -> 无回调（安全降级）', () {
     final s = selectStatus(
       const AgentChatState(error: '免费额度已用完', quotaExhausted: true),
       null,

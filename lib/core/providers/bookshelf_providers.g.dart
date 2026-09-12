@@ -30,11 +30,36 @@ final bookshelfSiteDomainsProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BookshelfSiteDomainsRef = AutoDisposeFutureProviderRef<List<String>>;
-String _$bookshelfShelvesHash() => r'81eb2def171be8319e7a01ba0e062226825dd0ce';
+String _$siteDisplayNamesHash() => r'69e0eed8e84e73484594a07e4604ad277ac187dc';
+
+/// 站点显示名映射（`domain -> display_name`）
+///
+/// 取自 `site_scripts.display_name`（提取 Agent 在 save_script 时从页面
+/// 推断登记，如 `www.qidian.com -> 起点中文网`）。与 [onlineNovelsProvider]
+/// 同生命周期：提取会话导入小说后随 Tab 列表一起刷新。
+///
+/// Copied from [siteDisplayNames].
+@ProviderFor(siteDisplayNames)
+final siteDisplayNamesProvider =
+    AutoDisposeFutureProvider<Map<String, String>>.internal(
+  siteDisplayNames,
+  name: r'siteDisplayNamesProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$siteDisplayNamesHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef SiteDisplayNamesRef = AutoDisposeFutureProviderRef<Map<String, String>>;
+String _$bookshelfShelvesHash() => r'39777011034152a834917155d3aba7da7f74ff96';
 
 /// 书架 Tab 列表
 ///
 /// 全部/原创固定 + 按来源站点拆分的联网书架（见 [Bookshelf.tabShelves]）。
+/// 站点 Tab 名优先用 [siteDisplayNamesProvider] 登记的站点名，回退 host。
 ///
 /// Copied from [bookshelfShelves].
 @ProviderFor(bookshelfShelves)

@@ -789,7 +789,8 @@ class NovelListScreen extends ConsumerWidget {
 **说明**: 旧 `illustration_repository.dart` 与 `scene_illustrations` 表已于 v34（media_items 引入时）移除，现统一走 `MediaProxy` + `media_items` 表 + `NovelCover` / `MediaView` 渲染。
 
 **功能**:
-- AI 文生图（Agent 工具 `create_images`，走后端 ComfyUI 出图）
+- AI 文生图（Agent 工具 `create_images`，走端侧本地 sd.cpp 引擎 `libsds.so` 出图，
+  见 `lib/services/image_generation/local_sd_backend.dart`）
 - 小说封面媒体化（v36 `coverMediaId`，`NovelCover` 命中走 `MediaView`）
 - 角色头像镜像媒体化（v34 `avatar_media_id`）
 
@@ -858,10 +859,11 @@ class NovelListScreen extends ConsumerWidget {
 - 沉浸式聊天
 - 流式输出支持
 - AI 续写/重写章节（`create_chapter` / `update_chapter_content` 工具，组合"修改要求 + 人物卡 + 写作标签 + AI 作家设定"调 LLM）
-- AI 文生图（`list_text2img_models` + `create_images` 工具，调后端 ComfyUI 出图）
+- AI 文生图（`list_text2img_models` + `create_images` 工具，走端侧本地 sd.cpp 引擎出图）
   - `create_images` 参数: `prompt`(必填) / `negativePrompt`(可选) / `count`(1-4) / `modelName`
   - `list_text2img_models` 返回 `promptSkill` 字段供 LLM 撰写针对性提示词
-  - 这两个工具始终由 `WritingScenario` 注入 LLM；后端/ComfyUI 不可用时由 tool_executor 返回错误消息引导用户修复
+  - 这两个工具始终由 `WritingScenario` 注入 LLM；模型未就绪或引擎不可用（libsds.so 缺失，
+    仅 Android arm64-v8a 随包发布）时由 tool_executor 返回 engine_not_ready 等错误消息
 
 **兼容层**:
 - `AgentChatNotifier` 保留为兼容层（仍被测试使用），`agent_chat_dialog.dart` 的写入路径已改为直接使用 ScenarioSession

@@ -668,4 +668,98 @@ void main() {
       expect(s.chapterContentOcr, isFalse);
     });
   });
+
+  // ===== 站点显示名（display_name，v45 起） =====
+
+  group('updateScriptPart - displayName', () {
+    test('首次保存带 displayName 时写入 display_name 列', () async {
+      await repo.updateScriptPart(
+        domain: 'www.qidian.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'L',
+        ocr: false,
+        displayName: ' 起点中文网 ',
+      );
+
+      final s = (await repo.getByDomain('www.qidian.com'))!;
+      expect(s.displayName, '起点中文网', reason: '应 trim 前后空白');
+    });
+
+    test('首次保存不带 displayName 时落空串', () async {
+      await repo.updateScriptPart(
+        domain: 'a.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'C',
+        ocr: false,
+      );
+
+      final s = (await repo.getByDomain('a.com'))!;
+      expect(s.displayName, '');
+    });
+
+    test('分次保存不传 displayName 不清空已有值', () async {
+      await repo.updateScriptPart(
+        domain: 'b.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'L',
+        ocr: false,
+        displayName: '番茄小说',
+      );
+      await repo.updateScriptPart(
+        domain: 'b.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'C',
+        ocr: false,
+      );
+
+      final s = (await repo.getByDomain('b.com'))!;
+      expect(s.chapterContentJs, 'C');
+      expect(s.displayName, '番茄小说', reason: '第二次保存未传名应保留原值');
+    });
+
+    test('显式传新 displayName 覆盖旧值', () async {
+      await repo.updateScriptPart(
+        domain: 'c.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'L',
+        ocr: false,
+        displayName: '旧名',
+      );
+      await repo.updateScriptPart(
+        domain: 'c.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'C',
+        ocr: false,
+        displayName: '新名',
+      );
+
+      final s = (await repo.getByDomain('c.com'))!;
+      expect(s.displayName, '新名');
+    });
+  });
+
+  group('getDisplayNamesByDomain', () {
+    test('仅返回 display_name 非空的行，键小写化', () async {
+      await repo.updateScriptPart(
+        domain: 'WWW.Qidian.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'L',
+        ocr: false,
+        displayName: '起点中文网',
+      );
+      await repo.updateScriptPart(
+        domain: 'plain.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'L',
+        ocr: false,
+      );
+
+      final names = await repo.getDisplayNamesByDomain();
+      expect(names, {'www.qidian.com': '起点中文网'});
+    });
+
+    test('无任何登记名时返回空 Map', () async {
+      expect(await repo.getDisplayNamesByDomain(), isEmpty);
+    });
+  });
 }

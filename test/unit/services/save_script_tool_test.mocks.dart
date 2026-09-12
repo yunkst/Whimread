@@ -159,6 +159,16 @@ class MockSiteScriptRepository extends _i1.Mock
       ) as _i3.Future<void>);
 
   @override
+  _i3.Future<Map<String, String>> getDisplayNamesByDomain() =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getDisplayNamesByDomain,
+          [],
+        ),
+        returnValue: _i3.Future<Map<String, String>>.value(<String, String>{}),
+      ) as _i3.Future<Map<String, String>>);
+
+  @override
   _i3.Future<({String id, bool isInsert})> upsertByDomain({
     required String? domain,
     required String? chapterListJs,
@@ -210,6 +220,7 @@ class MockSiteScriptRepository extends _i1.Mock
     required String? scriptJs,
     required bool? ocr,
     String? testUrl,
+    String? displayName,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -221,6 +232,7 @@ class MockSiteScriptRepository extends _i1.Mock
             #scriptJs: scriptJs,
             #ocr: ocr,
             #testUrl: testUrl,
+            #displayName: displayName,
           },
         ),
         returnValue:

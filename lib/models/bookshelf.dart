@@ -56,20 +56,29 @@ class Bookshelf {
   ///
   /// [siteDomains] 为有藏书的站点 host 列表（由仓库按最近活跃排序），
   /// 顺序即 Tab 顺序。
-  static List<Bookshelf> tabShelves(List<String> siteDomains) {
+  ///
+  /// [displayNames] 为 `domain -> 站点显示名`（来自 `site_scripts.display_name`，
+  /// 如 `www.qidian.com -> 起点中文网`）；未命中的站点回退 host
+  /// （见 [siteDisplayName]）。
+  static List<Bookshelf> tabShelves(
+    List<String> siteDomains, {
+    Map<String, String> displayNames = const {},
+  }) {
     return [
       const Bookshelf(kind: BookshelfKind.all, name: '全部'),
       const Bookshelf(kind: BookshelfKind.original, name: '原创'),
       for (final domain in siteDomains)
         Bookshelf(
           kind: BookshelfKind.online,
-          name: siteDisplayName(domain),
+          name: displayNames[domain.toLowerCase()] ?? siteDisplayName(domain),
           domain: domain,
         ),
     ];
   }
 
-  /// 站点书架显示名：去掉 `www.` 前缀的 host（如 `www.qidian.com` → `qidian.com`）。
+  /// 站点书架默认显示名：去掉 `www.` 前缀的 host（如 `www.qidian.com` →
+  /// `qidian.com`）。站点在 `site_scripts.display_name` 登记过名字时，
+  /// 展示方优先用登记名，本方法仅作回退。
   static String siteDisplayName(String host) {
     return host.startsWith('www.') ? host.substring('www.'.length) : host;
   }

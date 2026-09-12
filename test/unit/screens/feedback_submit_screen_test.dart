@@ -45,6 +45,7 @@ class _FakeFeedbackService extends FeedbackService {
     String? steps,
     String? contact,
     bool includeLogs = false,
+    bool includeLlmLogs = false,
     FeedbackKind kind = FeedbackKind.userReport,
   }) async {
     submitCalls++;
@@ -55,6 +56,7 @@ class _FakeFeedbackService extends FeedbackService {
       'steps': steps,
       'contact': contact,
       'includeLogs': includeLogs,
+      'includeLlmLogs': includeLlmLogs,
       'kind': kind,
     };
     if (error != null) throw error!;
