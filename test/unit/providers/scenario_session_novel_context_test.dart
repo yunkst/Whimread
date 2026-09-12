@@ -122,6 +122,7 @@ class _MockNovelAgentService implements NovelAgentService {
     required List<dynamic> history,
     required String scenarioId,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     contextNovelIds.add(scenarioContext.currentNovelId);
     // 等一帧让 ScenarioSession 的事件监听先注册上
@@ -136,6 +137,7 @@ class _MockNovelAgentService implements NovelAgentService {
     required String scenarioId,
     required List<dynamic> initialMessages,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     contextNovelIds.add(scenarioContext.currentNovelId);
     await Future<void>.delayed(Duration.zero);

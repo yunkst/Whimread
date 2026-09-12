@@ -77,6 +77,7 @@ class MockNovelAgentService implements NovelAgentService {
     required List<dynamic> history,
     required String scenarioId,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     // 同场景串行
     if (_runningByScenario[scenarioId] == true) {
@@ -137,6 +138,7 @@ class MockNovelAgentService implements NovelAgentService {
     required String scenarioId,
     required List<dynamic> initialMessages,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     // 同场景串行
     if (_runningByScenario[scenarioId] == true) {

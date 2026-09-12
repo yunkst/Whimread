@@ -16,9 +16,23 @@ class AgentFloatingButton extends ConsumerStatefulWidget {
   /// （main.dart 包含书架/浏览器/设置）使用，其场景由 Tab 切换逻辑维护。
   final String? scenarioId;
 
+  /// 自定义按钮内容（优先级高于默认 auto_awesome 图标）。
+  ///
+  /// 由调用方渲染特殊入口（如阅读页的「按标注重写」icon+数量徽标），
+  /// 点击行为走 [overrideOnTap]。
+  final Widget? overrideChild;
+
+  /// 自定义点击行为（优先级高于默认「打开对话」）。
+  ///
+  /// null = 默认行为（打开场景为 [scenarioId] 的对话窗口）。
+  /// 非空 = 调用此回调（如阅读页启动标注重写 + 切换到 annotation_rewrite 场景）。
+  final VoidCallback? overrideOnTap;
+
   const AgentFloatingButton({
     super.key,
     this.scenarioId,
+    this.overrideChild,
+    this.overrideOnTap,
   });
 
   @override
@@ -65,7 +79,7 @@ class _AgentFloatingButtonState extends ConsumerState<AgentFloatingButton> {
               final dy = (_y - _startY).abs();
 
               if (dx < 5 && dy < 5) {
-                _showChatDialog();
+                _handleTap();
               }
 
               _isDragging = false;
@@ -102,17 +116,28 @@ class _AgentFloatingButtonState extends ConsumerState<AgentFloatingButton> {
               ),
               child: Material(
                 color: Colors.transparent,
-                child: Icon(
-                  Icons.auto_awesome,
-                  color: appColors.agentOnBrand,
-                  size: 24,
-                ),
+                child: widget.overrideChild ??
+                    Icon(
+                      Icons.auto_awesome,
+                      color: appColors.agentOnBrand,
+                      size: 24,
+                    ),
               ),
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// 点击处理：overrideOnTap 优先，否则打开当前场景对话。
+  void _handleTap() {
+    final override = widget.overrideOnTap;
+    if (override != null) {
+      override();
+      return;
+    }
+    _showChatDialog();
   }
 
   void _showChatDialog() {
@@ -129,10 +154,18 @@ class AgentFloatingShell extends StatelessWidget {
   /// 透传给 [AgentFloatingButton] 的场景 ID（null = 沿用全局当前值）。
   final String? scenarioId;
 
+  /// 透传给 [AgentFloatingButton] 的自定义内容（null = 默认图标）。
+  final Widget? overrideChild;
+
+  /// 透传给 [AgentFloatingButton] 的自定义点击行为（null = 打开对话）。
+  final VoidCallback? overrideOnTap;
+
   const AgentFloatingShell({
     super.key,
     required this.child,
     this.scenarioId,
+    this.overrideChild,
+    this.overrideOnTap,
   });
 
   @override
@@ -140,7 +173,11 @@ class AgentFloatingShell extends StatelessWidget {
     return Stack(
       children: [
         child,
-        AgentFloatingButton(scenarioId: scenarioId),
+        AgentFloatingButton(
+          scenarioId: scenarioId,
+          overrideChild: overrideChild,
+          overrideOnTap: overrideOnTap,
+        ),
       ],
     );
   }

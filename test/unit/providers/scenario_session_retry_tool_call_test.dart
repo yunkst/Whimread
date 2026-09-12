@@ -60,6 +60,7 @@ class _MockNovelAgentService implements NovelAgentService {
     required List<dynamic> history,
     required String scenarioId,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     if (_running[scenarioId] == true) {
       _controller.add(AgentErrorEvent('场景 $scenarioId 的 Agent 正在运行中'));
@@ -82,6 +83,7 @@ class _MockNovelAgentService implements NovelAgentService {
     required String scenarioId,
     required List<dynamic> initialMessages,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {}
 
   @override

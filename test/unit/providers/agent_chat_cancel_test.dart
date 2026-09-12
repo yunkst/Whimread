@@ -60,6 +60,7 @@ class MockNovelAgentService implements NovelAgentService {
     required List<dynamic> history,
     required String scenarioId,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     sendMessageCallCount++;
     lastUserInput = userInput;
@@ -91,6 +92,7 @@ class MockNovelAgentService implements NovelAgentService {
     required String scenarioId,
     required List<dynamic> initialMessages,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     await Future<void>.delayed(Duration.zero);
     _controller.add(const AgentDoneEvent());

@@ -23,6 +23,54 @@ import 'agent_scenario.dart';
 import 'agent_scenario_factory.dart';
 import 'agent_system_prompt.dart';
 
+/// 给一个未打标的事件打上 [runId]，原样保留其它字段。
+///
+/// 由 NovelAgentService.sendMessage/resumeFromMessages 在 runId 非空时把
+/// loop emit 包装一层（emit 回调本身没法做"加字段"，必须重新构造），
+/// 让 ScenarioSession 端的 [shouldMainSessionHandleEvent] 能用 runId 精确
+/// 区分本 session 与其它并发 session，避免跨场景事件污染。
+AgentEvent _tagEventWithRunId(AgentEvent event, String runId) {
+  return switch (event) {
+    TextDeltaEvent() => TextDeltaEvent(event.text, runId: runId),
+    ToolCallStartEvent() =>
+      ToolCallStartEvent(event.name, event.args, event.toolCallId, runId: runId),
+    ToolCallEndEvent() => ToolCallEndEvent(
+        event.name,
+        event.toolCallId,
+        event.result,
+        fullResult: event.fullResult,
+        success: event.success,
+        runId: runId,
+      ),
+    ToolProgressEvent() =>
+      ToolProgressEvent(event.toolCallId, event.generatedChars, runId: runId),
+    AgentDoneEvent() => AgentDoneEvent(runId: runId),
+    AgentErrorEvent() =>
+      AgentErrorEvent(event.error, quotaExhausted: event.quotaExhausted, runId: runId),
+    InjectedUserInputEvent() =>
+      InjectedUserInputEvent(event.text, scenarioId: event.scenarioId, runId: runId),
+    RetryEvent() => RetryEvent(
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        errorText: event.errorText,
+        emittedChars: event.emittedChars,
+        runId: runId,
+      ),
+    CompactionEvent() => CompactionEvent(
+        removedChars: event.removedChars,
+        originalChars: event.originalChars,
+        compactedChars: event.compactedChars,
+        keptMessageCount: event.keptMessageCount,
+        droppedMessageCount: event.droppedMessageCount,
+        droppedAgentFromIndex: event.droppedAgentFromIndex,
+        compactionNote: event.compactionNote,
+        rewrittenContent: event.rewrittenContent,
+        runId: runId,
+      ),
+  };
+}
+
 class NovelAgentService {
   final Ref ref;
   final StreamController<AgentEvent> _controller =
@@ -136,11 +184,17 @@ class NovelAgentService {
   /// [history] 之前的对话历史（agent 视角的完整 messages，含 tool/system，不含本轮 user）
   /// [scenarioId] 场景标识（'writing' | 'webview_extract' | ...）
   /// [scenarioContext] 场景上下文参数
+  /// [runId] 非空时给本次运行 emit 的所有事件打上 runId 标签，
+  /// 让调用方持有的 ScenarioSession 用 [shouldMainSessionHandleEvent] 精确
+  /// 接收本 run 的事件，避免与其它并发运行的 session 互相污染。
+  /// 通常由 startAnnotationRewrite 这类「运行实例 ≠ scenarioId」的入口使用，
+  /// 传入 sessionId.toString()；普通 sendMessage 留空（保持原 untagged 行为）。
   Future<void> sendMessage({
     required String userInput,
     required List<ChatMessage> history,
     required String scenarioId,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     // A 方案：运行中不再拒绝，改为排队补充消息。消息由 AgentLoop.run 的
     // pendingInjections 回调在下一轮 drain 到 messages，让本轮 LLM 看到
@@ -189,11 +243,18 @@ class NovelAgentService {
           ChatMessage(role: 'user', content: userContent),
         ];
 
+        // runId 非空时包装 emit：每个事件在 _controller.add 前打标，
+        // 让本 run 的事件只被 runId 匹配的 ScenarioSession 接收。
+        final emit = runId == null
+            ? (AgentEvent event) => _controller.add(event)
+            : (AgentEvent event) =>
+                _controller.add(_tagEventWithRunId(event, runId));
+
         // 运行循环
         await loop.run(
           initialMessages: initialMessages,
           systemPrompt: systemPrompt,
-          emit: (event) => _controller.add(event),
+          emit: emit,
           cancellationToken: token,
           pendingInjections: () => _drainInjections(scenarioId),
         );
@@ -236,10 +297,12 @@ class NovelAgentService {
   /// 调用方把剩余（含末尾 user）的 messages 直接交给 loop.run。
   /// 不调用 buildUserContextPrefix：retry 时阅读上下文应保持 user 当时的样子，
   /// 否则会污染 LLM 看到的历史。
+  /// [runId] 语义同 sendMessage。
   Future<void> resumeFromMessages({
     required String scenarioId,
     required List<ChatMessage> initialMessages,
     required AgentScenarioContext scenarioContext,
+    String? runId,
   }) async {
     // A 方案：与 sendMessage 对称。retryLastRound 调本方法前应已确保
     // _isRunning=false（失败轮 finalize 后 _isRunning 被设回 false），
@@ -267,10 +330,15 @@ class NovelAgentService {
         final systemPrompt = env.scenario.buildSystemPrompt(scenarioContext);
 
         // ★ 与 sendMessage 的关键差异：不 append user，不注入 contextPrefix
+        final emit = runId == null
+            ? (AgentEvent event) => _controller.add(event)
+            : (AgentEvent event) =>
+                _controller.add(_tagEventWithRunId(event, runId));
+
         await loop.run(
           initialMessages: initialMessages,
           systemPrompt: systemPrompt,
-          emit: (event) => _controller.add(event),
+          emit: emit,
           cancellationToken: token,
           pendingInjections: () => _drainInjections(scenarioId),
         );

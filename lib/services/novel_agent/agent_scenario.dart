@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../core/providers/reading_context_providers.dart';
+import '../../models/paragraph_annotation.dart';
 import '../../repositories/agent_memory_repository.dart';
 import '../dsl_engine/llm_provider.dart' show ChatMessage;
 
@@ -45,6 +46,14 @@ class AgentScenarioContext {
   /// 当前小说的标题（写作场景专用，用于 system prompt 与 UI 展示）
   final String? currentNovelTitle;
 
+  /// 按标注重写的目标绑定（仅 annotation_rewrite 场景使用）
+  ///
+  /// 携带小说/章节 url、章节标题、列表 position（1-based）、以及用户在阅读页
+  /// 录入的段落标注。ScenarioSession 在调用 sendMessage 前将其塞入 context，
+  /// factory 据此构造 `AnnotationRewriteScenario` 并把工具锁死在目标章节上。
+  /// 非 annotation_rewrite 场景忽略此字段（保持 null）。
+  final AnnotationRewriteTarget? rewriteTarget;
+
   const AgentScenarioContext({
     this.scenarioId,
     this.readingContext,
@@ -53,6 +62,40 @@ class AgentScenarioContext {
     this.useHeadlessWebView = false,
     this.currentNovelId,
     this.currentNovelTitle,
+    this.rewriteTarget,
+  });
+}
+
+/// 按标注重写场景的目标绑定
+///
+/// 由阅读页在启动改写时构造，注入 [AgentScenarioContext.rewriteTarget]。
+/// AnnotationRewriteScenario 用它构造 system prompt + 锁定工具参数。
+class AnnotationRewriteTarget {
+  /// 当前小说的唯一 URL（用于 list_chapters、update_chapter_content 写库定位）
+  final String novelUrl;
+
+  /// 当前小说的标题（system prompt 中展示给 LLM）
+  final String novelTitle;
+
+  /// 被锁定章节的 URL（update_chapter_content 唯一可写的目标）
+  final String chapterUrl;
+
+  /// 被锁定章节的标题（system prompt 中展示）
+  final String chapterTitle;
+
+  /// 章节在小说列表中的 1-based position（list_chapters 返回字段对齐）
+  final int lockedPosition;
+
+  /// 用户在本章节录入的段落标注
+  final List<ParagraphAnnotation> annotations;
+
+  const AnnotationRewriteTarget({
+    required this.novelUrl,
+    required this.novelTitle,
+    required this.chapterUrl,
+    required this.chapterTitle,
+    required this.lockedPosition,
+    required this.annotations,
   });
 }
 
@@ -328,6 +371,11 @@ const Map<String, dynamic> patchMemoryToolDefinition = {
 abstract final class ScenarioIds {
   static const writing = 'writing';
   static const webviewExtract = 'webview_extract';
+
+  /// 按标注重写章节 — 阅读页长按段落录入标注后触发的局部改写 Agent。
+  /// 工具面被锁死（仅 read/update_chapter_content/list_chapters，且
+  /// update_chapter_content 物理上只能改当前章节），改写过程进入对话窗口。
+  static const annotationRewrite = 'annotation_rewrite';
 }
 
 /// 场景快速输入提示词

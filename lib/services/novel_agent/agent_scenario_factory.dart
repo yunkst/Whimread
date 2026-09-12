@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../logger_service.dart';
 import 'agent_scenario.dart';
 import '../headless_webview_pool.dart';
+import 'scenarios/annotation_rewrite_scenario.dart';
 import 'scenarios/writing_scenario.dart';
 import 'scenarios/webview_extract_scenario.dart';
 
@@ -27,6 +28,13 @@ class AgentScenarioFactory {
     switch (scenarioId) {
       case ScenarioIds.writing:
         return WritingScenario(_ref);
+      case ScenarioIds.annotationRewrite:
+        final target = context.rewriteTarget;
+        if (target == null) {
+          throw ArgumentError(
+              'annotation_rewrite 场景需要 AgentScenarioContext.rewriteTarget');
+        }
+        return AnnotationRewriteScenario(_ref, target);
       case ScenarioIds.webviewExtract:
         if (context.useHeadlessWebView) {
           // Headless 模式：从池获取 controller（排他占用）
@@ -87,6 +95,11 @@ class AgentScenarioFactory {
           id: ScenarioIds.webviewExtract,
           displayName: '网页小说提取',
           icon: '🔍',
+        ),
+        const ScenarioInfo(
+          id: ScenarioIds.annotationRewrite,
+          displayName: '按标注重写',
+          icon: '📝',
         ),
       ];
 }

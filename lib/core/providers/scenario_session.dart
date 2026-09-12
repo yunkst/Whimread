@@ -24,6 +24,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/chat_session.dart';
 import '../../models/chat_message_record.dart';
+import '../../models/paragraph_annotation.dart';
 import '../../repositories/chat_session_repository.dart';
 import '../../services/logger_service.dart';
 import '../../services/novel_agent/agent_event.dart';
@@ -41,6 +42,30 @@ import 'agent_chat_state.dart';
 import 'reading_context_providers.dart';
 import 'subagent_providers.dart';
 import 'webview_providers.dart';
+
+/// 按标注重写章节的运行结果
+///
+/// 由 [ScenarioSession.startAnnotationRewrite] 在 agent 回合结束时计算并返回。
+/// 调用方（阅读页）据此判断是否清理本章节的段落标注（已重写则清除，失败则保留以便重试）。
+class AnnotationRewriteOutcome {
+  /// 整体成功：LLM 至少有一次成功的 update_chapter_content 写库 + 没有致命错误。
+  final bool success;
+
+  /// 失败原因（仅 success=false 时非空）
+  final String? error;
+
+  /// 累计成功写库的 update_chapter_content 次数
+  final int updateCount;
+
+  const AnnotationRewriteOutcome({
+    required this.success,
+    this.error,
+    this.updateCount = 0,
+  });
+
+  factory AnnotationRewriteOutcome.failure(String error) =>
+      AnnotationRewriteOutcome(success: false, error: error);
+}
 
 /// 判定主 ScenarioSession 是否应处理某个 [AgentEvent]。
 ///
@@ -99,6 +124,20 @@ class ScenarioSession {
   /// 失败轮 partial 起点（_agentMessages 索引）：finalize error 时记录为「最后一条 user 索引 + 1」
   /// retryLastRound 据此砍除失败轮残留。AgentDoneEvent 时清空。
   int? _failedRoundStartIndex;
+
+  // ===== 标注重写（仅 annotation_rewrite 场景使用） =====
+  /// 本会话正在跑的标注重写目标（仅 annotation_rewrite 场景在改写运行时设置）。
+  /// [_buildScenarioContext] 据此把 rewriteTarget 注入 AgentScenarioContext，
+  /// factory 据此构造 AnnotationRewriteScenario 把工具锁死在目标章节上。
+  AnnotationRewriteTarget? _pendingRewriteTarget;
+
+  /// 标注重写结果的等待器（startAnnotationRewrite 在 run 启动时设置，
+  /// 由 finalize / cancel 路径完成后填充 AnnotationRewriteOutcome 后置 null）。
+  Completer<AnnotationRewriteOutcome>? _rewriteCompleter;
+
+  /// 标注重写本轮的起始 agent 消息索引（含本轮 user）。finalize 后从该索引起扫描
+  /// _agentMessages 计算成功 update 次数；用来排除历史轮次对本轮结果的干扰。
+  int? _rewriteStartAgentIndex;
 
   // ===== 会话状态 =====
   late AgentChatState _state;
@@ -833,6 +872,9 @@ class ScenarioSession {
       _lifecycle = SessionLifecycle.idle;
       _notifyStateChanged();
     }
+    // 取消路径也要填充 rewrite completer（用户主动取消 → 视为失败，保留标注以便重试）
+    _maybeCompleteRewriteCompleter(error: '已取消');
+    _pendingRewriteTarget = null;
   }
 
   /// 统一中断守卫 — 所有写操作的第一道（也是唯一一道）运行中处理。
@@ -894,6 +936,184 @@ class ScenarioSession {
     }
 
     unawaited(_clearMessagesFromDb());
+  }
+
+  /// 启动按标注重写章节（仅 annotation_rewrite 场景使用）。
+  ///
+  /// 与 [sendMessage] 的差异：
+  /// - 用户消息由调用方决定（带标注列表），不调 buildUserContextPrefix 注入阅读上下文，
+  ///   避免 system prompt 与 user 输入语义错位。
+  /// - AgentScenarioContext 携带 [_pendingRewriteTarget]，factory 据此构造
+  ///   [AnnotationRewriteScenario] 把工具锁死在目标章节上。
+  /// - runId 传入 `_sessionId.toString()`，让所有事件打标 —— 本 run 的事件只被
+  ///   本 session（id 一致）接收，避免与其它并发场景互相污染。
+  /// - 返回 [AnnotationRewriteOutcome]：调用方据此决定是否清理章节标注
+  ///   （成功 → 清；失败 → 保留以便重试）。
+  ///
+  /// 完成时机：返回前确保 _handleAgentEvent 已把 AgentDoneEvent / AgentErrorEvent
+  /// 消费完毕（finalize 已把 tool 结果并入 _agentMessages），[_rewriteCompleter]
+  /// 在 finalize/cancel/error 路径完成后填充 outcome，await 拿到时 _agentMessages
+  /// 已是最终状态，可直接扫描本轮成功 update 次数。
+  Future<AnnotationRewriteOutcome> startAnnotationRewrite({
+    required String novelUrl,
+    required String novelTitle,
+    required String chapterUrl,
+    required String chapterTitle,
+    required int lockedPosition,
+    required List<ParagraphAnnotation> annotations,
+  }) async {
+    if (scenarioId != ScenarioIds.annotationRewrite) {
+      throw StateError(
+          'startAnnotationRewrite 只能在 annotation_rewrite 场景的 session 上调用，当前 scenarioId=$scenarioId');
+    }
+    if (_isRunning) {
+      throw StateError('session已已有 agent 在运行，请等待完成或取消后再试');
+    }
+
+    await _ensureSessionId();
+
+    final target = AnnotationRewriteTarget(
+      novelUrl: novelUrl,
+      novelTitle: novelTitle,
+      chapterUrl: chapterUrl,
+      chapterTitle: chapterTitle,
+      lockedPosition: lockedPosition,
+      annotations: annotations,
+    );
+    _pendingRewriteTarget = target;
+
+    final annText = annotations
+        .map((a) =>
+            '- 第 ${a.paragraphIndex + 1} 段（"${a.paragraphPreview}"）：${a.content}')
+        .join('\n');
+    final userContent = '按标注改写《$chapterTitle》（共 ${annotations.length} 条标注）：\n'
+        '$annText\n'
+        '\n'
+        '先 read_chapter_content 读取全文；规划需要联动的修改范围（标注可能牵动上下文与章节走向）；'
+        '逐段 update_chapter_content 替换；完成后简短总结结束。';
+
+    final userMsg = ChatMessage(role: 'user', content: userContent);
+    _agentMessages.add(userMsg);
+    _rewriteStartAgentIndex = _agentMessages.length - 1;
+    _state = _state.copyWith(
+      messages: _uiMessages,
+      isLoading: true,
+      streamingSegments: const [],
+      error: null,
+    );
+    _notifyStateChanged();
+    await _persistAgentMessage(userMsg);
+
+    final completer = Completer<AnnotationRewriteOutcome>();
+    _rewriteCompleter = completer;
+
+    _isTokenCancelled = false;
+    _lifecycle = SessionLifecycle.active;
+    _isRunning = true;
+    _pendingSegments.clear();
+
+    LoggerService.instance.i(
+      'ScenarioSession [$scenarioId] 启动标注重写: chapter=$chapterTitle '
+      'annotations=${annotations.length} position=$lockedPosition sessionId=$_sessionId',
+      category: LogCategory.ai,
+      tags: ['session', 'rewrite', 'start', scenarioId],
+    );
+
+    try {
+      await _agentSub?.cancel();
+      _agentSub = _ref.read(novelAgentServiceProvider).events.listen(_handleAgentEvent);
+
+      // history = _agentMessages 去掉末尾的 user（service 会 append 一份）
+      final history = List<ChatMessage>.from(_agentMessages);
+      if (history.isNotEmpty && history.last.role == 'user') {
+        history.removeLast();
+      }
+      final scenarioContext = _buildScenarioContext();
+
+      await _ref.read(novelAgentServiceProvider).sendMessage(
+            userInput: userContent,
+            history: history,
+            scenarioId: scenarioId,
+            scenarioContext: scenarioContext,
+            runId: _sessionId?.toString(),
+          );
+    } catch (e, st) {
+      LoggerService.instance.e(
+        'ScenarioSession [$scenarioId] 标注重写异常: $e',
+        stackTrace: st.toString(),
+        category: LogCategory.ai,
+        tags: ['session', 'rewrite', 'exception', scenarioId],
+      );
+      _finalizeAgentResponse(error: '改写异常: $e');
+      _maybeCompleteRewriteCompleter(error: '改写异常: $e');
+    }
+
+    // 等待 finalize 把工具结果并入 _agentMessages（completer 在 AgentDoneEvent /
+    // AgentErrorEvent / cancel 路径完成后填充）。
+    return await completer.future;
+  }
+
+  /// finalize / cancel / 异常路径完成后填充 [_rewriteCompleter]（一次性）。
+  ///
+  /// [error] 非空时整轮视为失败；为空时按本轮 _agentMessages 内的成功
+  /// update_chapter_content 工具调用次数判定 success。
+  void _maybeCompleteRewriteCompleter({String? error}) {
+    final completer = _rewriteCompleter;
+    if (completer == null || completer.isCompleted) return;
+    _rewriteCompleter = null;
+    _pendingRewriteTarget = null;
+
+    final outcome = _computeAnnotationRewriteOutcome(error: error);
+    LoggerService.instance.i(
+      'ScenarioSession [$scenarioId] 标注重写完成: success=${outcome.success} '
+      'updateCount=${outcome.updateCount}${outcome.error != null ? ' error=${outcome.error}' : ''}',
+      category: LogCategory.ai,
+      tags: ['session', 'rewrite', 'done', scenarioId],
+    );
+    completer.complete(outcome);
+  }
+
+  /// 从本轮 agent 消息扫描成功 update_chapter_content 次数。
+  ///
+  /// - [error] 非空 → 失败（返回 failure）
+  /// - 遍历 [_rewriteStartAgentIndex, _agentMessages.length)：
+  ///   - assistant 含 toolCalls name=='update_chapter_content'
+  ///   - 紧跟其后的 tool 消息 content 解析为 JSON，success==true 视为成功
+  /// - 最终 success = error==null && updateCount>0
+  AnnotationRewriteOutcome _computeAnnotationRewriteOutcome({String? error}) {
+    final startIdx = _rewriteStartAgentIndex;
+    _rewriteStartAgentIndex = null;
+    if (error != null) {
+      return AnnotationRewriteOutcome.failure(error);
+    }
+    if (startIdx == null) {
+      return AnnotationRewriteOutcome.failure('未记录本轮起始索引');
+    }
+
+    var updateCount = 0;
+    for (var i = startIdx; i < _agentMessages.length; i++) {
+      final m = _agentMessages[i];
+      if (m.role != 'assistant') continue;
+      final calls = m.toolCalls;
+      if (calls == null || calls.isEmpty) continue;
+      for (final c in calls) {
+        if (c.name != 'update_chapter_content') continue;
+        // 找紧随的 tool result
+        final toolMsg = _findToolResult(_agentMessages, i, c.id);
+        if (toolMsg == null) continue;
+        try {
+          final parsed = jsonDecode(toolMsg.content ?? '') as Map<String, dynamic>;
+          if (parsed['success'] == true) updateCount++;
+        } catch (_) {
+          // 非 JSON 或解析失败 → 不计入成功
+        }
+      }
+    }
+    return AnnotationRewriteOutcome(
+      success: updateCount > 0,
+      updateCount: updateCount,
+      error: updateCount == 0 ? '改写未产生任何写库动作' : null,
+    );
   }
 
   /// 回滚到指定 user 消息 — 删除该消息及之后的所有记录,
@@ -1091,9 +1311,11 @@ class ScenarioSession {
           _finalizeAgentResponse();
         }
         _isTokenCancelled = false;
+        _maybeCompleteRewriteCompleter();
 
       case AgentErrorEvent e:
         _finalizeAgentResponse(error: e.error, quotaExhausted: e.quotaExhausted);
+        _maybeCompleteRewriteCompleter(error: e.error);
 
       case InjectedUserInputEvent e:
         // 运行中补充消息的 UI 计数 +1。
@@ -1532,6 +1754,7 @@ class ScenarioSession {
       useHeadlessWebView: useHeadless,
       currentNovelId: _currentNovel?.id,
       currentNovelTitle: _currentNovel?.title,
+      rewriteTarget: _pendingRewriteTarget,
     );
   }
 }
