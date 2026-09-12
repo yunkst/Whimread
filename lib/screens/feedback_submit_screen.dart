@@ -34,11 +34,15 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
 
   FeedbackCategory _category = FeedbackCategory.bug;
   bool _includeLogs = false;
+  bool _includeLlmLogs = false;
   bool _submitting = false;
   String? _errorText;
 
   /// 当前可附带的日志快照(开关打开时才采集展示,提交时以采集结果为准)
   List<LogEntry> _logPreview = const [];
+
+  /// 当前可附带的 LLM 调用日志快照(同上)
+  List<Map<String, dynamic>> _llmLogPreview = const [];
 
   @override
   void dispose() {
@@ -54,6 +58,21 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
       _includeLogs = value;
       _logPreview =
           value ? FeedbackService.collectRecentLogs() : const <LogEntry>[];
+    });
+  }
+
+  void _toggleIncludeLlmLogs(bool value) {
+    setState(() {
+      _includeLlmLogs = value;
+    });
+    if (!value) {
+      setState(() => _llmLogPreview = const <Map<String, dynamic>>[]);
+      return;
+    }
+    // 异步收集 LLM 日志(可能读 JSONL 文件)
+    FeedbackService.collectRecentLlmLogs().then((preview) {
+      if (!mounted) return;
+      setState(() => _llmLogPreview = preview);
     });
   }
 
@@ -73,6 +92,9 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
     try {
       final logs =
           _includeLogs ? FeedbackService.collectRecentLogs() : const <LogEntry>[];
+      final llmLogs = _includeLlmLogs
+          ? await FeedbackService.collectRecentLlmLogs()
+          : const <Map<String, dynamic>>[];
       await (widget.service ?? FeedbackService.instance).submit(
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
@@ -84,6 +106,7 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
             ? null
             : _contactController.text.trim(),
         includeLogs: logs.isNotEmpty,
+        includeLlmLogs: llmLogs.isNotEmpty,
         kind: FeedbackKind.userReport,
       );
       if (!mounted) return;
@@ -233,6 +256,39 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
                 Icons.receipt_long_outlined,
                 color:
                     _includeLogs ? appColors.agentAccent : appColors.neutral,
+              ),
+            ),
+            const SizedBox(height: 4),
+
+            // 附带 LLM 调用日志开关
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('一并提交 AI 调用记录（LLM 输入/输出）'),
+              subtitle: _includeLlmLogs
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('将附带最近 ${_llmLogPreview.length} 条 LLM 调用'
+                            '（SSE 已合并为单条，单条 response 截断 20K 字符）'),
+                        Text(
+                          '包含 AI 输入（已脱敏，仅模型/条数/字节数）与输出（含小说正文片段），可极大提升定位速度',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: appColors.inkSoft,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      '默认关闭；涉及 AI 生成内容异常时建议开启',
+                    ),
+              value: _includeLlmLogs,
+              onChanged: _submitting ? null : _toggleIncludeLlmLogs,
+              secondary: Icon(
+                Icons.psychology_outlined,
+                color: _includeLlmLogs
+                    ? appColors.agentAccent
+                    : appColors.neutral,
               ),
             ),
             const SizedBox(height: 8),

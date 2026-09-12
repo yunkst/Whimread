@@ -1,18 +1,24 @@
 /// 用户反馈提交服务
 ///
-/// 把用户在 [FeedbackSubmitScreen] 填写的问题报告(可选附带近期日志)提交到
-/// feedback 云函数(`POST /api/v1/feedback/submit`)。native 崩溃上报
-/// ([NativeCrashReporter]) 也走本服务(kind=nativeCrash)。
+/// 把用户在 [FeedbackSubmitScreen] 填写的问题报告(可选附带近期日志 + LLM
+/// 调用日志)提交到 feedback 云函数(`POST /api/v1/feedback/submit`)。
+/// native 崩溃上报 ([NativeCrashReporter]) 也走本服务(kind=nativeCrash)。
 ///
 /// 职责边界:
 /// - 只负责「一次性提交」;持续批量上报是 [LogReporterService] 的事
-/// - 日志采集来自 [LoggerService.instance.getLogs()] 内存环形队列,
+/// - 应用日志采集来自 [LoggerService.instance.getLogs()] 内存环形队列,
 ///   cap 300 条 + 单条 message 截断 500 字符,与 feedback 云函数入参上限对齐
+/// - LLM 调用日志采集来自 [LlmLogger.instance.getRecent()],
+///   上限 10 条 + 单条 response 截断 20K 字符 + 总字符预算 128KB(防 body 越 512KB)。
+///   SSE 流式请求在 LlmLogger 侧已聚合为单条 chat.completion 形态 JSON(见
+///   IoLlmHttpClient._reconstructStreamedJson),无需客户端再拼接。
 /// - host 解析 / JWT 鉴权 / Dio 超时与 [LogReporterService] 完全同源
 ///
 /// 失败语义:抛 [FeedbackSubmitException],UI 层捕获后 inline 展示,
 /// 表单内容不丢。
 library;
+
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart'
@@ -25,6 +31,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/backend/backend_config.dart';
 import 'device/device_auth_service.dart';
+import 'llm_logger/llm_call_record.dart';
+import 'llm_logger/llm_logger.dart';
 import 'logger_service.dart';
 
 /// 反馈来源(与服务端 feedback_reports.kind 枚举对齐)
@@ -51,11 +59,15 @@ enum FeedbackCategory {
 class FeedbackSubmitResult {
   final int reportId;
   final int logCount;
+
+  /// LLM 调用日志落库条数(未勾选或落库失败为 0)
+  final int llmLogCount;
   final DateTime? createdAt;
 
   const FeedbackSubmitResult({
     required this.reportId,
     required this.logCount,
+    this.llmLogCount = 0,
     this.createdAt,
   });
 
@@ -63,6 +75,7 @@ class FeedbackSubmitResult {
     return FeedbackSubmitResult(
       reportId: (json['report_id'] as num).toInt(),
       logCount: (json['log_count'] as num?)?.toInt() ?? 0,
+      llmLogCount: (json['llm_log_count'] as num?)?.toInt() ?? 0,
       createdAt: json['created_at'] is String
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
@@ -116,10 +129,28 @@ class FeedbackService {
   /// 单条日志 message 截断长度(与云函数 MAX_LOG_MESSAGE 对齐)
   static const int maxLogMessageChars = 500;
 
+  /// LLM 调用日志附加上限(与云函数 MAX_LLM_ENTRIES_PER_REPORT 对齐)
+  static const int maxAttachedLlmLogs = 10;
+
+  /// LLM 单条 response_body 截断长度(与云函数 MAX_LLM_RESPONSE_CHARS 对齐)
+  ///
+  /// LlmLogger 落盘的 responseBody 单条上限 5MB,反馈携带必须大幅截断;
+  /// SSE 聚合后大多在 2-10KB 区间,20KB 能覆盖完整 chat.completion JSON。
+  static const int maxLlmResponseChars = 20000;
+
+  /// LLM 日志总字符预算(防止 body 越 512KB 上限)。
+  ///
+  /// 计算依据:512KB body - 5KB 描述/标题/步骤 - 150KB 应用日志(300×500)
+  /// - 50KB 其它余量 ≈ 300KB 可用;这里限定 128KB 更安全(LLM 日志可单独
+  /// 提交,不需要把全部记录塞进去)。
+  static const int maxLlmTotalChars = 128 * 1024;
+
   /// 提交用户反馈
   ///
   /// [includeLogs] 为 true 时从 [LoggerService] 内存队列采集近期日志一并上传;
   /// 采集为空时按服务端约定自动降级为不附带(不会失败)。
+  /// [includeLlmLogs] 同理,采集 [LlmLogger] 最近 N 条 LLM 调用记录(SSE 已聚合);
+  /// 总字符预算 [maxLlmTotalChars],超限条目按时间倒序丢弃并标 `truncated=true`。
   Future<FeedbackSubmitResult> submit({
     required String title,
     required String description,
@@ -127,6 +158,7 @@ class FeedbackService {
     String? steps,
     String? contact,
     bool includeLogs = false,
+    bool includeLlmLogs = false,
     FeedbackKind kind = FeedbackKind.userReport,
   }) async {
     final host = await resolveBackendHost();
@@ -143,6 +175,9 @@ class FeedbackService {
     }
 
     final logs = includeLogs ? collectRecentLogs() : const <LogEntry>[];
+    final llmLogs = includeLlmLogs
+        ? await collectRecentLlmLogs()
+        : const <Map<String, dynamic>>[];
     final packageInfo = await PackageInfo.fromPlatform();
     final deviceModel = await _collectDeviceModel();
 
@@ -154,6 +189,7 @@ class FeedbackService {
       contact: contact,
       kind: kind,
       logs: logs,
+      llmLogs: llmLogs,
       packageInfo: packageInfo,
       deviceModel: deviceModel,
     );
@@ -215,6 +251,81 @@ class FeedbackService {
     return [...olderWarnings, ...tail];
   }
 
+  /// 从 LlmLogger 采集最近 LLM 调用记录(已聚合 SSE),按字符预算截断。
+  ///
+  /// 策略(配合服务端 MAX_LLM_TOTAL_CHARS):
+  /// - 先按时间倒序取最近 [maxEntries] 条
+  /// - 单条 response_body > [responseCharLimit] 时截断到上限并打 `truncated=true`
+  /// - 累计 JSON 序列化字节 > [totalCharBudget] 时,从最早的条目开始丢弃
+  ///   (保留最近的)
+  ///
+  /// 返回 map 列表(序列化后形态,与 buildPayload 直接对接)。
+  /// async 是因为 [LlmLogger.getRecent] 可能需要从 JSONL 文件补齐冷启动缓存。
+  static Future<List<Map<String, dynamic>>> collectRecentLlmLogs({
+    int maxEntries = maxAttachedLlmLogs,
+    int responseCharLimit = maxLlmResponseChars,
+    int totalCharBudget = maxLlmTotalChars,
+  }) async {
+    final records = await LlmLogger.instance.getRecent(limit: maxEntries);
+    if (records.isEmpty) return const <Map<String, dynamic>>[];
+
+    // 按时间倒序(最近的在前)→ 累计字节超预算时丢最早
+    final kept = <Map<String, dynamic>>[];
+    var totalChars = 0;
+    for (final r in records) {
+      final map = _llmRecordToMap(r, responseCharLimit: responseCharLimit);
+      // 用 toJson 的字节长度估算(更准确)
+      final approx = jsonEncode(map).length;
+      if (totalChars + approx > totalCharBudget && kept.isNotEmpty) {
+        continue;
+      }
+      totalChars += approx;
+      kept.add(map);
+    }
+    return List.unmodifiable(kept);
+  }
+
+  /// LlmCallRecord → 服务端入参 map
+  ///
+  /// requestBody 在 LlmLogger 侧已经脱敏为 `model/messages 条数/bytes` 摘要,
+  /// 这里直接转发即可(隐私设计:用户小说正文不落盘)。
+  /// responseBody 单条截断到 [responseCharLimit] 并打 `truncated=true`,
+  /// server 端 [MAX_LLM_RESPONSE_CHARS] 也会做二次截断兜底。
+  static Map<String, dynamic> _llmRecordToMap(
+    LlmCallRecord r, {
+    int responseCharLimit = maxLlmResponseChars,
+  }) {
+    final rawResponse = r.responseBody;
+    String? response;
+    var truncated = false;
+    if (rawResponse != null) {
+      if (rawResponse.length > responseCharLimit) {
+        response =
+            '${rawResponse.substring(0, responseCharLimit)}\n...[truncated to $responseCharLimit chars, original=${rawResponse.length}]';
+        truncated = true;
+      } else {
+        response = rawResponse;
+      }
+    }
+    return {
+      'id': r.id,
+      'timestamp': r.timestamp.toUtc().toIso8601String(),
+      'endpoint': r.endpoint,
+      'model': r.model,
+      'is_streaming': r.isStreaming,
+      // 已经是脱敏摘要(见 LlmLogger.logRequest 注释)
+      'request_summary': r.requestBody,
+      'response_body': response,
+      'duration_ms': r.durationMs,
+      'is_success': r.isSuccess,
+      'error_message': r.errorMessage,
+      'prompt_tokens': r.promptTokens,
+      'completion_tokens': r.completionTokens,
+      'total_tokens': r.totalTokens,
+      'truncated': truncated,
+    };
+  }
+
   /// 构造提交 payload(纯函数,便于单测)
   @visibleForTesting
   static Map<String, dynamic> buildPayload({
@@ -225,6 +336,7 @@ class FeedbackService {
     String? contact,
     FeedbackKind kind = FeedbackKind.userReport,
     required List<LogEntry> logs,
+    List<Map<String, dynamic>> llmLogs = const <Map<String, dynamic>>[],
     required PackageInfo packageInfo,
     String? deviceModel,
   }) {
@@ -246,6 +358,8 @@ class FeedbackService {
       if (deviceModel != null) 'device_model': deviceModel,
       'include_logs': attached.isNotEmpty,
       if (attached.isNotEmpty) 'attached_logs': attached,
+      'include_llm_logs': llmLogs.isNotEmpty,
+      if (llmLogs.isNotEmpty) 'attached_llm_logs': llmLogs,
     };
   }
 
