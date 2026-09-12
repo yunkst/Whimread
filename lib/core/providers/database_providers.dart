@@ -14,6 +14,7 @@ import '../../repositories/prompt_tag_repository.dart';
 import '../../repositories/site_script_repository.dart';
 import '../../repositories/agent_memory_repository.dart';
 import '../../repositories/chat_session_repository.dart';
+import '../../repositories/paragraph_annotation_repository.dart';
 import '../database/database_connection.dart';
 import '../interfaces/repositories/i_novel_repository.dart';
 import '../interfaces/repositories/i_chapter_repository.dart';
@@ -24,6 +25,7 @@ import '../interfaces/repositories/i_bookshelf_repository.dart';
 import '../interfaces/repositories/i_outline_repository.dart';
 import '../interfaces/repositories/i_prompt_tag_category_repository.dart';
 import '../interfaces/repositories/i_prompt_tag_repository.dart';
+import '../interfaces/repositories/i_paragraph_annotation_repository.dart';
 
 part 'database_providers.g.dart';
 
@@ -60,11 +62,17 @@ IBookshelfWriter bookshelfWriter(Ref ref) {
 ///
 /// 使用IDatabaseConnection接口注入，支持测试和依赖替换
 /// 依赖 ChapterVersionRepository 实现自动版本保存
+/// 依赖 ParagraphAnnotationRepository 实现级联清理段落标注
 @riverpod
 IChapterRepository chapterRepository(Ref ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   final versionRepo = ref.watch(chapterVersionRepositoryProvider);
-  return ChapterRepository(dbConnection: dbConnection, versionRepo: versionRepo);
+  final annotationRepo = ref.watch(paragraphAnnotationRepositoryProvider);
+  return ChapterRepository(
+    dbConnection: dbConnection,
+    versionRepo: versionRepo,
+    annotationRepo: annotationRepo,
+  );
 }
 
 /// 章节写操作 Provider（仅 [ChapterMutationNotifier] 用）。
@@ -86,6 +94,15 @@ IChapterWriter chapterWriter(Ref ref) {
 IChapterVersionRepository chapterVersionRepository(Ref ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   return ChapterVersionRepository(dbConnection: dbConnection);
+}
+
+/// ParagraphAnnotationRepository Provider
+///
+/// 阅读页段落标注的持久化操作
+@riverpod
+IParagraphAnnotationRepository paragraphAnnotationRepository(Ref ref) {
+  final dbConnection = ref.watch(databaseConnectionProvider);
+  return ParagraphAnnotationRepository(dbConnection: dbConnection);
 }
 
 /// CharacterRepository Provider

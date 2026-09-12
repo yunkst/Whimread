@@ -7,6 +7,7 @@ import '../services/logger_service.dart';
 import 'base_repository.dart';
 import '../core/interfaces/repositories/i_chapter_repository.dart';
 import '../core/interfaces/repositories/i_chapter_version_repository.dart';
+import '../core/interfaces/repositories/i_paragraph_annotation_repository.dart';
 
 /// 章节写操作接口（仅 [ChapterMutationNotifier] 持有）。
 ///
@@ -64,11 +65,17 @@ class ChapterRepository extends BaseRepository
     implements IChapterRepository, IChapterWriter {
   final IChapterVersionRepository _versionRepo;
 
+  /// 可选：段落标注仓库，章节/小说缓存删除时级联清理标注。
+  /// 可空以保持既有构造调用（测试）兼容。
+  final IParagraphAnnotationRepository? _annotationRepo;
+
   /// 构造函数 - 通过依赖注入接收数据库连接和版本仓库
   ChapterRepository({
     required super.dbConnection,
     required IChapterVersionRepository versionRepo,
-  }) : _versionRepo = versionRepo;
+    IParagraphAnnotationRepository? annotationRepo,
+  })  : _versionRepo = versionRepo,
+        _annotationRepo = annotationRepo;
 
   // 内存状态管理
   // 使用 LinkedHashSet 实现 LRU 淘汰：新访问的条目移到末尾，淘汰时从头部移除
@@ -246,12 +253,14 @@ class ChapterRepository extends BaseRepository
 
   /// 删除章节缓存
   ///
-  /// 同时清理内存缓存和版本历史，防止"幻读"
+  /// 同时清理内存缓存、版本历史和段落标注，防止"幻读"
   @override
   Future<int> deleteChapterCache(String chapterUrl) async {
     _removeFromMemoryCache(chapterUrl);
     // 级联删除版本历史
     await _versionRepo.deleteVersionsByChapter(chapterUrl);
+    // 级联删除段落标注
+    await _annotationRepo?.deleteByChapter(chapterUrl);
     final db = await database;
     final affected = await db.delete(
       'chapter_cache',
@@ -324,6 +333,9 @@ class ChapterRepository extends BaseRepository
 
       // 级联删除版本历史
       await _versionRepo.deleteVersionsByNovel(novelUrl);
+
+      // 级联删除段落标注
+      await _annotationRepo?.deleteByNovel(novelUrl);
 
       final deleted = await db.delete(
         'chapter_cache',

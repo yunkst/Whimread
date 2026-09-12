@@ -72,12 +72,13 @@ final bookshelfWriterProvider = AutoDisposeProvider<IBookshelfWriter>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BookshelfWriterRef = AutoDisposeProviderRef<IBookshelfWriter>;
-String _$chapterRepositoryHash() => r'8c82f427c1be5f67323bf3e5b5e79a1bf3860b8d';
+String _$chapterRepositoryHash() => r'8b77da1dbcd6c10b6d01fc696959d9bee0b33806';
 
 /// ChapterRepository Provider
 ///
 /// 使用IDatabaseConnection接口注入，支持测试和依赖替换
 /// 依赖 ChapterVersionRepository 实现自动版本保存
+/// 依赖 ParagraphAnnotationRepository 实现级联清理段落标注
 ///
 /// Copied from [chapterRepository].
 @ProviderFor(chapterRepository)
@@ -144,6 +145,30 @@ final chapterVersionRepositoryProvider =
 // ignore: unused_element
 typedef ChapterVersionRepositoryRef
     = AutoDisposeProviderRef<IChapterVersionRepository>;
+String _$paragraphAnnotationRepositoryHash() =>
+    r'2642bed9f10395fac1420bbdc31e9e17e4972831';
+
+/// ParagraphAnnotationRepository Provider
+///
+/// 阅读页段落标注的持久化操作
+///
+/// Copied from [paragraphAnnotationRepository].
+@ProviderFor(paragraphAnnotationRepository)
+final paragraphAnnotationRepositoryProvider =
+    AutoDisposeProvider<IParagraphAnnotationRepository>.internal(
+  paragraphAnnotationRepository,
+  name: r'paragraphAnnotationRepositoryProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$paragraphAnnotationRepositoryHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ParagraphAnnotationRepositoryRef
+    = AutoDisposeProviderRef<IParagraphAnnotationRepository>;
 String _$characterRepositoryHash() =>
     r'88d938991a24b892168a768899b6196a7546688f';
 

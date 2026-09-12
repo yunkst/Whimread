@@ -52,7 +52,9 @@ import '../core/providers/reader_state_providers.dart'; // 新增：细粒度状
 import '../core/providers/reading_context_providers.dart';
 import '../widgets/agent_chat/agent_floating_button.dart';
 import '../widgets/reader/version_history_sheet.dart';
+import '../widgets/reader/paragraph_annotation_sheet.dart'; // 段落标注编辑弹层
 import '../models/chapter_version.dart';
+import '../models/paragraph_annotation.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 
@@ -107,6 +109,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   // 保留滚动速度配置（供 AutoScrollMixin 使用）
   double? _scrollSpeed; // 滚动速度倍数，1.0为默认速度
+
+  // 当前章节的段落标注（key = 段落序号）
+  Map<int, ParagraphAnnotation> _annotations = {};
 
   @override
   void initState() {
@@ -208,6 +213,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           widget.novel.url,
           _currentChapter.url,
         );
+
+    // 加载当前章节的段落标注
+    await _loadAnnotations();
 
     // 处理滚动位置（保留在 reader_screen 中，因为这涉及到 ScrollController）
     _handleScrollPosition(resetScrollPosition);
@@ -523,6 +531,103 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
+// ============ Paragraph Annotations ============
+  /// 加载当前章节的段落标注（key = 段落序号）
+  Future<void> _loadAnnotations() async {
+    try {
+      final repo = ref.read(paragraphAnnotationRepositoryProvider);
+      final list = await repo.getForChapter(_currentChapter.url);
+      if (!mounted) return;
+      setState(() {
+        _annotations = {for (final a in list) a.paragraphIndex: a};
+      });
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '加载段落标注失败',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['paragraph_annotation', 'load', 'failed'],
+      );
+    }
+  }
+
+  /// 长按段落：弹出标注编辑弹层（已有标注则回显编辑）
+  void _showAnnotationEditor(int index, String paragraph) {
+    ParagraphAnnotationSheet.show(
+      context,
+      paragraphPreview: ParagraphAnnotation.buildPreview(paragraph),
+      existing: _annotations[index],
+      onSave: (content) => _saveAnnotation(index, paragraph, content),
+      onDelete: () => _deleteAnnotation(index),
+    );
+  }
+
+  /// 保存段落标注（新增或更新），返回是否成功
+  Future<bool> _saveAnnotation(
+      int index, String paragraph, String content) async {
+    try {
+      final repo = ref.read(paragraphAnnotationRepositoryProvider);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final old = _annotations[index];
+      final annotation = ParagraphAnnotation(
+        novelUrl: widget.novel.url,
+        chapterUrl: _currentChapter.url,
+        paragraphIndex: index,
+        paragraphPreview: ParagraphAnnotation.buildPreview(paragraph),
+        content: content,
+        createdAt: old?.createdAt ?? now,
+        updatedAt: now,
+      );
+
+      final id = await repo.upsert(annotation);
+      if (!mounted) return false;
+      setState(() {
+        _annotations[index] = annotation.copyWith(id: id);
+      });
+      ToastUtils.showSuccess(
+        old == null ? '标注已保存' : '标注已更新',
+        context: context,
+      );
+      return true;
+    } catch (e, stackTrace) {
+      if (!mounted) return false;
+      ErrorHelper.showErrorWithLog(
+        context,
+        '保存标注失败',
+        stackTrace: stackTrace,
+        category: LogCategory.database,
+        tags: ['paragraph_annotation', 'save', 'failed'],
+      );
+      return false;
+    }
+  }
+
+  /// 删除段落标注，返回是否成功
+  Future<bool> _deleteAnnotation(int index) async {
+    final existing = _annotations[index];
+    if (existing?.id == null) return false;
+    try {
+      final repo = ref.read(paragraphAnnotationRepositoryProvider);
+      await repo.delete(existing!.id!);
+      if (!mounted) return false;
+      setState(() {
+        _annotations.remove(index);
+      });
+      ToastUtils.showSuccess('标注已删除', context: context);
+      return true;
+    } catch (e, stackTrace) {
+      if (!mounted) return false;
+      ErrorHelper.showErrorWithLog(
+        context,
+        '删除标注失败',
+        stackTrace: stackTrace,
+        category: LogCategory.database,
+        tags: ['paragraph_annotation', 'delete', 'failed'],
+      );
+      return false;
+    }
+  }
+
   // 显示阅读设置对话框（合并字体大小、文字亮度、滚动速度）
   void _showReaderSettingsDialog() {
     showDialog(
@@ -677,6 +782,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           textBrightness: _textBrightness ?? 1.0,
           isEditMode: isEditMode,
           isAutoScrolling: isAutoScrolling,
+          annotations: _annotations,
+          onParagraphLongPress: _showAnnotationEditor,
           onContentChanged: (index, newContent) {
             // 仅支持全文编辑模式（index=-1）
             assert(index == -1, '只支持全文编辑模式，段落编辑模式已废弃');

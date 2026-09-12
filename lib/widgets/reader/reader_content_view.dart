@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../models/paragraph_annotation.dart';
 import '../paragraph_widget.dart';
 
 /// ReaderContentView - 阅读器内容视图
@@ -20,6 +21,12 @@ class ReaderContentView extends StatefulWidget {
   final bool isEditMode;
   final bool isAutoScrolling;
 
+  /// 当前章节已有的段落标注（key = 段落序号），用于显示标注标记
+  final Map<int, ParagraphAnnotation> annotations;
+
+  /// 长按段落回调（index = 段落序号，paragraph = 段落原文）
+  final void Function(int index, String paragraph)? onParagraphLongPress;
+
   /// 内容变化回调
   /// - [index] 段落索引（-1 表示全文编辑，>=0 表示段落编辑）
   /// - [newContent] 新的内容
@@ -36,6 +43,8 @@ class ReaderContentView extends StatefulWidget {
     this.textBrightness = 1.0,
     required this.isEditMode,
     required this.isAutoScrolling,
+    this.annotations = const {},
+    this.onParagraphLongPress,
     required this.onContentChanged,
     required this.scrollController,
     required this.onPointerDown,
@@ -168,6 +177,10 @@ class _ReaderContentViewState extends State<ReaderContentView> {
               fontSize: widget.fontSize,
               textBrightness: widget.textBrightness,
               isEditMode: widget.isEditMode,
+              hasAnnotation: widget.annotations.containsKey(index),
+              onLongPress: widget.onParagraphLongPress == null
+                  ? null
+                  : () => widget.onParagraphLongPress!(index, paragraph),
               onContentChanged: (newContent) =>
                   widget.onContentChanged(index, newContent),
             );

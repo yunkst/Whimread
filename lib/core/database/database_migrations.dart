@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 42;
+  static const int currentVersion = 44;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -888,6 +888,48 @@ class DatabaseMigrations {
         await _addColumnIfNotExists(db, 'image_models',
             'error_message', 'TEXT NOT NULL DEFAULT \'\'');
         _log('迁移 v41 → v42: image_models 加生命周期/负向预设/来源快照 7 列');
+        break;
+
+      // ========== 版本 43：重建 novels 视图覆盖 bookshelf 所有列 ==========
+      // 背景：v20 创建的 novels 视图固定列清单（id, title, author, url, coverUrl,
+      //   description, backgroundSetting, addedAt, lastReadChapter, lastReadTime,
+      //   aiAccompanimentEnabled, aiInfoNotificationEnabled）。v36 给 bookshelf 加了
+      //   coverMediaId 列但视图未重建，导致 novel_repository.getNovels() 读到的
+      //   coverMediaId 恒为 null（实际调用方 agent_novel_picker_dialog /
+      //   novel_navigation_executor 已观察到）。
+      // 修复：DROP 旧视图后用 SELECT * FROM bookshelf 重建，自动包含后续加列；
+      //   旧 view 的列清单已迁到 getNovels 行映射代码（grep 验证），无需手工维护。
+      // 防漂移：未来给 bookshelf 加列时，若忘了走 v(N+1) DROP 重建视图，会被下方
+      //   单测 test/unit/core/database_migration_v43_test.dart::novels_view_contains_all_bookshelf_columns 立刻暴露。
+      case 43:
+        await db.execute('DROP VIEW IF EXISTS novels');
+        await db.execute('CREATE VIEW novels AS SELECT * FROM bookshelf');
+        _log('迁移 v42 → v43: 重建 novels 视图覆盖 bookshelf 所有列');
+        break;
+
+      // ========== 版本 44：段落标注表 ==========
+      // 阅读时长按段落写的个人标注（类段评交互），每个段落最多一条：
+      //   - UNIQUE(chapterUrl, paragraphIndex)：重复长按同段落 = 编辑，upsert 幂等
+      //   - paragraphIndex 为阅读页按 '\n' 拆分过滤空行后的段落序号，
+      //     与章节内容强相关；paragraphPreview 存段落前 80 字供编辑弹窗回显
+      //   - 章节缓存/小说删除时由 ChapterRepository 级联清理（同版本历史策略）
+      case 44:
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS paragraph_annotations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          novelUrl TEXT NOT NULL,
+          chapterUrl TEXT NOT NULL,
+          paragraphIndex INTEGER NOT NULL,
+          paragraphPreview TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL,
+          UNIQUE(chapterUrl, paragraphIndex)
+        )
+      ''');
+        await _createIndexIfNotExists(
+            db, 'idx_paragraph_annotations_chapter', 'paragraph_annotations', 'chapterUrl');
+        _log('迁移 v43 → v44: 创建 paragraph_annotations 表（段落标注）');
         break;
     }
   }
