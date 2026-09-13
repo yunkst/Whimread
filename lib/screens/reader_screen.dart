@@ -661,10 +661,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 过程（读章/替换/思考）通过对话窗口实时可见。
   ///
   /// 点击入口前：`_annotations.isNotEmpty` 由按钮构造条件保证；
-  /// 运行中：禁止重复点击，编辑模式下拒绝启动。
+  /// 运行中：不重复启动，点击转为重新打开对话窗口查看进度；
+  /// 编辑模式下拒绝启动。
   /// 成功后清理本章节标注（已被 AI 消化，保留会误导「还有待重写标注」）。
   Future<void> _startAnnotationRewrite() async {
-    if (_isRewriteRunning) return;
+    if (_isRewriteRunning) {
+      // 会话存在全局 scenarioSessionsProvider，启动时弹出的对话窗口被关掉后，
+      // 点击 FAB 重开仍能看到正在跑的过程；静默 return 会让用户误以为按钮失灵。
+      AgentChatLauncherEntry.open(
+          context, scenarioId: ScenarioIds.annotationRewrite);
+      return;
+    }
     if (_annotations.isEmpty) return;
     final isEditMode = ref.read(readerEditModeProvider);
     if (isEditMode) {

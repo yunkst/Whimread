@@ -90,16 +90,19 @@ class AgentScenarioFactory {
           id: ScenarioIds.writing,
           displayName: '小说写作助手',
           icon: '✍️',
+          supportsMemory: true,
         ),
         const ScenarioInfo(
           id: ScenarioIds.webviewExtract,
           displayName: '网页小说提取',
           icon: '🔍',
+          supportsMemory: true,
         ),
         const ScenarioInfo(
           id: ScenarioIds.annotationRewrite,
           displayName: '按标注重写',
           icon: '📝',
+          supportsMemory: false,
         ),
       ];
 }
@@ -110,9 +113,18 @@ class ScenarioInfo {
   final String displayName;
   final String icon;
 
+  /// 该场景是否有自己的经验记忆存储。
+  ///
+  /// true = 场景有 patch_memory 工具且 getMemories 读自己的存储，
+  /// 记忆管理页为其展示 Tab；false = 场景无记忆闭环（如按标注重写：
+  /// 无 patch_memory，且只读复用写作场景的记忆），展示记忆 Tab 只会
+  /// 诱导用户写入无人消费的死数据。
+  final bool supportsMemory;
+
   const ScenarioInfo({
     required this.id,
     required this.displayName,
     required this.icon,
+    this.supportsMemory = false,
   });
 }

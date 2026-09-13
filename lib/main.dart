@@ -406,22 +406,23 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         // 任何异常吞掉，绝不阻塞启动。
       }
 
-      // 3. 启动期静默检查正式版更新
-      //    仅 stable 通道（includePrerelease=false），预览版不弹。
+      // 3. 启动期静默检查更新
+      //    通道跟随用户设置：未开预览版开关仅查 stable，开了则含预览版。
       //    失败一律吞掉，不阻塞启动；用户可随时去设置页手动检查。
       if (!mounted) return;
       await _silentCheckStableUpdate();
     });
   }
 
-  /// 启动期静默检查正式版更新：有新正式版则弹窗，预览版 / 失败 / 已是最新均不打扰。
+  /// 启动期静默检查更新：有新版本则弹窗，失败 / 已是最新均不打扰。
+  ///
+  /// 通道跟随用户设置：预览版开关开启时含 prerelease，否则仅查 stable。
   Future<void> _silentCheckStableUpdate() async {
     try {
       final updateService = AppUpdateService();
-      // includePrerelease=false：仅查 stable 通道，预览版不会触发弹窗
       final result = await updateService.checkForUpdateDetailed(
         forceCheck: false, // 走 1 小时节流
-        includePrerelease: false,
+        includePrerelease: await AppUpdateService.isPreviewChannelEnabled(),
       );
       if (!mounted) return;
 

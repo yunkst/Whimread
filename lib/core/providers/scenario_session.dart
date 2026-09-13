@@ -970,7 +970,24 @@ class ScenarioSession {
       throw StateError('session已已有 agent 在运行，请等待完成或取消后再试');
     }
 
+    // 每次改写都是干净开始：清空上一轮历史（内存 + DB），改写会话不积压上下文，
+    // 上一轮的章节内容/标注不进入本轮 LLM。顺序有讲究：
+    // 1) 先清 DB（此后任何 hydrate 都只能读到空）
+    // 2) 再 _ensureSessionId（冷启动 hydrate 读到的必然是空）
+    // 3) 最后清内存（兜底掉与 get() 冷启动 hydrateFromRecentIfNeeded
+    //    并发竞态时 hydrate 带回的旧消息——其赋值必然发生在本次清空之前）
+    // 不走 clearConversation()：它对 DB 清理是 fire-and-forget，无法保证先于 hydrate。
+    await _clearMessagesFromDb();
     await _ensureSessionId();
+    _pendingSegments.clear();
+    _agentMessages.clear();
+    _state = _state.copyWith(
+      messages: const [],
+      isLoading: false,
+      streamingSegments: const [],
+      error: null,
+    );
+    _notifyStateChanged();
 
     final target = AnnotationRewriteTarget(
       novelUrl: novelUrl,

@@ -22,6 +22,7 @@ import 'package:novel_app/core/providers/agent_chat_providers.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/agent_chat_message.dart';
+import 'package:novel_app/models/paragraph_annotation.dart';
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/novel_agent_service.dart';
@@ -1020,6 +1021,57 @@ void main() {
               .whereType<TextSegment>()
               .any((t) => t.content.contains('把这张图变成水墨风视频')),
           isTrue);
+    });
+  });
+
+  // ===========================================================================
+  // 7. 按标注重写干净开始
+  // ===========================================================================
+
+  group('按标注重写干净开始', () {
+    test('startAnnotationRewrite 启动前清空上一轮历史，不带入本轮 LLM 上下文',
+        () async {
+      final sessions = container.read(scenarioSessionsProvider.notifier);
+      final session = sessions.get(ScenarioIds.annotationRewrite);
+
+      // 上一轮：普通消息制造历史（user + assistant 各一条）
+      await session.sendMessage(content: '上一轮旧消息');
+      expect(session.state.messages.length, 2);
+
+      // 本轮改写：mock 无工具调用 → outcome success=false/updateCount=0，
+      // 但 completer 正常完成即验证事件链路无恙
+      final outcome = await session.startAnnotationRewrite(
+        novelUrl: 'novel-1',
+        novelTitle: '测试小说',
+        chapterUrl: 'ch-1',
+        chapterTitle: '第一章',
+        lockedPosition: 1,
+        annotations: [
+          ParagraphAnnotation(
+            novelUrl: 'novel-1',
+            chapterUrl: 'ch-1',
+            paragraphIndex: 2,
+            paragraphPreview: '被标注的段落…',
+            content: '这段节奏太拖了',
+            createdAt: 0,
+            updatedAt: 0,
+          ),
+        ],
+      );
+      expect(outcome.updateCount, 0);
+      expect(outcome.success, isFalse);
+
+      // 会话已重建：只剩本轮的 user 请求 + mock 的 assistant 回复，
+      // 上一轮的 user/assistant 消息不残留
+      expect(session.state.messages.length, 2,
+          reason: '改写应干净开始，只含本轮 user + assistant');
+      expect(session.state.messages.first.role, AgentChatRole.user);
+      expect(session.state.messages.first.content, contains('按标注改写《第一章》'));
+      // 发给 LLM 的本轮输入即新的标注请求，不含旧消息
+      expect(mockService.sendMessageUserInputs.last,
+          contains('按标注改写《第一章》'));
+      expect(mockService.sendMessageUserInputs.last,
+          isNot(contains('上一轮旧消息')));
     });
   });
 }

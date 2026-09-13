@@ -13,8 +13,10 @@ import 'logger_service.dart';
 /// 全局预加载服务
 ///
 /// 负责管理章节预加载任务队列，支持：
-/// - 智能排序：当前章节之后（后续章节）优先，当前章节之前（前序章节）次之
-/// - 抢占恢复：被阅读器抢占的任务放回队头，等待恢复后立即执行
+/// - 智能排序：当前章节之后（后续章节）优先，当前章节之前（前序章节）次之，
+///   且随每次入队的最新锚点整体重排（跳章阅读后队列转向新锚点）
+/// - 抢占恢复：被阅读器抢占的任务放回队头，恢复后立即执行
+///   （下次入队重排时按新锚点归位）
 /// - 速率限制：缓存命中立即执行，爬虫抓取 30 秒间隔
 /// - 串行执行：全局唯一执行点，避免 WebView 资源竞争
 /// - 去重机制：自动过滤队列内重复 URL 和已缓存章节
@@ -29,10 +31,13 @@ class PreloadService {
   // 核心组件
   final RateLimiter _rateLimiter = RateLimiter(interval: Duration(seconds: 30));
 
-  /// 有序任务队列（FIFO，支持 addFirst 抢占恢复）
+  /// 有序任务队列（FIFO；enqueueTasks 按最新锚点整体重排，
+  /// 支持 addFirst 抢占恢复）
   final ListQueue<PreloadTask> _queue = ListQueue<PreloadTask>();
 
   /// 去重集合：已入队的 chapterUrl（仅用于 O(1) 判断重复）
+  ///
+  /// 与 [_queue] 保持同集合同步增删；处理中的任务两者都已移除。
   final Set<String> _enqueuedUrls = <String>{};
 
   // 历史记录上限（避免内存膨胀）
@@ -92,8 +97,11 @@ class PreloadService {
 
   /// 添加预加载任务
   ///
-  /// 新任务追加到队尾（addLast），不插队。仅被阅读器抢占的任务
-  /// 才会通过 addFirst 放回队头，保证恢复后立即继续执行。
+  /// 以 [currentIndex] 为锚点整体重排队列：本小说已入队任务按
+  /// 「后续章节正序优先、前序章节倒序次之」重新排列，未入队的新任务
+  /// 插入到期望顺序对应位置（而非一律追加队尾）；已缓存或已不在章节
+  /// 列表中的旧任务出队；其他小说的任务保持原有相对顺序。用户跳章
+  /// 阅读后再次入队时，队列随新锚点转向，而不是沿用旧顺序。
   ///
   /// [novelUrl] 小说URL
   /// [novelTitle] 小说标题
@@ -113,7 +121,63 @@ class PreloadService {
     final uncachedUrls =
         await _chapterRepository.filterUncachedChapters(chapterUrls);
 
-    if (uncachedUrls.isEmpty) {
+    // 用原始索引 + 未缓存 Set 计算期望顺序（避免过滤后索引错位）：
+    // 后续章节正序优先，前序章节倒序次之；已全部缓存时为空序列
+    final uncachedSet = uncachedUrls.toSet();
+    final desiredTasks = _createTasks(
+      novelUrl,
+      novelTitle,
+      chapterUrls,
+      currentIndex,
+      uncachedSet,
+    );
+
+    // 重排队列：
+    // - 本小说已入队任务按期望顺序重新排列（复用原任务对象）；
+    // - 已不在期望序列中的旧任务（已被阅读器缓存 / 章节列表变更）出队；
+    // - 本小说任务块整体替换到原首个本小说任务的位置，其他小说任务原序保留。
+    final enqueuedForNovel = <String, PreloadTask>{
+      for (final task in _queue)
+        if (task.novelUrl == novelUrl) task.chapterUrl: task,
+    };
+
+    int addedCount = 0;
+    int reorderedCount = 0;
+    final orderedForNovel = <PreloadTask>[];
+    for (final task in desiredTasks) {
+      final existing = enqueuedForNovel[task.chapterUrl];
+      if (existing != null) {
+        orderedForNovel.add(existing);
+        reorderedCount++;
+      } else if (!_enqueuedUrls.contains(task.chapterUrl)) {
+        // 已被其他小说占用队列位的 URL 跳过，沿用原去重语义
+        orderedForNovel.add(task);
+        addedCount++;
+      }
+    }
+
+    final newQueue = ListQueue<PreloadTask>();
+    var spliced = false;
+    for (final task in _queue) {
+      if (task.novelUrl == novelUrl) {
+        if (!spliced) {
+          newQueue.addAll(orderedForNovel);
+          spliced = true;
+        }
+        // 旧任务已由 orderedForNovel 接管（或已淘汰），跳过
+      } else {
+        newQueue.addLast(task);
+      }
+    }
+    if (!spliced) newQueue.addAll(orderedForNovel);
+    _queue
+      ..clear()
+      ..addAll(newQueue);
+    _enqueuedUrls
+      ..clear()
+      ..addAll(newQueue.map((t) => t.chapterUrl));
+
+    if (desiredTasks.isEmpty) {
       LoggerService.instance.i(
         '✅ "$novelTitle" 所有章节已缓存',
         category: LogCategory.cache,
@@ -122,31 +186,13 @@ class PreloadService {
       return;
     }
 
-    // 用原始索引 + 未缓存 Set 创建任务（避免过滤后索引错位）
-    final uncachedSet = uncachedUrls.toSet();
-    final tasks = _createTasks(
-      novelUrl,
-      novelTitle,
-      chapterUrls,
-      currentIndex,
-      uncachedSet,
-    );
-
-    // 去重并入队
-    int addedCount = 0;
-    for (final task in tasks) {
-      if (!_enqueuedUrls.contains(task.chapterUrl)) {
-        _queue.addLast(task);
-        _enqueuedUrls.add(task.chapterUrl);
-        addedCount++;
-      }
-    }
-
-    if (addedCount > 0) {
+    if (addedCount > 0 || reorderedCount > 0) {
       LoggerService.instance.i(
-        '📚 开始预加载: $novelTitle, 当前第${currentIndex + 1}章, 待缓存$addedCount个',
+        '📚 预加载队列按第${currentIndex + 1}章重排: $novelTitle, '
+        '新增$addedCount, 重排$reorderedCount, '
+        '队列${_queue.length}个',
         category: LogCategory.cache,
-        tags: ['preload', novelUrl, 'start'],
+        tags: ['preload', novelUrl, 'reorder'],
       );
 
       // 启动处理（如果未在运行且未暂停）
@@ -155,7 +201,7 @@ class PreloadService {
       }
     } else {
       LoggerService.instance.d(
-        '⏭️ 所有任务已在队列中',
+        '⏭️ 队列顺序已是最新: $novelTitle, 队列${_queue.length}个',
         category: LogCategory.cache,
         tags: ['preload', novelUrl],
       );
@@ -494,6 +540,10 @@ class PreloadService {
 
   /// 获取队列长度
   int get queueLength => _queue.length;
+
+  /// 当前队列中的章节 URL 顺序（队头在前，仅供测试断言与诊断使用）
+  List<String> get queuedChapterUrls =>
+      _queue.map((t) => t.chapterUrl).toList();
 
   /// 是否正在处理队列
   bool get isProcessing => _isRunning;

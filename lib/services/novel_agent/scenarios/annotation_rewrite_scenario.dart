@@ -29,6 +29,7 @@ import '../../../core/providers/chapter_mutation_provider.dart';
 import '../../../core/providers/database_providers.dart';
 import '../../../core/providers/reader_state_providers.dart';
 import '../../logger_service.dart';
+import '../../preferences_service.dart';
 import '../agent_scenario.dart';
 import '../tool_executor/prompt_tag_executor.dart';
 
@@ -59,9 +60,43 @@ class AnnotationRewriteScenario
         _kGetPromptTagTool,
       ];
 
-  // 标注重写场景不需要 patch_memory / 经验记忆 —— 显式禁用基类默认实现。
+  // 经验记忆与作家设定：只读注入 system prompt。本场景没有 patch_memory 工具，
+  // 不写记忆；记忆按场景隔离存储，这里复用写作场景（writing）沉淀的经验记忆。
+  // NovelAgentService 在 buildSystemPrompt 前调用 getMemories 预热缓存，
+  // 使同步的 prompt 构建零 IO；加载失败降级为空，不阻断改写。
+  List<String> _memories = const [];
+  String _writerPrompt = '';
+
   @override
-  Future<List<String>> getMemories() async => const [];
+  Future<List<String>> getMemories() async {
+    try {
+      _memories = await _ref
+          .read(agentMemoryRepositoryProvider)
+          .getAllByScenario(ScenarioIds.writing);
+    } catch (e, stackTrace) {
+      _memories = const [];
+      LoggerService.instance.e(
+        '标注重写加载经验记忆失败: $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.ai,
+        tags: ['agent', 'rewrite', 'get_memories', 'failed'],
+      );
+    }
+    try {
+      final raw =
+          await PreferencesService.instance.getString('ai_writer_prompt');
+      _writerPrompt = raw.trim();
+    } catch (e, stackTrace) {
+      _writerPrompt = '';
+      LoggerService.instance.e(
+        '标注重写加载作家设定失败: $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.ai,
+        tags: ['agent', 'rewrite', 'get_writer_prompt', 'failed'],
+      );
+    }
+    return _memories;
+  }
 
   @override
   Future<String?> onNoToolCalls(List<ChatMessage> messages) async => null;
@@ -80,8 +115,17 @@ class AnnotationRewriteScenario
             '- 第 ${a.paragraphIndex + 1} 段（"${a.paragraphPreview}"）：${a.content}')
         .join('\n');
 
-    return '''你是按标注重写章节的 Agent。用户在阅读时对若干段落写下了批注，这些批注表达的是用户对这一章的修改意图。你的任务：调用工具改写当前章节正文，让章节符合批注意图。
+    final writerSection = _writerPrompt.isEmpty
+        ? ''
+        : '\n## 作家设定（用户配置的作者人设，改写落笔必须遵循）\n'
+            '$_writerPrompt\n';
+    final memorySection = _memories.isEmpty
+        ? ''
+        : '\n## 经验记忆（写作助手沉淀的经验，只读参考，本场景不能修改）\n'
+            '${_memories.asMap().entries.map((e) => '[${e.key + 1}] ${e.value}').join('\n')}\n';
 
+    return '''你是按标注重写章节的 Agent。用户在阅读时对若干段落写下了批注，这些批注表达的是用户对这一章的修改意图。你的任务：调用工具改写当前章节正文，让章节符合批注意图。
+$writerSection
 ## 关键理解
 - 批注不是"只改被标注的那一段"的指令。它往往牵动上下文：伏笔要提前埋、后文要跟着圆、节奏和章节走向可能需要调整。
 - 你需要通读全章，判断批注意图波及的范围，然后一并修改受影响的段落（包括标注段本身、它的前后文、以及为保持连贯必须联动的其它段落）。
@@ -91,7 +135,7 @@ class AnnotationRewriteScenario
 - 标注说明"改什么"，写作技巧约束"怎么改"。改写前先调用 `list_prompt_tags` 查看用户的写作技巧库。
 - 与本次改写相关的技巧（对话/描写/节奏/风格/情节等），用 `get_prompt_tag` 读取完整提示词，并在替换文本时结合这些技巧落笔，保证改出的文字符合用户的写作偏好，而不是平淡的功能性改写。
 - 技巧与本次改动无关时不必强行套用。
-
+$memorySection
 ## 规则
 1. **必须先用 `read_chapter_content` 读取章节原文**，再决定改写方案；需要了解全书的章节脉络时可用 `list_chapters`。
 2. 改写通过 `update_chapter_content(oldString, newString)` 完成精确字符串替换。每次替换的 oldString 必须与 read_chapter_content 返回内容逐字一致，且包含完整的待改写段落（含换行）。

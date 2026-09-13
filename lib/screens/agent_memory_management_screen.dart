@@ -201,13 +201,16 @@ class _AgentMemoryManagementScreenState
     );
   }
 
-  /// 场景切换 ChoiceChip 栏
+  /// 场景切换 ChoiceChip 栏（只展示有自己记忆存储的场景，
+  /// 如按标注重写只读复用写作记忆、无 patch_memory，不展示避免死数据）
   Widget _buildScenarioTabs() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
-        children: AgentScenarioFactory.availableScenarios.map((info) {
+        children: AgentScenarioFactory.availableScenarios
+            .where((info) => info.supportsMemory)
+            .map((info) {
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
