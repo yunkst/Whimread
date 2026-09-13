@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.1.0-preview.1+135
+version: 3.1.0-preview.2+136
 
 repository: https://github.com/yunkst/Whimread
 homepage: https://github.com/yunkst/Whimread
@@ -177,24 +177,14 @@ flutter:
   uses-material-design: true
 
   # ─── 阅读风内嵌字体（Noto Serif/Sans SC，已子集化）───
-  # 子集覆盖 CJK 基本区 + 全角标点 + 拉丁，生僻字由 fontFamilyFallback 兜底。
-  fonts:
-    - family: NotoSerifSC
-      fonts:
-        - asset: assets/fonts/NotoSerifSC-Regular.ttf
-        - asset: assets/fonts/NotoSerifSC-Bold.ttf
-          weight: 700
-    - family: NotoSansSC
-      fonts:
-        - asset: assets/fonts/NotoSansSC-Regular.ttf
-        - asset: assets/fonts/NotoSansSC-Bold.ttf
-          weight: 700
+  # 2026-09 APK 瘦身：四个 ttf（~38MB）改为启动资源引导动态下载 +
+  # FontLoader 运行时注册（lib/services/app_resource_manager.dart），
+  # 不再随 APK 打包。assets/fonts/ 下的源文件保留，供
+  # tool/publish_resources.dart 生成 manifest 上传到资源 bucket。
 
   # 注:PP-OCRv6 模型 (inference.onnx 21MB + ppocrv6_dict.txt 75KB) 已迁移到
   # CloudBase Storage,启动后由 OcrModelDownloader 后台下载到 app 私有目录。
-  # 详见 lib/services/ocr_model_downloader.dart。模型不再随 APK 打包,APK arm64
-  # 从 97MB 缩到约 76MB(节省 22%)。tool/ocr_test_assets/ 下的测试图
-  # (chapter_full.png 等) 被 .gitignore 排除,不入库,本机 PoC 时本地提供即可。
+  # 详见 lib/services/ocr_model_downloader.dart。
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

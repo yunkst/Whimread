@@ -88,6 +88,10 @@ class OcrModelDownloader {
   /// 缓存:同一启动周期内只跑一次 ensureLocal
   Future<OcrModelManifest>? _pending;
 
+  /// 最新一次调用注册的进度回调（ensureLocal 可重复调用刷新 sink，
+  /// 供启动资源引导页在其后订阅时也能拿到进度）
+  void Function(int received, int total)? _progressSink;
+
   OcrModelDownloader({Dio? dio, required Future<String> Function() archProvider})
       : _dio = dio ?? _buildDefaultDio(),
         _archProvider = archProvider;
@@ -118,8 +122,11 @@ class OcrModelDownloader {
   Future<String> localDictPath() async => (await _localDictFile()).path;
 
   // ---- 主入口:启动期后台调度 ----
-  /// 不抛异常,失败内部记日志 + 抛 StateError 让 OcrPredictor 走降级
-  Future<OcrModelManifest> ensureLocal() {
+  /// 不抛异常,失败内部记日志 + 抛 StateError 让 OcrPredictor 走降级。
+  /// [onProgress] 可选,字节级进度（首次调用时立即注册,重复调用会覆盖 sink）。
+  Future<OcrModelManifest> ensureLocal(
+      {void Function(int received, int total)? onProgress}) {
+    if (onProgress != null) _progressSink = onProgress;
     _pending ??= _doEnsure();
     return _pending!;
   }
@@ -199,7 +206,7 @@ class OcrModelDownloader {
         expectSha256: archEntry.sha256,
         dest: modelFile,
         label: 'inference.onnx',
-        onProgress: (rec, total) => _logProgress('inference.onnx', rec, total),
+        onProgress: (rec, total) => _reportProgress('inference.onnx', rec, total),
       );
     }
     if (needDict) {
@@ -208,7 +215,7 @@ class OcrModelDownloader {
         expectSha256: manifest.dict.sha256,
         dest: dictFile,
         label: 'ppocrv6_dict.txt',
-        onProgress: (rec, total) => _logProgress('dict', rec, total),
+        onProgress: (rec, total) => _reportProgress('dict', rec, total),
       );
     }
 
@@ -313,6 +320,15 @@ class OcrModelDownloader {
         category: LogCategory.ai,
         tags: ['ocr', 'model-download', 'progress'],
       );
+    }
+  }
+
+  /// 字节级进度:模型与 dict 两阶段连续上报给外部 sink（引导页），
+  /// 同时保留日志。dict 阶段偏移由调用方保证（模型完成后才开始 dict）。
+  void _reportProgress(String label, int received, int total) {
+    _logProgress(label, received, total);
+    if (label == 'inference.onnx') {
+      _progressSink?.call(received, total);
     }
   }
 

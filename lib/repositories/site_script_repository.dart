@@ -161,6 +161,35 @@ class SiteScriptRepository extends BaseRepository {
     }
   }
 
+  /// 重命名站点显示名（脚本管理面板手动改名用）。
+  ///
+  /// 写入 `display_name` 列（书架站点 Tab 优先展示的名字）；传空串则清空、
+  /// 展示方回退 host。
+  Future<void> setDisplayName(String id, String displayName) async {
+    try {
+      final db = await database;
+      await db.update(
+        'site_scripts',
+        {'display_name': displayName.trim()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      LoggerService.instance.i(
+        '脚本显示名变更: id=$id displayName=${displayName.trim()}',
+        category: LogCategory.database,
+        tags: ['site_script', 'set_display_name'],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '更新脚本显示名失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'set_display_name', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
   /// 更新 use_count 和 last_used_at（标记已使用）
   Future<void> markUsed(String id) async {
     try {

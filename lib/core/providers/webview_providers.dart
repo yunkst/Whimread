@@ -571,6 +571,22 @@ class SiteScriptListNotifier
     }
   }
 
+  /// 重命名站点显示名（书架 Tab 优先展示的名字；空串 = 清空、回退 host）
+  Future<void> renameScript(String id, String displayName) async {
+    try {
+      final repository = _ref.read(siteScriptRepositoryProvider);
+      await repository.setDisplayName(id, displayName);
+      await _loadScripts();
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '重命名脚本失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'rename', 'error'],
+      );
+    }
+  }
+
   /// 刷新脚本列表
   void refresh() => _loadScripts();
 }

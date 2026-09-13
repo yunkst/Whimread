@@ -127,7 +127,9 @@ class _ScriptCard extends ConsumerWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  script.domain,
+                  script.displayName.isNotEmpty
+                      ? script.displayName
+                      : script.domain,
                   style: AppTypography.novelTitle.copyWith(
                     fontSize: 14,
                     color: colorScheme.onSurface,
@@ -155,6 +157,19 @@ class _ScriptCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 6),
+          // 显示名（与域名不同时展示，便于了解书架 Tab 名称来源）
+          if (script.displayName.isNotEmpty && script.displayName != script.domain)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                '站点：${script.domain}',
+                style: AppTypography.metaItalic.copyWith(
+                  fontSize: 11,
+                  color: context.appColors.inkSoft,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           // 脚本状态标签
           Row(
             children: [
@@ -190,6 +205,13 @@ class _ScriptCard extends ConsumerWidget {
                 icon: Icons.visibility_outlined,
                 label: '查看',
                 onTap: () => _showViewDialog(context, script),
+              ),
+              const SizedBox(width: 8),
+              _buildActionButton(
+                context,
+                icon: Icons.edit_outlined,
+                label: '改名',
+                onTap: () => _showRenameDialog(context, ref, script),
               ),
               const SizedBox(width: 8),
               _buildActionButton(
@@ -285,6 +307,67 @@ class _ScriptCard extends ConsumerWidget {
       context: context,
       builder: (ctx) => _ScriptDetailDialog(script: script),
     );
+  }
+
+  /// 改名对话框：编辑站点显示名（书架 Tab 优先展示；清空则回退域名）
+  void _showRenameDialog(
+      BuildContext context, WidgetRef ref, SiteScript script) {
+    final controller = TextEditingController(text: script.displayName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名站点'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '域名: ${script.domain}',
+              style: AppTypography.novelTitle.copyWith(
+                fontSize: 14,
+                color: context.appColors.ink,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLength: 50,
+              decoration: const InputDecoration(
+                labelText: '站点显示名',
+                hintText: '书架 Tab 显示的名字',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              style: const TextStyle(fontSize: 14),
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '留空则显示域名。此名字也会显示在书架的站点 Tab 上。',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref
+                  .read(siteScriptListProvider.notifier)
+                  .renameScript(script.id, controller.text.trim());
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    ).whenComplete(controller.dispose);
   }
 
   /// 验证：弹出 URL 输入框

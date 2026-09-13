@@ -60,6 +60,16 @@ android {
         }
     }
 
+    // 2026-09 APK 瘦身：libsds.so（stable-diffusion 引擎，arm64 约 57MB）改为
+    // 启动资源引导动态下载（lib/services/app_resource_manager.dart），不再打进 APK。
+    // CMake 仍会编出 so（供 tool/publish_resources.dart 收集上传到资源 bucket），
+    // 这里只从打包产物中排除。
+    packagingOptions {
+        jniLibs {
+            excludes += "**/libsds.so"
+        }
+    }
+
     signingConfigs {
         create("release") {
             // 仅当 key.properties 存在且字段完整时启用，否则降级为 debug 签名

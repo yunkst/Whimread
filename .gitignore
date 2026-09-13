@@ -84,3 +84,6 @@ cloudfunctions/*/__tests__/
 
 # Python 字节码缓存（skill 脚本本地运行产物）
 __pycache__/
+
+# 动态资源发布产物（tool/publish_resources.dart 生成）
+tool/app_resources/dist/

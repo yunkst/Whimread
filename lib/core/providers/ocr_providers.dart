@@ -14,7 +14,8 @@ import '../../poc/ocr_predictor.dart';
 import '../../services/ocr_model_downloader.dart';
 import '../../utils/device_arch.dart';
 
-/// OCR 模型下载器单例。main() 在 post-frame 里触发 ensureLocal()。
+/// OCR 模型下载器单例。启动资源引导（resourceBootstrapNotifierProvider）
+/// 与 ocrPredictorProvider 都会触发 ensureLocal()（幂等）。
 final ocrModelDownloaderProvider = Provider<OcrModelDownloader>((ref) {
   return OcrModelDownloader(
     // 不传 dio：走 _buildDefaultDio() 的超时配置（裸 Dio 弱网下可无限挂起）

@@ -17,6 +17,8 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
+import '../app_resource_manager.dart';
+
 // ============================================================
 // 枚举常量（sd.h 用 C enum，FFI 侧统一按 Int32 传递；这里只列用到的）
 // ============================================================
@@ -434,7 +436,12 @@ final class SdLibrary {
 
   static SdLibrary? _instance;
 
-  /// 打开 libsds.so（仅 Android arm64 设备上会成功）。
+  /// 打开 libsds.so。
+  ///
+  /// 加载顺序：
+  /// 1. [AppResourceManager.sdLibraryPath]（启动资源引导下载后的绝对路径，
+  ///    2026-09 APK 瘦身后 so 不再随包发布）；
+  /// 2. 回退 `DynamicLibrary.open('libsds.so')`（兼容旧版随包构建）。
   /// 失败抛异常，调用方捕获后按"引擎不可用"降级。
   static SdLibrary open() {
     final cached = _instance;
@@ -442,7 +449,11 @@ final class SdLibrary {
     if (!Platform.isAndroid) {
       throw const _SdLibUnavailable('libsds.so 仅在 Android 构建中打包');
     }
-    final inst = SdLibrary._(DynamicLibrary.open('libsds.so'));
+    final path = AppResourceManager.sdLibraryPath;
+    final lib = (path != null && File(path).existsSync())
+        ? DynamicLibrary.open(path)
+        : DynamicLibrary.open('libsds.so');
+    final inst = SdLibrary._(lib);
     _instance = inst;
     return inst;
   }

@@ -6,7 +6,9 @@ import 'screens/bookshelf_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/webview_browser_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
+import 'screens/resource_bootstrap/resource_bootstrap_screen.dart';
 import 'services/app_update_service.dart';
+import 'services/app_resource_manager.dart' show ResourceItemStatus;
 import 'services/app_update_result.dart';
 import 'core/providers/service_providers.dart';
 import 'core/providers/image_model_download_providers.dart';
@@ -15,7 +17,7 @@ import 'core/providers/onboarding_providers.dart';
 import 'core/providers/ui_providers.dart';
 import 'core/providers/agent_scenario_provider.dart';
 import 'core/providers/device_quota_provider.dart';
-import 'core/providers/ocr_providers.dart';
+import 'core/providers/resource_bootstrap_providers.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_typography.dart';
 import 'utils/toast_utils.dart';
@@ -171,22 +173,8 @@ void main() async {
       child: const NovelReaderApp(),
     ));
 
-    // 首帧渲染后,后台启动 OCR 模型下载(不阻塞 UI,失败不影响 App 运行)
-    // 首启:用户首启 ~5-30 秒后模型本地就绪,期间触发 OCR 还原会 await 下载
-    // 后续:manifest sha256 命中本地缓存,直接跳过
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      container.read(ocrModelDownloaderProvider).ensureLocal().then(
-        (_) {},  // success: 不需要做事
-        onError: (e, st) {
-          LoggerService.instance.w(
-            'OCR 模型后台下载启动失败(不影响 App): $e',
-            stackTrace: st.toString(),
-            category: LogCategory.ai,
-            tags: ['ocr', 'model-download', 'startup-error'],
-          );
-        },
-      );
-    });
+    // 动态资源（字体/OCR 模型/libsds.so）的启动校验与下载已移交
+    // _ResourceGate → resourceBootstrapNotifierProvider（见 _AppRoot）。
   }, (error, stackTrace) {
     _logGlobalError('async-unhandled', error, stackTrace,
         category: LogCategory.general);
@@ -326,7 +314,7 @@ class _AppRoot extends ConsumerWidget {
       ),
       data: (onboardingState) {
         if (onboardingState.onboardingCompleted) {
-          return const HomePage();
+          return const _ResourceGate(child: HomePage());
         }
         return const OnboardingScreen();
       },
@@ -340,6 +328,52 @@ class _AppRoot extends ConsumerWidget {
         );
         return const HomePage();
       },
+    );
+  }
+}
+
+/// 动态资源门卫：onboarding 完成后、进首页前，先做一次启动资源校验/下载。
+///
+/// - 全部就绪（含 sha256 缓存命中，<1s）→ 直接放行；
+/// - 有缺失且用户在本 manifest 版本内跳过过 → 放行（后台静默补下载）；
+/// - 有缺失且未跳过 → 展示 ResourceBootstrapScreen（可跳过/重试）；
+/// - manifest 拉取失败 → 放行（各功能按需降级，不比旧行为差）。
+class _ResourceGate extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const _ResourceGate({required this.child});
+
+  @override
+  ConsumerState<_ResourceGate> createState() => _ResourceGateState();
+}
+
+class _ResourceGateState extends ConsumerState<_ResourceGate> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+        ref.read(resourceBootstrapNotifierProvider.notifier).bootstrap());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(resourceBootstrapNotifierProvider);
+
+    // 全部就绪（或 manifest 拉取失败放行）→ 直接进首页
+    if (state.completed) return widget.child;
+    if (!state.checking) {
+      final notifier = ref.read(resourceBootstrapNotifierProvider.notifier);
+      // 用户跳过过 → 放行（资源在后台静默补下载）
+      if (notifier.skippedThisManifest) return widget.child;
+      // manifest 拉到后各资源逐个校验/下载；仍全部处于校验态时保持加载页，
+      // 任一资源进入下载/失败态（即确实需要下载）才切引导页，
+      // 避免缓存全命中时闪一帧
+      final needsUi = state.items.values
+          .any((s) => s.status != ResourceItemStatus.checking);
+      if (needsUi) return const ResourceBootstrapScreen();
+    }
+    return const Scaffold(
+      body: Center(child: CircularProgressIndicator()),
     );
   }
 }
