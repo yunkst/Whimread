@@ -8,12 +8,15 @@
 /// - 目标绑定：小说 URL + 章节 URL + 章节列表 position 全部来自构造时注入的
 ///   [AnnotationRewriteTarget]（经 AgentScenarioContext.rewriteTarget 传递），
 ///   LLM 看到的工具 schema 不含任何标识参数，物理上无法触达其它章节。
-/// - 最小工具面：3 个工具
+/// - 最小工具面：5 个工具
 ///   - `read_chapter_content`   —— 读取当前章节正文
 ///   - `update_chapter_content` —— 对当前章节做精确字符串替换
 ///   - `list_chapters`          —— 查看当前小说的章节列表（context）
+///   - `list_prompt_tags`       —— 写作技巧列表（只读，复用 PromptTagExecutor）
+///   - `get_prompt_tag`         —— 写作技巧完整提示词（只读）
 /// - 写库后即时刷前端：每次成功替换后调 [chapterContentStateNotifierProvider]，
-///   阅读页 ref.watch 自动重建 → 触发段落级延迟揭示动画。
+///   阅读页 ref.watch 自动重建 → 触发段落级延迟揭示动画。仅当阅读页当前
+///   展示的正是被改写章节时才写入，防止把用户正在看的其它章节内容顶掉。
 /// - 写版本快照：source='ai_rewrite'，复用「版本历史」还原能力。
 /// - 成功 update 次数累计在 [successfulUpdateCount]，供会话层判定改写结果。
 library;
@@ -27,6 +30,7 @@ import '../../../core/providers/database_providers.dart';
 import '../../../core/providers/reader_state_providers.dart';
 import '../../logger_service.dart';
 import '../agent_scenario.dart';
+import '../tool_executor/prompt_tag_executor.dart';
 
 class AnnotationRewriteScenario
     with AgentScenarioCleanupMixin
@@ -51,6 +55,8 @@ class AnnotationRewriteScenario
         _kReadChapterContentTool,
         _kUpdateChapterContentTool,
         _kListChaptersTool,
+        _kListPromptTagsTool,
+        _kGetPromptTagTool,
       ];
 
   // 标注重写场景不需要 patch_memory / 经验记忆 —— 显式禁用基类默认实现。
@@ -81,17 +87,24 @@ class AnnotationRewriteScenario
 - 你需要通读全章，判断批注意图波及的范围，然后一并修改受影响的段落（包括标注段本身、它的前后文、以及为保持连贯必须联动的其它段落）。
 - 与批注无关、且不受改动影响的内容保持原样，不要为了改而改。
 
+## 写作技巧（动笔前必读）
+- 标注说明"改什么"，写作技巧约束"怎么改"。改写前先调用 `list_prompt_tags` 查看用户的写作技巧库。
+- 与本次改写相关的技巧（对话/描写/节奏/风格/情节等），用 `get_prompt_tag` 读取完整提示词，并在替换文本时结合这些技巧落笔，保证改出的文字符合用户的写作偏好，而不是平淡的功能性改写。
+- 技巧与本次改动无关时不必强行套用。
+
 ## 规则
 1. **必须先用 `read_chapter_content` 读取章节原文**，再决定改写方案；需要了解全书的章节脉络时可用 `list_chapters`。
 2. 改写通过 `update_chapter_content(oldString, newString)` 完成精确字符串替换。每次替换的 oldString 必须与 read_chapter_content 返回内容逐字一致，且包含完整的待改写段落（含换行）。
 3. 多个不相邻的修改拆成多次替换调用，不要一次替换过大的范围。
-4. 不创建/删除章节，不调用任何写场景插图/改人物/改大纲/媒体/提示词标签等工具。
+4. 不创建/删除章节，不调用任何写场景插图/改人物/改大纲/媒体等工具。
 5. 完成所有改写后，无需调用工具直接输出简短总结结束（loop 看到无 tool_calls 即终止）。
 
 ## 工具说明
 - `read_chapter_content()`：读取本章节正文（无需参数）
 - `update_chapter_content(oldString, newString, replaceAll?)`：在本章节内替换（无需章节标识）
 - `list_chapters()`：查看当前小说的章节列表（仅供了解上下文）
+- `list_prompt_tags(categoryName?)`：查看写作技巧列表（分类 + 名称 + 使用场景）
+- `get_prompt_tag(id?|name?)`：查看某条写作技巧的完整提示词
 
 ## 当前任务
 - 小说：《${_target.novelTitle}》
@@ -99,7 +112,7 @@ class AnnotationRewriteScenario
 - 用户标注（${annotations.length} 条）：
 $annotationList
 
-先读全文，规划需要联动的修改范围，再逐段替换；完成后输出一句简短总结。
+先读全文，规划需要联动的修改范围；查看并选取相关写作技巧；再逐段替换；完成后输出一句简短总结。
 ''';
   }
 
@@ -200,9 +213,24 @@ $annotationList
 
     // 即时刷新前端内容：让阅读页触发段落级延迟揭示动画。
     // setContent 是同步写入；下游 ref.watch 会在下一帧重建 ListView。
-    _ref
-        .read(chapterContentStateNotifierProvider.notifier)
-        .setContent(updatedContent);
+    //
+    // ⚠️ 章节守卫：chapterContentState 是全局单例，反映的是阅读页"当前正在
+    // 展示"的章节。若用户在改写运行期间切到了别的章节（原地换章不换页面），
+    // 无脑写入会把被改写章节的文本顶掉用户正在看的正文——跨章节污染。
+    // 此时只写库，用户重新进入被改写章节时自然会读到新内容。
+    final contentState = _ref.read(chapterContentStateNotifierProvider);
+    if (contentState.currentChapter?.url == _target.chapterUrl) {
+      _ref
+          .read(chapterContentStateNotifierProvider.notifier)
+          .setContent(updatedContent);
+    } else {
+      LoggerService.instance.d(
+        '标注重写 update_chapter_content: 阅读页已切离目标章节'
+        '(current=${contentState.currentChapter?.url ?? 'null'})，跳过前端刷新',
+        category: LogCategory.ai,
+        tags: ['agent', 'rewrite', 'update', 'skip_refresh'],
+      );
+    }
     successfulUpdateCount++;
 
     LoggerService.instance.i(
@@ -257,6 +285,10 @@ $annotationList
         return _updateChapterContent(args);
       case 'list_chapters':
         return _listChapters();
+      case 'list_prompt_tags':
+        return await PromptTagExecutor(_ref).listPromptTags(args);
+      case 'get_prompt_tag':
+        return await PromptTagExecutor(_ref).getPromptTag(args);
       default:
         return jsonEncode({
           'error': 'unknown_tool',
@@ -329,6 +361,54 @@ const Map<String, dynamic> _kListChaptersTool = {
     'parameters': {
       'type': 'object',
       'properties': <String, dynamic>{},
+      'required': <String>[],
+    },
+  },
+};
+
+/// 写作技巧列表（只读，执行复用 [PromptTagExecutor.listPromptTags]）
+const Map<String, dynamic> _kListPromptTagsTool = {
+  'type': 'function',
+  'function': {
+    'name': 'list_prompt_tags',
+    'description':
+        '获取用户的写作技巧列表，按分类分组返回（仅含 id、名称、使用场景，'
+        '不含提示词正文）。改写前先调用此工具了解用户偏好哪些写作手法，'
+        '与本次改写相关的技巧再用 get_prompt_tag 读取完整提示词。',
+    'parameters': {
+      'type': 'object',
+      'properties': {
+        'categoryName': {
+          'type': 'string',
+          'description': '分类名称筛选（如"风格"、"场景"、"人物"、"情节"）。不填返回全部。',
+        },
+      },
+      'required': <String>[],
+    },
+  },
+};
+
+/// 写作技巧详情（只读，执行复用 [PromptTagExecutor.getPromptTag]）
+const Map<String, dynamic> _kGetPromptTagTool = {
+  'type': 'function',
+  'function': {
+    'name': 'get_prompt_tag',
+    'description':
+        '查看指定写作技巧的完整提示词（promptText）。'
+        '传入 id（来自 list_prompt_tags）或 name 精确查看。'
+        '改写文本前应先读取相关技巧，把技巧要求落实到替换出的文字上。',
+    'parameters': {
+      'type': 'object',
+      'properties': {
+        'id': {
+          'type': 'integer',
+          'description': '技巧 ID（从 list_prompt_tags 获取）',
+        },
+        'name': {
+          'type': 'string',
+          'description': '技巧名称（大小写无关精确匹配）',
+        },
+      },
       'required': <String>[],
     },
   },

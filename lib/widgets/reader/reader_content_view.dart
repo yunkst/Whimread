@@ -30,8 +30,8 @@ class ReaderContentView extends StatefulWidget {
   /// 待揭示段落（index → 改写后的新文本）；段落进入视口时由其 ParagraphWidget 触发淡出+打字机动画
   final Map<int, String> pendingReveals;
 
-  /// ParagraphWidget 启动揭示动画时回调（父层据此标记 revealed，避免重放）
-  final void Function(int index)? onParagraphRevealStart;
+  /// ParagraphWidget 揭示动画播完回调（父层据此撤销该段的旧文本占位与登记）
+  final void Function(int index, String revealedText)? onParagraphRevealComplete;
 
   /// 内容变化回调
   /// - [index] 段落索引（-1 表示全文编辑，>=0 表示段落编辑）
@@ -52,7 +52,7 @@ class ReaderContentView extends StatefulWidget {
     this.annotations = const {},
     this.onParagraphLongPress,
     this.pendingReveals = const {},
-    this.onParagraphRevealStart,
+    this.onParagraphRevealComplete,
     required this.onContentChanged,
     required this.scrollController,
     required this.onPointerDown,
@@ -188,8 +188,10 @@ class _ReaderContentViewState extends State<ReaderContentView> {
               isEditMode: widget.isEditMode,
               hasAnnotation: widget.annotations.containsKey(index),
               revealNewText: reveal,
-              onRevealStart:
-                  widget.onParagraphRevealStart == null ? null : (i) => widget.onParagraphRevealStart!(i),
+              onRevealComplete:
+                  widget.onParagraphRevealComplete == null
+                      ? null
+                      : (i, text) => widget.onParagraphRevealComplete!(i, text),
               onLongPress: widget.onParagraphLongPress == null
                   ? null
                   : () => widget.onParagraphLongPress!(index, paragraph),

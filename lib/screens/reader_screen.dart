@@ -120,14 +120,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 实际跑动状态由 [ScenarioSession.isRunning] 提供，过程可在 agent 对话窗口查看。
   bool _isRewriteRunning = false;
 
+  /// 本次改写锁定的章节（启动时快照）。
+  /// 用户改写期间可原地切章（_currentChapter 会变），清理标注 / 内容 diff /
+  /// 成功 banner 都必须对准启动时的章节，不能用实时 _currentChapter。
+  String? _rewriteChapterUrl;
+  String? _rewriteChapterTitle;
+
   // 段落级延迟揭示动画：
-  // - agent 写库 → ref.listen diff 新旧段落 → 待揭示段落登记到 _pendingReveals
+  // - agent 写库 → ref.listen diff 新旧段落 → 变化段落登记到 _pendingReveals
+  //   （_pendingOldTexts 存该段落改写前的文本，用于动画前的占位显示）
   // - 显示层对该段落保留旧文本；滚动进入视口后 ParagraphWidget 启动
-  //   淡出+打字机，并回调 onParagraphRevealStart 把索引记入 _revealedParas
+  //   淡出+打字机，播完回调 onParagraphRevealComplete 撤销登记
   // - 切章/退出即丢（不持久化），重新进入直接显示新文本
   final Map<int, String> _pendingReveals = {};
-  final Set<int> _revealedParas = {};
-  List<String> _oldParasCache = const [];
+  final Map<int, String> _pendingOldTexts = {};
 
   // 重写完成后顶部 banner（5s 自动消失）
   bool _showRewriteBanner = false;
@@ -673,6 +679,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final lockedPosition = _currentChapterIndex + 1;
     final annotations = _annotations.values.toList();
 
+    // 启动时快照改写目标章节：改写期间用户可原地切章（_currentChapter 被换掉），
+    // 完成后的标注清理、内容 diff、banner 都必须对准这里记录的章节。
+    _rewriteChapterUrl = _currentChapter.url;
+    _rewriteChapterTitle = _currentChapter.title;
+
     setState(() => _isRewriteRunning = true);
 
     LoggerService.instance.i(
@@ -702,19 +713,26 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       setState(() => _isRewriteRunning = false);
 
       if (outcome.success) {
-        // 标注已被 AI 重写消化 → 清理（DB + 内存）
+        // 标注已被 AI 重写消化 → 清理（DB + 内存），对准启动时锁定的章节
         await _clearAnnotationsAfterRewrite();
         if (!mounted) return;
+        // 用户改写期间可能已切到其它章节，提示语对准被改写的章节
+        final stillViewing = _currentChapter.url == _rewriteChapterUrl;
         ToastUtils.showSuccess(
-          '已按标注重写本章（${outcome.updateCount} 处修改）',
+          stillViewing
+              ? '已按标注重写本章（${outcome.updateCount} 处修改）'
+              : '已按标注重写《$_rewriteChapterTitle》（${outcome.updateCount} 处修改）',
           context: context,
         );
-        // 顶部 banner 5s 后自动消失
-        _bannerTimer?.cancel();
-        setState(() => _showRewriteBanner = true);
-        _bannerTimer = Timer(const Duration(seconds: 5), () {
-          if (mounted) setState(() => _showRewriteBanner = false);
-        });
+        // 顶部 banner 只在用户仍停留在被改写章节时展示（banner 文案是"本章"），
+        // 5s 后自动消失
+        if (stillViewing) {
+          _bannerTimer?.cancel();
+          setState(() => _showRewriteBanner = true);
+          _bannerTimer = Timer(const Duration(seconds: 5), () {
+            if (mounted) setState(() => _showRewriteBanner = false);
+          });
+        }
       } else {
         ErrorHelper.showErrorWithLog(
           context,
@@ -741,12 +759,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
-  /// 重写成功后清理本章节标注（DB + 内存状态）
+  /// 重写成功后清理本章节标注（DB + 内存状态）。
+  /// 对准启动时锁定的 [_rewriteChapterUrl]——改写期间用户可能已原地切章，
+  /// 实时 [_currentChapter] 已不可信。
   Future<void> _clearAnnotationsAfterRewrite() async {
+    final chapterUrl = _rewriteChapterUrl ?? _currentChapter.url;
     try {
       await ref
           .read(paragraphAnnotationRepositoryProvider)
-          .deleteByChapter(_currentChapter.url);
+          .deleteByChapter(chapterUrl);
     } catch (e, st) {
       LoggerService.instance.e(
         '清理章节标注失败: $e',
@@ -758,49 +779,76 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (mounted) setState(() => _annotations = {});
   }
 
+  /// 段落拆分（与显示层一致：按 '\n' 拆 + 过滤空行）
+  static List<String> _splitParagraphs(String content) =>
+      content.split('\n').where((p) => p.trim().isNotEmpty).toList();
+
   /// ref.listen 回调：agent 写库 → diff 新旧段落 → 登记待揭示段落
   ///
-  /// 段落数量不变：逐项比对，变化段落登记 pending（若已被揭示过则先移出
-  /// revealed 以允许再次动画）。
-  /// 段落数量变化（合并/拆分段落）：无法对齐索引 → 回退为瞬时替换（不动画，
-  /// 显示层直接用新内容，因为 pending 为空时 display == new）。
+  /// 守卫：
+  /// - 仅在改写运行期间消化内容更新；其它来源的变化（用户编辑保存/切章/刷新）
+  ///   直接清空揭示状态。
+  /// - 仅消化「正在展示被改写章节」的更新：用户切到其它章节后，全局内容状态
+  ///   属于那个章节，与改写 diff 语义完全对不上，必须忽略（防跨章节污染）。
+  ///
+  /// 对齐策略：段落级公共前缀/后缀对齐。中段长度一致时逐段配对，变化段登记
+  /// 揭示（含改写前文本占位）；中段有段落增删（合并/拆分）时索引整体错位，
+  /// 丢弃中段及之后的登记、该区域瞬时替换——前缀区域已登记的揭示不受影响。
   void _onContentChangedForRewrite(
       ChapterContentState? prev, ChapterContentState next) {
     if (!_isRewriteRunning) {
       // 非 agent 期间的内容变化（用户编辑保存/切章/刷新）：清空揭示状态
-      if (_pendingReveals.isNotEmpty || _revealedParas.isNotEmpty) {
+      if (_pendingReveals.isNotEmpty || _pendingOldTexts.isNotEmpty) {
         _pendingReveals.clear();
-        _revealedParas.clear();
-        _oldParasCache = const [];
+        _pendingOldTexts.clear();
       }
       return;
     }
     if (prev == null || prev.content == next.content) return;
-
-    final oldParas =
-        prev.content.split('\n').where((p) => p.trim().isNotEmpty).toList();
-    final newParas =
-        next.content.split('\n').where((p) => p.trim().isNotEmpty).toList();
-
-    if (oldParas.length != newParas.length) {
-      LoggerService.instance.d(
-        '标注重写 段落数变化 (${oldParas.length} → ${newParas.length})，回退瞬时替换',
-        category: LogCategory.ai,
-        tags: ['reader', 'rewrite', 'fallback_instant'],
-      );
-      _pendingReveals.clear();
-      _revealedParas.clear();
+    if (next.currentChapter?.url != _rewriteChapterUrl) {
+      // 阅读页已切到其它章节（或内容状态尚未挂上目标章节）：忽略，
+      // 场景层此时也不会再写入内容状态（双保险）
       return;
     }
 
-    _oldParasCache = oldParas;
+    final oldParas = _splitParagraphs(prev.content);
+    final newParas = _splitParagraphs(next.content);
+
+    var prefix = 0;
+    while (prefix < oldParas.length &&
+        prefix < newParas.length &&
+        oldParas[prefix] == newParas[prefix]) {
+      prefix++;
+    }
+    var suffix = 0;
+    while (suffix < oldParas.length - prefix &&
+        suffix < newParas.length - prefix &&
+        oldParas[oldParas.length - 1 - suffix] ==
+            newParas[newParas.length - 1 - suffix]) {
+      suffix++;
+    }
+    final oldMidEnd = oldParas.length - suffix;
+    final newMidEnd = newParas.length - suffix;
+
     var changed = 0;
-    for (var i = 0; i < newParas.length; i++) {
-      if (oldParas[i] == newParas[i]) continue;
-      changed++;
-      // 允许已揭示段落再次动画（agent 又改了一次）
-      _revealedParas.remove(i);
-      _pendingReveals[i] = newParas[i];
+    if (oldMidEnd - prefix == newMidEnd - prefix) {
+      // 中段可逐段配对：变化段落登记揭示（允许已揭示段落再次动画）
+      for (var i = prefix; i < newMidEnd; i++) {
+        if (oldParas[i] == newParas[i]) continue;
+        changed++;
+        _pendingOldTexts[i] = oldParas[i];
+        _pendingReveals[i] = newParas[i];
+      }
+    } else {
+      // 中段段落增删（合并/拆分）：索引错位，登记失效 → 中段瞬时替换
+      LoggerService.instance.d(
+        '标注重写 中段段落数变化 (${oldParas.length} → ${newParas.length})，'
+        '[$prefix, $newMidEnd) 区间回退瞬时替换',
+        category: LogCategory.ai,
+        tags: ['reader', 'rewrite', 'fallback_instant'],
+      );
+      _pendingReveals.removeWhere((i, _) => i >= prefix);
+      _pendingOldTexts.removeWhere((i, _) => i >= prefix);
     }
     if (changed > 0 && mounted) {
       setState(() {}); // 触发显示层按 pending 重建（未揭示段落显示旧文本）
@@ -812,11 +860,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  /// ParagraphWidget 启动揭示动画时回调。**不 setState**：
-  /// ListView.builder 的 itemBuilder 闭包持有 Set 引用，滚动重建时读到的
-  /// 是最新内容；可见项动画不受重建打断，滚走再滚回直接静态显示新文本。
-  void _onParagraphRevealStart(int index) {
-    _revealedParas.add(index);
+  /// ParagraphWidget 打字机动画播完回调：撤销该段的揭示登记，
+  /// 让段落静态显示新文本。**不匹配则保留登记**——动画期间 agent 又改了
+  /// 这一段时，登记里已是最新文本，下一次构建会以新目标重启动画。
+  void _onParagraphRevealComplete(int index, String revealedText) {
+    if (_pendingReveals[index] != revealedText) return;
+    _pendingReveals.remove(index);
+    _pendingOldTexts.remove(index);
+    if (mounted) setState(() {});
   }
 
   /// 改写模式 FAB 内容：auto_fix_high 图标 + 标注数量徽标 + 运行中转圈
@@ -1018,8 +1069,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // _content getter 内部使用 ref.read()，不会触发 UI 重建
     // 这里已经通过 ref.watch(chapterContentStateNotifierProvider) 建立了响应式依赖
     final content = contentState.content;
-    final paragraphs =
-        content.split('\n').where((p) => p.trim().isNotEmpty).toList();
+    final paragraphs = _splitParagraphs(content);
 
     // 有标注时 AI 悬浮按钮自动切换为「按标注重写」入口（点击启动改写并打开
     // 对话窗口查看过程）；无标注时保持默认「打开写作对话」行为。
@@ -1092,15 +1142,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final hasNext =
         currentIndex != -1 && currentIndex < widget.chapters.length - 1;
 
-    // 计算待揭示段落：未揭示的索引 → 旧文本占位 + revealNewText 触发子 Widget 动画
+    // 计算待揭示段落：登记中的索引 → 旧文本占位 + revealNewText 触发子 Widget 动画。
+    // 登记在动画播完（onParagraphRevealComplete）后才撤销——中途重建时继续传
+    // 同一组占位/目标，ParagraphWidget 才不会被父组件重建打断进行中的动画。
     final activeReveals = <int, String>{};
     if (!isEditMode) {
       for (final entry in _pendingReveals.entries) {
         final i = entry.key;
-        if (_revealedParas.contains(i)) continue;
         if (i >= paragraphs.length) continue;
-        if (i < _oldParasCache.length) {
-          paragraphs[i] = _oldParasCache[i];
+        final oldText = _pendingOldTexts[i];
+        if (oldText != null && oldText != paragraphs[i]) {
+          paragraphs[i] = oldText;
         }
         activeReveals[i] = entry.value;
       }
@@ -1118,7 +1170,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           annotations: _annotations,
           onParagraphLongPress: _showAnnotationEditor,
           pendingReveals: activeReveals,
-          onParagraphRevealStart: _onParagraphRevealStart,
+          onParagraphRevealComplete: _onParagraphRevealComplete,
           onContentChanged: (index, newContent) {
             // 仅支持全文编辑模式（index=-1）
             assert(index == -1, '只支持全文编辑模式，段落编辑模式已废弃');

@@ -22,12 +22,14 @@ class ParagraphWidget extends StatefulWidget {
   /// 行为契约：
   /// - 首次构建（滚动进入视口）即启动：旧文本（[paragraph]）淡出 180ms → 切换到
   ///   [revealNewText] 并以打字机（每 ~16ms 增 1 字符，总时长 ≤ 1000ms）逐字呈现。
-  /// - 动画启动时调用一次 [onRevealStart]（父层据此标记 revealed，后续跳过）。
-  /// - 父组件应在视口外已显示新文本时不要传 revealNewText（即 revealed 后置 null）。
+  /// - 动画进行中不被重建打断（父层在播完前持续传入同一组占位/目标）；
+  ///   播完后父层撤销登记（revealNewText 置 null），段落静态显示新文本。
+  /// - [revealNewText] 在动画播完后变为新目标（agent 又改了这段）→ 重新播放。
+  /// - 动画播完调用一次 [onRevealComplete]，父层据此撤销该段的揭示登记。
   final String? revealNewText;
 
-  /// 启动揭示动画时回调（无 setState，仅父层记录 revealed 索引）。
-  final ValueChanged<int>? onRevealStart;
+  /// 揭示动画播完回调（revealedText 为实际播放的新文本，供父层与登记比对）
+  final void Function(int index, String revealedText)? onRevealComplete;
 
   const ParagraphWidget({
     super.key,
@@ -40,7 +42,7 @@ class ParagraphWidget extends StatefulWidget {
     this.hasAnnotation = false,
     this.onLongPress,
     this.revealNewText,
-    this.onRevealStart,
+    this.onRevealComplete,
   });
 
   @override
@@ -54,6 +56,12 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
   Timer? _typingTimer;
   String _displayedNew = '';
   bool _hasStartedReveal = false;
+
+  /// 当前这轮动画是否已播完（播完后允许以新目标重启动画）
+  bool _revealFinished = false;
+
+  /// 本轮动画实际播放的新文本（fade 完成后锁定，不随 revealNewText 中途变化）
+  String _activeRevealText = '';
 
   /// 动画启动时缓存的旧文本——父组件中途重建（被后续 agent 更新触发）
   /// 时避免 fade 阶段读到错误的"旧文本"（应为 newText）。
@@ -93,10 +101,14 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
   void _maybeStartReveal() {
     final reveal = widget.revealNewText;
     if (reveal == null || reveal.isEmpty || reveal == widget.paragraph) return;
-    if (_hasStartedReveal) return;
+    // 动画进行中不打断（父层在播完前会持续传同一组值）
+    if (_hasStartedReveal && !_revealFinished) return;
+    // 同一目标已播完且父层尚未撤销登记：不重放
+    if (_revealFinished && _activeRevealText == reveal) return;
     _hasStartedReveal = true;
+    _revealFinished = false;
+    _activeRevealText = reveal;
     _fadingOutOldText = widget.paragraph;
-    widget.onRevealStart?.call(widget.index);
 
     _displayedNew = '';
     _fadeController?.dispose();
@@ -110,9 +122,10 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
 
   void _onFadeStatus(AnimationStatus status) {
     if (status != AnimationStatus.completed) return;
-    final reveal = widget.revealNewText!;
+    final reveal = _activeRevealText;
     if (reveal.isEmpty) {
-      setState(() => _displayedNew = '');
+      _revealFinished = true;
+      widget.onRevealComplete?.call(widget.index, reveal);
       return;
     }
     // 启动打字机：总时长 ≤ 1000ms，按字符数算每 tick 多少字符
@@ -129,6 +142,9 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
       if (typed >= reveal.length) {
         t.cancel();
         if (mounted) setState(() => _displayedNew = reveal);
+        // 播完通知父层撤销登记（父层据此让段落回到静态新文本）
+        _revealFinished = true;
+        widget.onRevealComplete?.call(widget.index, reveal);
         return;
       }
       typed = (typed + charsPerTick).clamp(0, reveal.length);
