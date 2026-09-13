@@ -1,3 +1,5 @@
+import 'dart:ui' show Size;
+
 import 'preferences_service.dart';
 
 /// 浏览器设置服务
@@ -101,15 +103,44 @@ class BrowserSettingsService {
   // ========== Preferences 服务实例 ==========
   static final PreferencesService _prefs = PreferencesService();
 
+  /// 桌面模式的同步缓存值。
+  ///
+  /// Headless WebView 创建时无法 await（构造参数需要同步 UA/尺寸），读写
+  /// isDesktopMode()/setDesktopMode() 时同步更新；未加载过时兜底 false
+  /// （与持久化默认值一致，即手机模式）。
+  static bool _cachedDesktopMode = _defaultDesktopMode;
+
+  /// 同步读取桌面模式缓存值（Headless WebView 构造用）。
+  static bool get desktopModeSync => _cachedDesktopMode;
+
+  // ========== Headless WebView 展示模式配置 ==========
+  //
+  // Agent/headless 场景的页面必须与用户内置浏览器看到的一致（番茄等站点
+  // 按 UA + viewport 宽度双重分流：UA 决定服务端返回的 HTML 版本，物理
+  // 宽度决定前端响应式断点走 PC 还是手机分支）。
+
+  /// Headless WebView 的 UA：跟随桌面模式；手机模式用空串（系统默认）。
+  static String get headlessUserAgent => desktopModeSync ? desktopUserAgent : '';
+
+  /// Headless WebView 桌面模式的物理尺寸。
+  ///
+  /// 宽 1200 与内置浏览器桌面模式的 SizedBox(width: 1200) 一致：headless
+  /// WebView 也有真实的布局尺寸，window.innerWidth ≈ 1200，响应式站点
+  /// 命中 PC 断点。高度仅影响可视区，给足即可。
+  static Size get headlessDesktopSize => const Size(1200, 1600);
+
   // ========== 公开方法 ==========
 
   /// 是否启用桌面模式（键不存在时返回默认 false）
   Future<bool> isDesktopMode() async {
-    return _prefs.getBool(_keyDesktopMode, defaultValue: _defaultDesktopMode);
+    final v = await _prefs.getBool(_keyDesktopMode, defaultValue: _defaultDesktopMode);
+    _cachedDesktopMode = v;
+    return v;
   }
 
   /// 设置桌面模式开关
   Future<void> setDesktopMode(bool value) async {
     await _prefs.setBool(_keyDesktopMode, value);
+    _cachedDesktopMode = value;
   }
 }

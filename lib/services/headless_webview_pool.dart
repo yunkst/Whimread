@@ -23,12 +23,14 @@
 /// 解耦：这两个 service 各自独立持有 WebView；本池专供 Agent 提取场景使用。
 library;
 
-import 'dart:async';
+import 'dart:async' show Completer, TimeoutException;
+import 'dart:ui' show Size;
 import 'dart:io' show Platform;
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'browser_settings_service.dart';
 import 'logger_service.dart';
 import 'novel_agent/scenarios/network_request_recorder.dart';
 
@@ -38,6 +40,9 @@ class HeadlessWebViewPool {
   InAppWebViewController? _controller;
   bool _isInitializing = false;
   int _refCount = 0;
+
+  /// 创建当前 WebView 实例时的桌面模式快照；与最新设置不一致时销毁重建。
+  bool _desktopModeAtCreation = BrowserSettingsService.desktopModeSync;
 
   // ===== 排他锁 =====
 
@@ -165,7 +170,21 @@ class HeadlessWebViewPool {
   // ===== 内部 =====
 
   Future<void> _ensureReady() async {
-    if (_controller != null) return;
+    final desktopNow = BrowserSettingsService.desktopModeSync;
+    if (_controller != null) {
+      if (_desktopModeAtCreation == desktopNow || _isInUse) return;
+      // 用户切换了桌面模式且当前无人占用：销毁重建，使 UA/尺寸跟随新展示
+      // 模式（池为 APP 级单例，不重建则一直停留在旧模式）。
+      LoggerService.instance.i(
+        'HeadlessWebViewPool: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
+        category: LogCategory.cache,
+        tags: ['headless-webview-pool', 'recreate', 'desktop-mode'],
+      );
+      _headlessWebView?.dispose();
+      _headlessWebView = null;
+      _controller = null;
+    }
+    _desktopModeAtCreation = desktopNow;
 
     if (_isInitializing) {
       // 等待初始化完成（每 500ms 轮询，最多 30s）
@@ -186,6 +205,10 @@ class HeadlessWebViewPool {
       final completer = Completer<InAppWebViewController>();
 
       _headlessWebView = HeadlessInAppWebView(
+        initialSize: BrowserSettingsService.desktopModeSync
+            ? BrowserSettingsService.headlessDesktopSize
+            // 手机模式：-1 走平台默认（全屏）尺寸
+            : const Size(-1, -1),
         onWebViewCreated: (controller) {
           if (!completer.isCompleted) {
             completer.complete(controller);
@@ -193,6 +216,8 @@ class HeadlessWebViewPool {
         },
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
+          // UA 跟随用户内置浏览器的桌面模式：番茄等站点按 UA 分流电脑版/手机版
+          userAgent: BrowserSettingsService.headlessUserAgent,
           // 不加载图片，节省流量和时间
           loadsImagesAutomatically: false,
           // 禁用不需要的功能

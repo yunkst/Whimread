@@ -32,6 +32,7 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show Size;
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -39,6 +40,7 @@ import '../repositories/site_script_repository.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
 import '../services/site_bookshelf_parser.dart';
+import 'browser_settings_service.dart';
 import 'headless_webview_errors.dart';
 import 'webview_page_loader.dart';
 
@@ -55,6 +57,10 @@ class HeadlessWebViewBookshelfService {
   InAppWebViewController? _controller;
   bool _isInitializing = false;
   bool _isFetching = false;
+
+  /// 创建当前 WebView 实例时的桌面模式快照；与最新设置不一致时销毁重建，
+  /// 使 UA/尺寸跟随用户内置浏览器的展示模式（见 BrowserSettingsService）。
+  bool _desktopModeAtCreation = BrowserSettingsService.desktopModeSync;
 
   final WebViewPageLoader _pageLoader = WebViewPageLoader();
 
@@ -173,7 +179,20 @@ class HeadlessWebViewBookshelfService {
   }
 
   Future<void> _ensureWebView() async {
-    if (_controller != null) return;
+    final desktopNow = BrowserSettingsService.desktopModeSync;
+    if (_controller != null) {
+      if (_desktopModeAtCreation == desktopNow) return;
+      // 展示模式切换：销毁重建（服务生命周期与页面导航对齐，重建代价可控）
+      LoggerService.instance.i(
+        'HeadlessWebViewBookshelf: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
+        category: LogCategory.cache,
+        tags: ['headless-webview', 'site-bookshelf', 'recreate', 'desktop-mode'],
+      );
+      _headlessWebView?.dispose();
+      _headlessWebView = null;
+      _controller = null;
+    }
+    _desktopModeAtCreation = desktopNow;
     if (_isInitializing) {
       for (var i = 0; i < 60; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
@@ -186,12 +205,17 @@ class HeadlessWebViewBookshelfService {
       final completer = Completer<InAppWebViewController>();
 
       _headlessWebView = HeadlessInAppWebView(
+        initialSize: BrowserSettingsService.desktopModeSync
+            ? BrowserSettingsService.headlessDesktopSize
+            : const Size(-1, -1),
         onWebViewCreated: (controller) {
           if (!completer.isCompleted) completer.complete(controller);
         },
         onLoadStop: _pageLoader.onLoadStopCallback,
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
+          // UA 跟随用户内置浏览器的桌面模式：站点按 UA 分流电脑版/手机版
+          userAgent: BrowserSettingsService.headlessUserAgent,
           loadsImagesAutomatically: false,
           mediaPlaybackRequiresUserGesture: true,
         ),
