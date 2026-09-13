@@ -47,9 +47,16 @@ description: Use this skill when building and releasing the Novel Flutter app. T
 
 **预览版版本号推导**(默认路径):
 - 查看上一个 tag(`git describe --tags --abbrev=0`)
-- 若上个是稳定版 `vX.Y.Z` → 本次预览版 `vX.Y.Z-preview.1`
+- 若上个是**已经发布过正式版**的稳定版 `vX.Y.Z` → 本次预览版必须**升一位小版本** `vX.Y+1.0-preview.1`。
+  ⚠️ **禁止发 `vX.Y.Z-preview.N`**:App 的版本比较(`app_update_service.dart`)遵循语义化版本,
+  同主段下正式版 > 任意预发布,`X.Y.Z-preview.N` 对已安装 `X.Y.Z` 正式版的用户永远是"旧版本",
+  检查更新不会弹出(2026-09-13 实际踩坑:3.0.0 正式版之后发 3.0.0-preview.1,用户检查更新看不到)
+- 若上个是稳定版但**该版本号尚未发过正式版**(例如刚发过 `v2.0.0-preview.3` 还没转正)→ 本次
+  `vX.Y.Z-preview.{N+1}`(同版本继续迭代)
 - 若上个是预览版 `vX.Y.Z-preview.N` → 本次 `vX.Y.Z-preview.{N+1}`(同版本继续迭代)
 - version_code 始终递增
+- **判断依据**:用 `gh release list` 或 `git tag -l "vX.Y.Z"` 确认上个稳定版是否已有正式 release;
+  只要 `vX.Y.Z` 正式版已存在,下一个预览版就必须基于 `X.Y+1.0`
 
 **稳定版版本号推导**(仅用户明确要求):
 - 取当前预览版基线 `vX.Y.Z-preview.N`,去掉后缀 → 稳定版 `vX.Y.Z`
@@ -247,17 +254,20 @@ fi
 
 **除非用户明确要求稳定版,否则一律发预览版。** 预览版只推送给开启「获取预览版」开关的用户,适合平时迭代快速验证。
 
-版本号推导(见「第零步」):
-- 上个稳定版 `vX.Y.Z` → 本次 `vX.Y.Z-preview.1`
+版本号推导(详见「第零步」):
+- 上个稳定版 `vX.Y.Z` **已有正式 release** → 本次必须升一位小版本 `v{X}.{Y+1}.0-preview.1`
+  (同主段 `vX.Y.Z-preview.N` 对已装 `vX.Y.Z` 正式版的用户永不弹更新,禁止使用)
+- 上个稳定版 `vX.Y.Z` 尚未发正式版(之前只有 preview) → 本次 `vX.Y.Z-preview.{N+1}`
 - 上个预览版 `vX.Y.Z-preview.N` → 本次 `vX.Y.Z-preview.{N+1}`
 
 ```yaml
-# pubspec.yaml 示例(从 2.0.0+107 发首个预览版)
-version: 2.0.0-preview.1+108
+# pubspec.yaml 示例:2.0.0 正式版已发布,从此发预览版要升小版本
+# version: 2.0.0+107 → version: 2.1.0-preview.1+108
+version: 2.1.0-preview.1+108
 ```
 
 ```bash
-# 发预览版:tag = v2.0.0-preview.1
+# 发预览版:tag = v2.1.0-preview.1
 # changelog 写入方式与稳定版完全一致
 CHANGELOG="..." python .Codex/skills/novel-app-release/scripts/build_and_upload.py
 ```

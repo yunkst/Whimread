@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme/app_colors.dart';
@@ -79,6 +80,18 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
   int get _warnCount => _logPreview
       .where((e) => e.level.index >= LogLevel.warning.index)
       .length;
+
+  /// 作者联系方式（点击复制）
+  static const _authorContacts = [
+    ('QQ', '865239338'),
+    ('微信', 'dazyt6'),
+  ];
+
+  Future<void> _copyContact(String label, String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ToastUtils.showInfo('已复制$label：$value');
+  }
 
   Future<void> _submit() async {
     if (_submitting) return;
@@ -317,6 +330,30 @@ class _FeedbackSubmitScreenState extends ConsumerState<FeedbackSubmitScreen> {
                     )
                   : const Icon(Icons.send_outlined),
               label: Text(_submitting ? '提交中...' : '提交反馈'),
+            ),
+
+            // 作者联系方式
+            const SizedBox(height: 20),
+            Text(
+              '也可以直接联系作者',
+              style: AppTypography.metaItalic.copyWith(
+                color: appColors.inkSoft,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ..._authorContacts.map(
+              (contact) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                leading: Icon(
+                  Icons.chat_bubble_outline,
+                  size: 20,
+                  color: appColors.neutral,
+                ),
+                title: Text('${contact.$1}：${contact.$2}'),
+                trailing: const Icon(Icons.copy_outlined, size: 18),
+                onTap: () => _copyContact(contact.$1, contact.$2),
+              ),
             ),
             const SizedBox(height: 24),
           ],
