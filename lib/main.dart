@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -64,6 +65,17 @@ void _logGlobalError(String source, Object error, StackTrace? stack,
 void main() async {
   // 确保 Flutter 初始化完成
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 强制竖屏：全平台统一锁定（Android manifest 已声明 portrait，
+  // 这里兜住 iOS/桌面端；包 try 防止个别平台不支持时阻塞启动）
+  try {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  } catch (e) {
+    LoggerService.instance.w('竖屏锁定设置失败: $e', tags: ['startup']);
+  }
 
   // 初始化日志服务
   await LoggerService.instance.init();

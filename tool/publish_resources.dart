@@ -3,23 +3,31 @@
 // 用法：
 //   dart run tool/publish_resources.dart \
 //     --sd-so <libsds.so 路径> \
+//     --strip <llvm-strip 路径> \
 //     [--fonts-dir assets/fonts] \
 //     [--base-url <对象存储公开前缀>] \
 //     [--out tool/app_resources/dist]
 //
 // 产物：
 //   <out>/manifest.json        —— 上传到 bucket 的 app-resources/v1/manifest.json
-//   <out>/ 上会列出需要一并上传的文件清单（字体 + libsds.so）
+//   <out>/libsds.so            —— strip 后的 so（上传这份）
+//   <out>/UPLOAD_LIST.txt      —— 待上传文件对照表
 //
-// 上传（二选一）：
-//   1. 云开发控制台 → 静态托管/云存储，把 dist 下文件传到对应路径，
-//      bucket 与 OCR 模型一致（公开读）：
-//      7768-whimread-dev-d0gm4oi0z3099082d-1256733196（tcb.qcloud.la）
-//   2. tcb CLI: tcb storage upload <本地文件> <云端路径>
+// strip 说明：
+//   CMake 产物带调试符号（159MB），运行时只需要代码段 + .dynsym。
+//   --strip 传入 NDK 的 llvm-strip（如
+//   <NDK>/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe），
+//   先拷贝到 dist 再对拷贝执行 strip（原始产物保留作崩溃符号存档）。
+//   实测 159MB → 57MB。strip 保留 .dynsym，Dart FFI lookup 不受影响。
+//
+// 上传（二选一，tcb CLI 需用 2.x 版本，3.x 不支持旧 COS 桶）：
+//   1. 云开发控制台 → 云存储，把 dist 下文件传到对应路径（公开读 bucket）
+//   2. npx -y @cloudbase/cli@2.12.10 storage upload <本地> <云端路径> \
+//        -e whimread-dev-d0gm4oi0z3099082d
 //
 // 注意：
 //   - libsds.so 从 gradle 构建产物收集：
-//     android/app/build/intermediates/cxx/*/obj/arm64-v8a/libsds.so
+//     build/app/intermediates/cxx/*/obj/arm64-v8a/libsds.so
 //     （packagingOptions 已把它排除出 APK，但 CMake 产物仍在 intermediates）
 //   - 每次更新资源后必须重新上传 manifest.json，否则客户端拿旧 sha256 校验失败
 //   - manifest_version 递增会让「跳过」标记失效，用户会再看到一次引导页
@@ -31,6 +39,7 @@ import 'package:crypto/crypto.dart';
 
 Future<void> main(List<String> args) async {
   String? sdSoPath;
+  String? stripPath;
   var fontsDir = 'assets/fonts';
   var baseUrl =
       'https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la';
@@ -40,6 +49,8 @@ Future<void> main(List<String> args) async {
     switch (args[i]) {
       case '--sd-so':
         sdSoPath = args[++i];
+      case '--strip':
+        stripPath = args[++i];
       case '--fonts-dir':
         fontsDir = args[++i];
       case '--base-url':
@@ -57,6 +68,29 @@ Future<void> main(List<String> args) async {
   if (!await soFile.exists()) {
     stderr.writeln('libsds.so 不存在: $sdSoPath');
     exit(2);
+  }
+
+  final out = Directory(outDir);
+  if (!await out.exists()) await out.create(recursive: true);
+
+  // strip：拷贝到 dist 后对拷贝执行（原始产物保留作崩溃符号存档）
+  File soToPublish;
+  if (stripPath != null) {
+    final stripped = File('${out.path}/libsds.so');
+    await soFile.copy(stripped.path);
+    final before = await stripped.length();
+    final r = Process.run(stripPath, [stripped.path]);
+    final res = await r;
+    if (res.exitCode != 0) {
+      stderr.writeln('llvm-strip 失败(exit ${res.exitCode}): ${res.stderr}');
+      exit(2);
+    }
+    final after = await stripped.length();
+    stdout.writeln('libsds.so strip 完成: $before → $after 字节');
+    soToPublish = stripped;
+  } else {
+    soToPublish = soFile;
+    stdout.writeln('⚠️ 未指定 --strip，上传未 strip 的原始 so（体积大数倍）');
   }
 
   const fontFiles = [
@@ -88,9 +122,9 @@ Future<void> main(List<String> args) async {
     fonts.add(await fileEntry('$baseUrl/app-resources/v1/ui_fonts', f, name));
   }
 
-  // 2. sd_engine
+  // 2. sd_engine（strip 后的产物）
   final sd = await fileEntry(
-      '$baseUrl/app-resources/v1/sd_engine', soFile, 'libsds.so');
+      '$baseUrl/app-resources/v1/sd_engine', soToPublish, 'libsds.so');
 
   final manifest = {
     'manifest_version': 1,
@@ -109,8 +143,6 @@ Future<void> main(List<String> args) async {
     ],
   };
 
-  final out = Directory(outDir);
-  if (!await out.exists()) await out.create(recursive: true);
   final manifestFile = File('${out.path}/manifest.json');
   await manifestFile.writeAsString(const JsonEncoder.withIndent('  ')
       .convert(manifest));
@@ -123,7 +155,7 @@ Future<void> main(List<String> args) async {
     buffer.writeln(
         'app-resources/v1/ui_fonts/${f['name']} → $fontsDir/${f['name']}');
   }
-  buffer.writeln('app-resources/v1/sd_engine/libsds.so → $sdSoPath');
+  buffer.writeln('app-resources/v1/sd_engine/libsds.so → ${soToPublish.path}');
   await File('${out.path}/UPLOAD_LIST.txt').writeAsString(buffer.toString());
 
   stdout.writeln('manifest 已生成: ${manifestFile.path}');

@@ -1,17 +1,21 @@
 /// 程序化小说封面
 ///
 /// 把 [Novel] 渲染成一张「书脊风」封面：
-/// - 优先用 [Novel.coverUrl] 真实封面图（Image.network，加载失败/为空回退程序化）
+/// - 优先用 [Novel.coverUrl] 真实封面图（本地缓存命中走 Image.file，
+///   未命中走 Image.network 并异步回写缓存；加载失败/为空回退程序化）
 /// - 否则由书名哈希选 8 套色板之一，首字/竖排程序化生成
 /// - 确定性：同一本书每次生成结果一致（title.hashCode % 8）
 ///
-/// 零网络依赖、零字体依赖，纯 Flutter 绘制。
+/// 程序化部分零网络依赖、零字体依赖，纯 Flutter 绘制。
 library;
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_typography.dart';
 import '../../models/novel.dart';
+import '../../services/media/cover_cache_service.dart';
 import '../media/media_view.dart';
 
 /// 小说封面
@@ -42,9 +46,89 @@ class _NovelCoverState extends State<NovelCover> {
   /// 真实封面是否加载失败 → 回退程序化
   bool _useFallback = false;
 
-  bool get _hasCoverUrl {
+  /// 封面本地缓存命中文件（异步加载，命中后切 Image.file 离线可用）
+  File? _cachedFile;
+
+  String? get _coverUrl {
     final url = widget.novel.coverUrl;
-    return url != null && url.trim().isNotEmpty && !_useFallback;
+    if (url == null || url.trim().isEmpty || _useFallback) return null;
+    return url.trim();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCachedFile();
+  }
+
+  @override
+  void didUpdateWidget(covariant NovelCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // coverUrl 变化（如补录封面）时重新查缓存
+    if (oldWidget.novel.coverUrl != widget.novel.coverUrl) {
+      _cachedFile = null;
+      _loadCachedFile();
+    }
+  }
+
+  Future<void> _loadCachedFile() async {
+    final url = _coverUrl;
+    if (url == null || !mounted) return;
+    final file = await CoverCacheService.instance.getFile(url);
+    if (mounted && file != null && _coverUrl == url) {
+      setState(() => _cachedFile = file);
+    }
+  }
+
+  /// 网络加载成功后异步回写缓存，下次展示/离线直接读本地文件。
+  /// 回写成功后立即切 Image.file，当前帧已展示网络图，切换无感。
+  void _onNetworkLoaded() {
+    final url = _coverUrl;
+    if (url == null) return;
+    CoverCacheService.instance.prefetch(url).then((file) {
+      if (mounted && file != null && _coverUrl == url) {
+        setState(() => _cachedFile = file);
+      }
+    });
+  }
+
+  /// 网络封面：加载成功后回写缓存；失败切程序化封面
+  Widget _networkImage(double width, double height) {
+    final url = _coverUrl;
+    if (url == null) return _programmaticFallback();
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      width: width,
+      height: height,
+      errorBuilder: (_, __, ___) {
+        // 加载失败，下一帧切到程序化封面
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _useFallback = true);
+        });
+        // 本帧先画底色占位，避免空白闪烁
+        return _programmaticFallback();
+      },
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) {
+          _onNetworkLoaded();
+          return child;
+        }
+        // 加载中显示底色
+        return Container(color: _CoverPalette.pick(widget.novel.title).solid);
+      },
+    );
+  }
+
+  /// 程序化封面占位（Size.infinite，供 Stack 内填充）
+  Widget _programmaticFallback() {
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _ProgrammaticCoverPainter(
+        title: widget.novel.title,
+        palette: _CoverPalette.pick(widget.novel.title),
+      ),
+    );
   }
 
   @override
@@ -84,31 +168,13 @@ class _NovelCoverState extends State<NovelCover> {
     final width = widget.width;
     final height = width * 4 / 3;
 
-    final content = _hasCoverUrl
-        ? Image.network(
-            widget.novel.coverUrl!,
+    final content = _cachedFile != null
+        ? Image.file(
+            _cachedFile!,
             fit: BoxFit.cover,
             width: width,
             height: height,
-            errorBuilder: (_, __, ___) {
-              // 加载失败，下一帧切到程序化封面
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() => _useFallback = true);
-              });
-              // 本帧先画底色占位，避免空白闪烁
-              return CustomPaint(
-                size: Size.infinite,
-                painter: _ProgrammaticCoverPainter(
-                  title: widget.novel.title,
-                  palette: _CoverPalette.pick(widget.novel.title),
-                ),
-              );
-            },
-            loadingBuilder: (context, child, progress) {
-              if (progress == null) return child;
-              // 加载中显示底色
-              return Container(color: _CoverPalette.pick(widget.novel.title).solid);
-            },
+            errorBuilder: (_, __, ___) => _networkImage(width, height),
           )
         : CustomPaint(
             size: Size(width, height),
