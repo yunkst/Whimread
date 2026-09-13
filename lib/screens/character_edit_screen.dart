@@ -299,10 +299,27 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
               color: context.appColors.ink,
             ),
           ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'Beta',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+                color: Theme.of(context).colorScheme.onSecondaryContainer,
+              ),
+            ),
+          ),
         ],
       ),
       subtitle: Text(
-        '普通用户可忽略，供生图功能使用',
+        '普通用户可忽略，供生图功能使用（Beta 功能）',
         style: AppTypography.metaItalic.copyWith(
           color: context.appColors.inkSoft,
         ),

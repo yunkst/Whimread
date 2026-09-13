@@ -252,4 +252,105 @@ void main() {
       expect(sr.buildToolCalls(), isEmpty);
     });
   });
+
+  // ============================================================
+  // tool_call id 聚合与兜底(反馈 id=2「工具错乱」回归)
+  //
+  // 线上证据(2026-09-13 13:58, deepseek-v4-flash):聚合后的响应里
+  // tool_calls[].id 全为 ""，回传的 tool.tool_call_id 也为 "":
+  //   - 严格校验的上游直接 HTTP 400(13:58:33-34 连续两次 LLM_UPSTREAM_ERROR)
+  //   - 宽松的上游接受后，多工具调用/多轮历史的工具结果归属全靠位置猜，
+  //     用户感知即「llm 调用工具返回结果错乱」
+  // 与 function.name 的空串覆盖是同型缺陷(见上方 name 回归用例)。
+  // ============================================================
+  group('tool_call id 聚合与兜底(反馈 id=2 回归)', () {
+    test('后续帧 id 为空串 → 不覆盖首帧已聚合的真 id', () {
+      final sr = StreamingResult(toolCallDeltas: [
+        {
+          'index': 0,
+          'id': '01a03eedc2b388ed35523f51cdc15fa6',
+          'type': 'function',
+          'function': {'name': 'navigate', 'arguments': ''}
+        },
+        {
+          'index': 0,
+          'id': '', // 部分网关在后续帧把 id 发成空串(与 name 空串同型)
+          'function': {'arguments': '{"url":"https://fanqienovel.com/shelf"}'}
+        },
+      ]);
+      final tcs = sr.buildToolCalls();
+      expect(tcs, hasLength(1));
+      expect(tcs.first.id, '01a03eedc2b388ed35523f51cdc15fa6');
+    });
+
+    test('全流未下发 id(字段缺失)→ 合成非空占位 id，不落空串', () {
+      final sr = StreamingResult(toolCallDeltas: [
+        {
+          'index': 0,
+          'function': {'name': 'get_page_info', 'arguments': '{}'}
+        },
+      ]);
+      final tcs = sr.buildToolCalls();
+      expect(tcs, hasLength(1));
+      expect(tcs.first.id, isNotEmpty);
+    });
+
+    test('多个无 id 并行调用 → 合成 id 按 index 互异，可一一配对', () {
+      final sr = StreamingResult(toolCallDeltas: [
+        {
+          'index': 0,
+          'function': {'name': 'list_network_requests'}
+        },
+        {
+          'index': 1,
+          'function': {'name': 'navigate'}
+        },
+      ]);
+      final tcs = sr.buildToolCalls();
+      expect(tcs, hasLength(2));
+      final ids = tcs.map((t) => t.id).toSet();
+      expect(ids.length, 2, reason: '并行调用各自的合成 id 必须互异，否则结果归属歧义');
+      expect(tcs.first.id, isNotEmpty);
+      expect(tcs.last.id, isNotEmpty);
+    });
+
+    test('id 先空串后有值 → 空串不写入，最终取后续真 id', () {
+      final sr = StreamingResult(toolCallDeltas: [
+        {
+          'index': 0,
+          'id': '', // 首帧空串
+          'function': {'name': 'get_page_info'}
+        },
+        {
+          'index': 0,
+          'id': 'real_call_id', // 后续帧补上真 id
+        },
+      ]);
+      final tcs = sr.buildToolCalls();
+      expect(tcs, hasLength(1));
+      expect(tcs.first.id, 'real_call_id');
+    });
+
+    test('首帧真 id + 后续帧空串 + 再后帧无 id 字段 → 保持真 id', () {
+      final sr = StreamingResult(toolCallDeltas: [
+        {
+          'index': 0,
+          'id': 'keep_me',
+          'function': {'name': 'navigate'}
+        },
+        {
+          'index': 0,
+          'id': '',
+          'function': {'arguments': '{"url":"x"}'}
+        },
+        {
+          'index': 0,
+          'function': {'arguments': '{"url":"y"}'}
+        },
+      ]);
+      final tcs = sr.buildToolCalls();
+      expect(tcs, hasLength(1));
+      expect(tcs.first.id, 'keep_me');
+    });
+  });
 }

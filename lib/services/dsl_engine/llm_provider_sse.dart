@@ -51,7 +51,10 @@ class StreamingResult {
           aggregated.putIfAbsent(idx, () => _ToolCallDelta(index: idx));
 
       final id = delta['id'] as String?;
-      if (id != null) entry.id = id;
+      // 空串视为缺失：部分网关(DeepSeek 经 new-api)在后续 delta 帧把 id 发成
+      // ""，一旦 if(id != null) 放过会覆盖首帧已聚合的真 id。与下方 name 的
+      // 空串防御同型。
+      if (id != null && id.isNotEmpty) entry.id = id;
 
       final func = delta['function'] as Map<String, dynamic>?;
       if (func != null) {
@@ -91,7 +94,14 @@ class StreamingResult {
           args = markParseError(detail: e.toString(), raw: argsStr);
         }
       }
-      return ToolCall(id: d.id ?? '', name: d.name ?? '', arguments: args);
+      // id 兜底合成：OpenAI 协议要求 tool 消息的 tool_call_id 与 assistant
+      // tool_calls[].id 精确配对，空串 id 会被严格校验的上游直接拒 400，
+      // 宽松上游在多工具调用/多轮历史下归属歧义（反馈 id=2「工具错乱」根因）。
+      // 按流内 index 合成稳定占位；配对语义由「紧跟其前的 assistant 消息」
+      // 保证，跨轮重名不影响匹配。
+      final callId =
+          (d.id != null && d.id!.isNotEmpty) ? d.id! : 'call_${d.index}';
+      return ToolCall(id: callId, name: d.name ?? '', arguments: args);
     }).toList();
   }
 }

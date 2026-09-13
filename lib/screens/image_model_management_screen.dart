@@ -34,7 +34,29 @@ class ImageModelManagementScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('生图模型管理'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('生图模型管理'),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Beta',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                  color: Theme.of(context).colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             onPressed: () => _addModel(context, ref),
