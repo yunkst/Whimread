@@ -186,12 +186,12 @@ class HeadlessWebViewContentService {
       }
       scriptId = script.id;
 
-      // 2. 确保 WebView 就绪
-      await _ensureWebView();
+      // 2. 确保 WebView 就绪（按脚本创作模式决定实例桌面/手机）
+      await _ensureWebView(requiredPreferredMode: script.preferredMode);
 
       LoggerService.instance.i(
-        'HeadlessWebView: 开始获取 domain=$domain url=$chapterUrl '
-        'priority=$priority',
+        'HeadlessWebView: 开始获取 domain=$domain scriptId=$scriptId url=$chapterUrl '
+        'priority=$priority mode=${_modeLabel(script.preferredMode)}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'fetch'],
       );
@@ -250,7 +250,8 @@ class HeadlessWebViewContentService {
       _recordSuccess(script.id);
 
       LoggerService.instance.i(
-        'HeadlessWebView: 获取成功 domain=$domain len=${result.content.length}',
+        'HeadlessWebView: 获取成功 domain=$domain scriptId=$scriptId '
+        'len=${result.content.length} mode=${_modeLabel(script.preferredMode)}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'success'],
       );
@@ -411,22 +412,41 @@ class HeadlessWebViewContentService {
     }
   }
 
+  /// 解析目标模式：脚本创作模式优先（1=桌面 / 2=手机），未设置回退全局设置
+  static bool _resolveTargetDesktop(int? preferredMode) {
+    if (preferredMode == 1) return true;
+    if (preferredMode == 2) return false;
+    return BrowserSettingsService.desktopModeSync;
+  }
+
+  static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
+
+  static String _modeLabel(int preferredMode) {
+    if (preferredMode == 1) return 'desktop';
+    if (preferredMode == 2) return 'mobile';
+    return 'global';
+  }
+
   /// 确保 HeadlessInAppWebView 已初始化
-  Future<void> _ensureWebView() async {
-    final desktopNow = BrowserSettingsService.desktopModeSync;
+  ///
+  /// [requiredPreferredMode] 为本次要执行的脚本的 preferredMode
+  /// （v46 起：1=桌面 / 2=手机 / 0=未设置）；未设置时回退到全局桌面模式设置。
+  /// 实例模式与目标不一致则销毁重建（一次 fetch 内部应自洽，不中途切 UA）。
+  Future<void> _ensureWebView({int? requiredPreferredMode}) async {
+    final targetDesktop = _resolveTargetDesktop(requiredPreferredMode);
     if (_controller != null) {
-      if (_desktopModeAtCreation == desktopNow) return;
-      // 展示模式切换：销毁重建（服务生命周期与页面导航对齐，重建代价可控）
+      if (_desktopModeAtCreation == targetDesktop) return;
       LoggerService.instance.i(
-        'HeadlessWebView: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
+        'HeadlessWebView: 模式切换 (${_modeLabelBool(_desktopModeAtCreation)} → '
+        '${_modeLabelBool(targetDesktop)})，重建 WebView',
         category: LogCategory.crawler,
-        tags: ['headless-webview', 'recreate', 'desktop-mode'],
+        tags: ['headless-webview', 'recreate', 'mode-change'],
       );
       _headlessWebView?.dispose();
       _headlessWebView = null;
       _controller = null;
     }
-    _desktopModeAtCreation = desktopNow;
+    _desktopModeAtCreation = targetDesktop;
     if (_isInitializing) {
       // 等待初始化完成（简单轮询）
       for (var i = 0; i < 60; i++) {

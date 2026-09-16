@@ -40,6 +40,16 @@ class SiteScript {
   /// 展示方（书架站点 Tab）回退 host。
   final String displayName;
 
+  /// 脚本创作/验证时的浏览器展示模式（v46 起）。
+  ///
+  /// 决定执行此脚本时使用的 Headless WebView 模式：1=桌面、2=手机。
+  /// 0=未设置（老脚本），执行时回退到用户当前全局模式。
+  ///
+  /// 同一域名的三个脚本（目录/正文/书架）共用一个模式，因为它们通常在同一次
+  /// Agent 会话里创作，模式一致。脚本是对特定 DOM（UA + viewport 决定的
+  /// 桌面版或手机版）写的，在另一种模式上跑容易因选择器失效而失败。
+  final int preferredMode;
+
   const SiteScript({
     required this.id,
     required this.domain,
@@ -55,6 +65,7 @@ class SiteScript {
     this.chapterContentOcr = false,
     this.bookshelfJs = '',
     this.displayName = '',
+    this.preferredMode = 0,
   });
 
   /// 从数据库 Map 构造
@@ -74,6 +85,7 @@ class SiteScript {
       chapterContentOcr: (map['chapter_content_ocr'] as int?) == 1,
       bookshelfJs: (map['bookshelf_js'] as String?) ?? '',
       displayName: (map['display_name'] as String?) ?? '',
+      preferredMode: (map['preferred_mode'] as int?) ?? 0,
       // 注：旧 'ocr' 列 v39 起不再读取，保留在 DB 仅作历史兼容。
     );
   }
@@ -95,6 +107,7 @@ class SiteScript {
       'chapter_content_ocr': chapterContentOcr ? 1 : 0,
       'bookshelf_js': bookshelfJs,
       'display_name': displayName,
+      'preferred_mode': preferredMode,
     };
   }
 
@@ -130,6 +143,7 @@ class SiteScript {
     bool? chapterContentOcr,
     String? bookshelfJs,
     String? displayName,
+    int? preferredMode,
   }) {
     return SiteScript(
       id: id ?? this.id,
@@ -146,6 +160,7 @@ class SiteScript {
       chapterContentOcr: chapterContentOcr ?? this.chapterContentOcr,
       bookshelfJs: bookshelfJs ?? this.bookshelfJs,
       displayName: displayName ?? this.displayName,
+      preferredMode: preferredMode ?? this.preferredMode,
     );
   }
 }

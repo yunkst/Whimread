@@ -115,12 +115,17 @@ class HeadlessWebViewBookshelfService {
       scriptId = script.id;
 
       LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 开始 domain=$domain scriptId=$scriptId url=$url',
+        'HeadlessWebViewBookshelf: 开始 domain=$domain scriptId=$scriptId '
+        'url=$url mode=${_modeLabel(script.preferredMode)}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'site-bookshelf', 'fetch'],
       );
 
-      await _ensureWebView(domain: logDomain, scriptId: scriptId);
+      await _ensureWebView(
+        domain: logDomain,
+        scriptId: scriptId,
+        requiredPreferredMode: script.preferredMode,
+      );
 
       // 等待 onLoadStop（超时抛 PageLoadFailedException）
       await _loadPage(url);
@@ -159,6 +164,7 @@ class HeadlessWebViewBookshelfService {
       LoggerService.instance.i(
         'HeadlessWebViewBookshelf: outcome=success '
         'domain=$logDomain scriptId=$scriptId count=${result.length} '
+        'mode=${_modeLabel(script.preferredMode)} '
         'durationMs=${stopwatch.elapsedMilliseconds}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'site-bookshelf', 'success'],
@@ -210,21 +216,40 @@ class HeadlessWebViewBookshelfService {
     }
   }
 
-  Future<void> _ensureWebView({String? domain, String? scriptId}) async {
-    final desktopNow = BrowserSettingsService.desktopModeSync;
+  /// 解析目标模式：脚本创作模式优先（1=桌面 / 2=手机），未设置回退全局设置
+  static bool _resolveTargetDesktop(int? preferredMode) {
+    if (preferredMode == 1) return true;
+    if (preferredMode == 2) return false;
+    return BrowserSettingsService.desktopModeSync;
+  }
+
+  static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
+
+  static String _modeLabel(int preferredMode) {
+    if (preferredMode == 1) return 'desktop';
+    if (preferredMode == 2) return 'mobile';
+    return 'global';
+  }
+
+  Future<void> _ensureWebView({
+    String? domain,
+    String? scriptId,
+    int? requiredPreferredMode,
+  }) async {
+    final targetDesktop = _resolveTargetDesktop(requiredPreferredMode);
     if (_controller != null) {
-      if (_desktopModeAtCreation == desktopNow) return;
-      // 展示模式切换：销毁重建（服务生命周期与页面导航对齐，重建代价可控）
+      if (_desktopModeAtCreation == targetDesktop) return;
       LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
+        'HeadlessWebViewBookshelf: 模式切换 '
+        '(${_modeLabelBool(_desktopModeAtCreation)} → ${_modeLabelBool(targetDesktop)})，重建 WebView',
         category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'recreate', 'desktop-mode'],
+        tags: ['headless-webview', 'site-bookshelf', 'recreate', 'mode-change'],
       );
       _headlessWebView?.dispose();
       _headlessWebView = null;
       _controller = null;
     }
-    _desktopModeAtCreation = desktopNow;
+    _desktopModeAtCreation = targetDesktop;
     if (_isInitializing) {
       LoggerService.instance.i(
         'HeadlessWebViewBookshelf: 等待其他初始化完成 domain=$domain scriptId=$scriptId',

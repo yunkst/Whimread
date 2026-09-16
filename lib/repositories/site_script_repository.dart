@@ -358,6 +358,8 @@ class SiteScriptRepository extends BaseRepository {
   /// - [displayName] 非 null 且去空白后非空时写入 `display_name`（站点显示名，
   ///   v45 起）；null 或空白表示本次不涉及，**保留原值**（save_script 按
   ///   script_type 分次调用，不能互相覆盖）。
+  /// - [preferredMode] 非 null 时写入 `preferred_mode`（v46 起，脚本创作/验证
+  ///   时的浏览器展示模式：1=桌面、2=手机）；null 表示本次不涉及，保留原值。
   /// - **若 domain 不存在会自动 INSERT** 一条新记录：本次 [scriptType] 列写
   ///   [scriptJs] + 对应 ocr 列（bookshelf 无 ocr 列），其余列留空串、ocr 为 0；
   ///   `verified=0` 标识尚未完成其余类型。这样无论 agent 第一次调的是哪种
@@ -371,6 +373,7 @@ class SiteScriptRepository extends BaseRepository {
     required bool ocr,
     String? testUrl,
     String? displayName,
+    int? preferredMode,
   }) async {
     // 站点显示名：空白视为"未提供"，避免 agent 传空串清掉已有名字
     final effectiveDisplayName =
@@ -407,6 +410,7 @@ class SiteScriptRepository extends BaseRepository {
               scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
           'sample_url': testUrl ?? '',
           'display_name': effectiveDisplayName ?? '',
+          'preferred_mode': preferredMode ?? 0,
           'created_at': now,
           'last_used_at': now,
           'use_count': 0,
@@ -441,6 +445,10 @@ class SiteScriptRepository extends BaseRepository {
       // 显示名仅在实际提供时覆盖，分次保存互不清空
       if (effectiveDisplayName != null) {
         updateValues['display_name'] = effectiveDisplayName;
+      }
+      // 创作模式仅在实际提供时覆盖
+      if (preferredMode != null) {
+        updateValues['preferred_mode'] = preferredMode;
       }
       await db.update(
         'site_scripts',

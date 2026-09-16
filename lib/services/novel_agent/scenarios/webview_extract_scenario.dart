@@ -16,6 +16,7 @@ import 'package:novel_app/core/providers/extraction_task_providers.dart';
 import 'package:novel_app/core/providers/webview_add_novel_providers.dart';
 import 'package:novel_app/core/providers/webview_providers.dart';
 import 'package:novel_app/repositories/site_script_repository.dart';
+import 'package:novel_app/services/browser_settings_service.dart';
 import 'package:novel_app/services/logger_service.dart';
 import 'package:novel_app/services/ocr_render_js.dart';
 import 'package:novel_app/services/ocr_restore_service.dart';
@@ -1463,6 +1464,8 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         restoreService: restoreService,
         testUrl: testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
         displayName: displayName,
+        preferredMode:
+            BrowserSettingsService.desktopModeSync ? 1 : 2, // v46 起记录创作模式
       );
 
       if (outcome['success'] == true) {
@@ -1638,6 +1641,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     OcrRestoreService? restoreService,
     String? testUrl,
     String? displayName,
+    int? preferredMode,
   }) async {
     // 1. 结构校验
     final structErr = _validateScriptResult(jsResult, scriptType, ocr);
@@ -1706,6 +1710,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       ocr: ocr,
       testUrl: testUrl,
       displayName: displayName,
+      preferredMode: preferredMode,
     );
     if (!saveResult.success) {
       // 防御性兜底：updateScriptPart 现在不再返回 domain_not_found（domain 不存在

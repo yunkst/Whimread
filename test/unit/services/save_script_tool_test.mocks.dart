@@ -149,6 +149,23 @@ class MockSiteScriptRepository extends _i1.Mock
       ) as _i3.Future<void>);
 
   @override
+  _i3.Future<void> setDisplayName(
+    String? id,
+    String? displayName,
+  ) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #setDisplayName,
+          [
+            id,
+            displayName,
+          ],
+        ),
+        returnValue: _i3.Future<void>.value(),
+        returnValueForMissingStub: _i3.Future<void>.value(),
+      ) as _i3.Future<void>);
+
+  @override
   _i3.Future<void> markUsed(String? id) => (super.noSuchMethod(
         Invocation.method(
           #markUsed,
@@ -221,6 +238,7 @@ class MockSiteScriptRepository extends _i1.Mock
     required bool? ocr,
     String? testUrl,
     String? displayName,
+    int? preferredMode,
   }) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -233,6 +251,7 @@ class MockSiteScriptRepository extends _i1.Mock
             #ocr: ocr,
             #testUrl: testUrl,
             #displayName: displayName,
+            #preferredMode: preferredMode,
           },
         ),
         returnValue:

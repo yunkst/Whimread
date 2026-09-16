@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 45;
+  static const int currentVersion = 46;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -941,6 +941,17 @@ class DatabaseMigrations {
         await _addColumnIfNotExists(
             db, 'site_scripts', 'display_name', 'TEXT NOT NULL DEFAULT \'\'');
         _log('迁移 v44 → v45: site_scripts 加 display_name 列（站点显示名）');
+        break;
+
+      // ========== 版本 46：脚本创作模式 ==========
+      // site_scripts 加 preferred_mode 列：脚本创作/验证时的浏览器展示模式
+      // （1=桌面、2=手机、0=未设置）。执行时按此模式准备 Headless WebView，
+      // 避免用户切换桌面/手机模式后，脚本在另一种 DOM 上跑失效。
+      // 0 = 老脚本未记录，执行时回退当前全局模式。
+      case 46:
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'preferred_mode', 'INTEGER NOT NULL DEFAULT 0');
+        _log('迁移 v45 → v46: site_scripts 加 preferred_mode 列（脚本创作模式）');
         break;
     }
   }
