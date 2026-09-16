@@ -39,119 +39,125 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return AlertDialog(
-      title: Row(
-        children: [
-          Icon(
-            Icons.new_releases,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            widget.isNewVersion ? '发现新版本' : '重新下载',
-            style: const TextStyle(fontSize: 18),
-          ),
-        ],
-      ),
-      content: SizedBox(
-        width: 300,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // 下载中 / 下载完成待安装 / 安装中禁止关闭：
+    // State 在 dispose 后 mounted=false，进度回调与自动安装都会被跳过，
+    // 表现为「下载到一半点别处，下载白下了」，因此这里必须拦住 pop 路径
+    return PopScope(
+      canPop: !_isDownloading && !_isDownloadComplete && !_isInstalling,
+      child: AlertDialog(
+        title: Row(
           children: [
-            // 版本信息
-            Text(
-              '版本 ${widget.version.version}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+            Icon(
+              Icons.new_releases,
+              color: theme.colorScheme.primary,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(width: 8),
             Text(
-              '大小: ${widget.version.fileSizeFormatted}',
-              style: theme.textTheme.bodySmall,
+              widget.isNewVersion ? '发现新版本' : '重新下载',
+              style: const TextStyle(fontSize: 18),
             ),
-            const SizedBox(height: 12),
-
-            // 更新日志
-            if (widget.version.changelog != null &&
-                widget.version.changelog!.isNotEmpty) ...[
+          ],
+        ),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 版本信息
               Text(
-                '更新内容:',
-                style: theme.textTheme.labelMedium,
+                '版本 ${widget.version.version}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 4),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 240),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
+              Text(
+                '大小: ${widget.version.fileSizeFormatted}',
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+
+              // 更新日志
+              if (widget.version.changelog != null &&
+                  widget.version.changelog!.isNotEmpty) ...[
+                Text(
+                  '更新内容:',
+                  style: theme.textTheme.labelMedium,
                 ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Scrollbar(
-                  child: SingleChildScrollView(
-                    child: MarkdownBody(
-                      data: widget.version.changelog!,
-                      selectable: true,
-                      shrinkWrap: true,
-                      styleSheet: _buildChangelogStyle(context),
+                const SizedBox(height: 4),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Scrollbar(
+                    child: SingleChildScrollView(
+                      child: MarkdownBody(
+                        data: widget.version.changelog!,
+                        selectable: true,
+                        shrinkWrap: true,
+                        styleSheet: _buildChangelogStyle(context),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-            ],
+                const SizedBox(height: 12),
+              ],
 
-            // 下载进度
-            if (_isDownloading || _isDownloadComplete) ...[
-              if (_isDownloading) ...[
-                LinearProgressIndicator(
-                  value: _downloadProgress,
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${(_downloadProgress * 100).toStringAsFixed(0)}% - $_statusMessage',
-                  style: theme.textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-              ] else if (_isDownloadComplete) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(8),
+              // 下载进度
+              if (_isDownloading || _isDownloadComplete) ...[
+                if (_isDownloading) ...[
+                  LinearProgressIndicator(
+                    value: _downloadProgress,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        color: theme.colorScheme.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '下载完成',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.bold,
+                  const SizedBox(height: 8),
+                  Text(
+                    '${(_downloadProgress * 100).toStringAsFixed(0)}% - $_statusMessage',
+                    style: theme.textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ] else if (_isDownloadComplete) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          color: theme.colorScheme.primary,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '下载完成',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
+                const SizedBox(height: 12),
               ],
-              const SizedBox(height: 12),
             ],
-          ],
+          ),
         ),
+        actions: _buildActions(context),
       ),
-      actions: _buildActions(context),
     );
   }
 
@@ -358,6 +364,10 @@ Future<void> showAppUpdateDialog(
 }) {
   return showDialog(
     context: context,
+    // 下载进行中 / 完成 / 安装中都会被 _AppUpdateDialogState 里的
+    // PopScope(canPop: false) 拦截返回键；这里再关掉点击遮罩关闭，
+    // 防止用户点别处把对话框关掉导致下载链路被丢弃。
+    barrierDismissible: false,
     builder: (context) => AppUpdateDialog(
       version: version,
       updateService: updateService,
