@@ -215,7 +215,7 @@ void main() {
       expect(result['success'], true);
     });
 
-    test('bookshelf novels 非空 + 字段齐全 → 落库通过', () async {
+    test('bookshelf novels 非空 + 字段齐全（含 cover_url）→ 落库通过', () async {
       final repo = MockSiteScriptRepository();
       when(repo.updateScriptPart(
         domain: anyNamed('domain'),
@@ -231,8 +231,16 @@ void main() {
         scriptJs: 'js',
         jsResult: {
           'novels': [
-            {'title': '斗破苍穹', 'url': 'https://a.com/book/1/'},
-            {'title': '凡人修仙传', 'url': 'https://a.com/book/2/'},
+            {
+              'title': '斗破苍穹',
+              'url': 'https://a.com/book/1/',
+              'cover_url': 'https://a.com/img/1.jpg',
+            },
+            {
+              'title': '凡人修仙传',
+              'url': 'https://a.com/book/2/',
+              'cover_url': '', // 无封面图时允许空串
+            },
           ],
         },
         repo: repo,
@@ -247,6 +255,25 @@ void main() {
         scriptJs: 'js',
         ocr: false,
       )).called(1);
+    });
+
+    test('bookshelf 某项缺 cover_url 键 → novel_cover_url_missing', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'bookshelf',
+        ocr: false,
+        scriptJs: 'js',
+        jsResult: {
+          'novels': [
+            {'title': '有封面', 'url': 'https://a.com/1', 'cover_url': ''},
+            {'title': '漏封面', 'url': 'https://a.com/2'}, // 没.cover_url 键
+          ],
+        },
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'novel_cover_url_missing');
     });
 
     test('bookshelf 缺 novels 字段 → novels_empty', () async {

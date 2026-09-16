@@ -14,9 +14,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/database_providers.dart';
 import '../core/providers/services/network_service_providers.dart';
+import '../models/bookshelf.dart';
+import '../models/site_bookshelf_entry.dart';
 import '../models/site_script.dart';
 import '../services/logger_service.dart';
 import '../services/site_bookshelf_syncer.dart';
+import '../utils/novel_url_normalizer.dart';
 import '../utils/toast_utils.dart';
 
 class SiteBookshelfRefreshSheet extends ConsumerStatefulWidget {
@@ -197,9 +200,36 @@ class _SiteBookshelfRefreshSheetState
 
       final novelRepo = ref.read(novelRepositoryProvider);
       final bookshelfMut = ref.read(bookshelfMutationProvider.notifier);
+      // 同步前快照本地书架，做"同站同名"模糊去重兜底：手动添加与书架页
+      // 提取的 URL 可能是同站不同变体（www/手机域、详情页 vs 目录页），
+      // URL 归一化也未必命中，靠 站点+书名 判定为已收藏。
+      final existingNovels = await ref
+          .read(bookshelfRepositoryProvider)
+          .getNovelsByBookshelf(BookshelfKind.all);
+      Future<bool> isKnownBook(SiteBookshelfEntry entry) async {
+        final host = Uri.tryParse(entry.url)?.host.toLowerCase() ?? '';
+        if (host.isEmpty) return false;
+        return existingNovels.any((n) {
+          final nHost = Uri.tryParse(n.url)?.host.toLowerCase() ?? '';
+          if (nHost.isEmpty) return false;
+          return NovelUrlNormalizer.sameSiteHost(host, nHost) &&
+              n.title.trim() == entry.title.trim();
+        });
+      }
+
+      // 已存在条目的封面回填：entry.url 可能是已存 URL 的变体，
+      // 先归一化定位到已存原始 URL 再写（updateCoverUrlByUrl 是精确 WHERE）
+      Future<void> backfillCover(String novelUrl, String coverUrl) async {
+        final stored =
+            await novelRepo.findExistingBookshelfUrl(novelUrl) ?? novelUrl;
+        await bookshelfMut.backfillCoverUrl(stored, coverUrl);
+      }
+
       final summary = await SiteBookshelfSyncer.sync(
         entries: entries,
         isInBookshelf: novelRepo.isInBookshelf,
+        isKnownBook: isKnownBook,
+        backfillCover: backfillCover,
         addNovel: bookshelfMut.addNovel,
         progress: (p) {
           if (!mounted) return;

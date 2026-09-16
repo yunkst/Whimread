@@ -35,6 +35,7 @@ import 'services/star_prompt_service.dart';
 import 'widgets/agent_chat/agent_floating_button.dart';
 import 'widgets/app_update_dialog.dart';
 import 'widgets/star_prompt_dialog.dart';
+import 'widgets/startup_splash.dart';
 
 /// 最近记录的全局异常签名（前 200 字符 hash），用于去重。
 /// 同一异常在多层捕获中只记录第一条。
@@ -272,13 +273,11 @@ class NovelReaderApp extends ConsumerWidget {
         );
       },
       loading: () {
-        // 加载中显示默认主题
+        // 主题加载中：品牌开屏层（与原生启动屏同底色，无背景跳变）
         return MaterialApp(
           title: 'Novel App',
           theme: _buildFallbackThemeData(),
-          home: const Center(
-            child: CircularProgressIndicator(),
-          ),
+          home: const AppStartupSplash(),
           debugShowCheckedModeBanner: true,
         );
       },
@@ -321,9 +320,8 @@ class _AppRoot extends ConsumerWidget {
     final onboardingAsync = ref.watch(onboardingNotifierProvider);
 
     return onboardingAsync.when(
-      loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      ),
+      // onboarding 状态读取中：开屏层继续遮，避免深浅主题切换闪帧
+      loading: () => const AppStartupSplash(),
       data: (onboardingState) {
         if (onboardingState.onboardingCompleted) {
           return const _ResourceGate(child: HomePage());
@@ -346,10 +344,12 @@ class _AppRoot extends ConsumerWidget {
 
 /// 动态资源门卫：onboarding 完成后、进首页前，先做一次启动资源校验/下载。
 ///
-/// - 全部就绪（含 sha256 缓存命中，<1s）→ 直接放行；
+/// - 校验期间展示品牌开屏层（与原生启动屏/兜底主题同底色，
+///   资源快路径下全程无背景跳变、无闪烁）；
 /// - 有缺失且用户在本 manifest 版本内跳过过 → 放行（后台静默补下载）；
 /// - 有缺失且未跳过 → 展示 ResourceBootstrapScreen（可跳过/重试）；
-/// - manifest 拉取失败 → 放行（各功能按需降级，不比旧行为差）。
+/// - manifest 拉取失败 → 放行（各功能按需降级，不比旧行为差）；
+/// - 放行时首页在开屏层之上淡入，首页首帧构建被开屏层盖住。
 class _ResourceGate extends ConsumerStatefulWidget {
   final Widget child;
 
@@ -359,7 +359,23 @@ class _ResourceGate extends ConsumerStatefulWidget {
   ConsumerState<_ResourceGate> createState() => _ResourceGateState();
 }
 
-class _ResourceGateState extends ConsumerState<_ResourceGate> {
+class _ResourceGateState extends ConsumerState<_ResourceGate>
+    with SingleTickerProviderStateMixin {
+  /// 放行后首页淡入时长：短到不拖慢感知，足够盖掉首页首帧构建的抖动。
+  static const _revealDuration = Duration(milliseconds: 420);
+
+  late final AnimationController _revealController =
+      AnimationController(vsync: this, duration: _revealDuration)
+        ..addStatusListener((status) {
+          // 淡入结束后把开屏层从渲染树移除，首页独占
+          if (status == AnimationStatus.completed && mounted) {
+            setState(() {});
+          }
+        });
+
+  /// 是否已触发放行淡入（只触发一次）
+  bool _revealArmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -368,25 +384,57 @@ class _ResourceGateState extends ConsumerState<_ResourceGate> {
   }
 
   @override
+  void dispose() {
+    _revealController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = ref.watch(resourceBootstrapNotifierProvider);
 
-    // 全部就绪（或 manifest 拉取失败放行）→ 直接进首页
-    if (state.completed) return widget.child;
-    if (!state.checking) {
-      final notifier = ref.read(resourceBootstrapNotifierProvider.notifier);
-      // 用户跳过过 → 放行（资源在后台静默补下载）
-      if (notifier.skippedThisManifest) return widget.child;
-      // manifest 拉到后各资源逐个校验/下载；仍全部处于校验态时保持加载页，
-      // 任一资源进入下载/失败态（即确实需要下载）才切引导页，
-      // 避免缓存全命中时闪一帧
-      final needsUi = state.items.values
-          .any((s) => s.status != ResourceItemStatus.checking);
-      if (needsUi) return const ResourceBootstrapScreen();
+    if (!state.completed) {
+      if (!state.checking) {
+        final notifier = ref.read(resourceBootstrapNotifierProvider.notifier);
+        // 用户跳过过 → 放行（资源在后台静默补下载）
+        if (notifier.skippedThisManifest) return _buildRevealingChild();
+        // manifest 拉到后各资源逐个校验/下载；仍全部处于校验态时保持
+        // 开屏层，任一资源进入下载/失败态（即确实需要下载）才切引导页，
+        // 避免缓存全命中时闪一帧
+        final needsUi = state.items.values
+            .any((s) => s.status != ResourceItemStatus.checking);
+        if (needsUi) return const ResourceBootstrapScreen();
+      }
+      // 校验中 → 开屏层继续遮
+      return const AppStartupSplash();
     }
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
+
+    return _buildRevealingChild();
+  }
+
+  /// 放行进首页：首页在开屏层之上淡入，替代硬切。
+  Widget _buildRevealingChild() {
+    _armReveal();
+    if (_revealController.isCompleted) return widget.child;
+    return Stack(
+      children: [
+        const Positioned.fill(child: AppStartupSplash()),
+        FadeTransition(
+          opacity: CurvedAnimation(
+              parent: _revealController, curve: Curves.easeOut),
+          child: widget.child,
+        ),
+      ],
     );
+  }
+
+  /// 首帧把 Stack 摆好后再开始淡入，避免首帧即半透明。
+  void _armReveal() {
+    if (_revealArmed) return;
+    _revealArmed = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _revealController.forward();
+    });
   }
 }
 

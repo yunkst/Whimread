@@ -142,7 +142,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln('- chapters 必须按章节顺序从小到大排列（第一章 → 最新章），不要倒序');
     buf.writeln('- cover_url（必填字段，缺失会拒绝落库）：优先 <meta property="og:image" content="...">，其次目录页书籍封面 <img> 的 src / data-src；取绝对 URL（相对路径用 new URL(src, PAGE_URL).href 补全）；确实无封面时返回空串 ""');
     buf.writeln('- 内容返回: { "title": "...", "content": "..." }，content 中段落之间必须用 \\n 分隔');
-    buf.writeln('- 书架脚本（可选，仅在「我的书架/收藏」页运行；用户要求生成时才做）返回: { "novels": [{ "title": "...", "url": "..." }] }。url 应为该站小说目录页绝对路径，便于应用跳转后复用 chapter_list_js。保存用 save_script(script_type="bookshelf", test_url=<书架页>, ocr=false)。');
+    buf.writeln('- 书架脚本（可选，仅在「我的书架/收藏」页运行；用户要求生成时才做）返回: { "novels": [{ "title": "...", "url": "...", "cover_url": "..." }] }。url 应为该站小说目录页绝对路径，便于应用跳转后复用 chapter_list_js。cover_url 为每本书的封面槽位：取书架条目内 <img> 的 src / data-src / data-original（懒加载优先取 data-* 属性），相对路径用 new URL(src, PAGE_URL).href 补全为绝对 URL，确实无封面时返回空串 ""。保存用 save_script(script_type="bookshelf", test_url=<书架页>, ocr=false)。');
     buf.writeln('- 翻页: 检测下一页 → 点击 → await new Promise(r => setTimeout(r, 1000)) → 继续');
     buf.writeln('- 只使用标准 DOM API（querySelector, innerText），不依赖 jQuery/Vue/React');
     buf.writeln('- 跳过广告段落（含本章未完、一秒记住等）');
@@ -1809,6 +1809,21 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
             'reason': 'novel_missing_field',
             'diagnostic': '某 novel 缺少 title 或 url',
             'suggestion': '每个 novel 必须有非空 title 和 url（小说目录页路径）',
+          };
+        }
+      }
+      // cover_url 封面槽位（可选能力、必填键）：与 chapter_list 同语义——
+      // 键必须存在且为字符串（空串允许，书架页确实无封面图时返回 ''），
+      // 防止脚本作者漏提取；解析/同步侧仍按可选处理，兼容旧脚本。
+      for (final n in novels) {
+        if (n is Map && (n['cover_url'] ?? n['coverUrl']) is! String) {
+          return {
+            'reason': 'novel_cover_url_missing',
+            'diagnostic': '某 novel 缺少 cover_url 字段（封面槽位，可为空串）',
+            'suggestion': '每本 novel 加 cover_url 提取：'
+                'const img = 条目元素.querySelector(\'img\'); '
+                'const coverUrl = img ? new URL(img.dataset.src || img.dataset.original || img.src, PAGE_URL).href : \'\'; '
+                '返回 {title, url, cover_url: coverUrl}',
           };
         }
       }

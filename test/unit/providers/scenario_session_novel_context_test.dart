@@ -63,6 +63,10 @@ class _FakeNovelRepository implements INovelRepository {
   Future<bool> isInBookshelf(String novelUrl) => throw UnimplementedError();
 
   @override
+  Future<String?> findExistingBookshelfUrl(String novelUrl) =>
+      throw UnimplementedError();
+
+  @override
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) =>
       throw UnimplementedError();
 

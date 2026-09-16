@@ -51,12 +51,17 @@ class BookshelfMutation extends _$BookshelfMutation {
 
   /// 切换小说的书架归属（在则移除 / 不在则加入）。
   ///
-  /// 内部先查 `isInBookshelf`，再走 add/remove 分支，
-  /// **两分支都经 [_wrap]**，因此 invalidate 一定触发。
+  /// 先按归一化 URL 定位已存行：命中 → 按已存原始 URL 移除（`WHERE url=?`
+  /// 是精确匹配，传入机械变体 URL 会删 0 行且 UI 误以为已移除）；
+  /// 未命中 → 加入。两分支都经 [_wrap]，因此 invalidate 一定触发。
   Future<void> toggleBookshelf(Novel novel) async {
     final writer = _writer;
-    if (await _isInBookshelf(novel.url)) {
-      await _wrap(() => writer.removeFromBookshelf(novel.url));
+    final storedUrl =
+        await ref.read(novelRepositoryProvider).findExistingBookshelfUrl(
+              novel.url,
+            );
+    if (storedUrl != null) {
+      await _wrap(() => writer.removeFromBookshelf(storedUrl));
     } else {
       await _wrap(() => writer.addToBookshelf(novel));
     }
@@ -117,10 +122,6 @@ class BookshelfMutation extends _$BookshelfMutation {
   // ===== 内部 =====
 
   IBookshelfWriter get _writer => ref.read(bookshelfWriterProvider);
-
-  Future<bool> _isInBookshelf(String novelUrl) async {
-    return ref.read(novelRepositoryProvider).isInBookshelf(novelUrl);
-  }
 
   /// 统一收口：写库 + invalidate(bookshelfNovelsProvider)。
   ///

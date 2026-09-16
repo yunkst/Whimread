@@ -403,7 +403,8 @@ class ScenarioSession {
       final list = await repo.listSessionsByScenario(scenarioId, limit: 1);
       if (list.isEmpty) return;
       _sessionId = list.first.id;
-      _ref.read(currentChatSessionIdProvider.notifier).state = _sessionId;
+      _ref.read(currentChatSessionIdProvider(scenarioId).notifier).state =
+          _sessionId;
       LoggerService.instance.i(
         'ScenarioSession [$scenarioId] 复用最近 session id=$_sessionId',
         category: LogCategory.ai,
@@ -440,7 +441,7 @@ class ScenarioSession {
         currentNovelTitle: _currentNovel?.title,
       ));
       _sessionId = id;
-      _ref.read(currentChatSessionIdProvider.notifier).state = id;
+      _ref.read(currentChatSessionIdProvider(scenarioId).notifier).state = id;
       LoggerService.instance.i(
         'ScenarioSession [$scenarioId] 发消息新建 session id=$id',
         category: LogCategory.ai,
@@ -1554,7 +1555,7 @@ class ScenarioSession {
 
   /// 落库单条 agent 消息（user 消息即时落库用）
   Future<void> _persistAgentMessage(ChatMessage m) async {
-    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider);
+    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider(scenarioId));
     if (sid == null) return;
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);
@@ -1581,7 +1582,7 @@ class ScenarioSession {
   /// 整批单事务提交：中途失败全部回滚，不会留下断裂的 ReAct 链。
   Future<void> _persistAgentMessages(List<ChatMessage> msgs,
       {bool partial = false}) async {
-    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider);
+    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider(scenarioId));
     if (sid == null) return;
     try {
       final repo = _ref.read(chatSessionRepositoryProvider);

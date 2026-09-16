@@ -70,15 +70,18 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
     // 事件回流通过 SubagentRunner 内部 agentService.events.add 发到全局流，
     // 本方法不负责转发。
     //
-    // 任务 8 #6 key 对齐：parentSessionId 必须与 ScenarioSession 读取/取消侧
-    // 用的 key 一致——统一为 `currentChatSessionIdProvider.toString()`。
+    // 任务 8 #6 key 对齐：parentSessionId 必须与 SubagentToolCard 反查侧
+    // 用的 key 一致——统一为该场景 scoped 的
+    // `currentChatSessionIdProvider(scenarioId).toString()`。
     // 之前用 scenarioId（String）会导致 SubagentRegistry 的
     // `getByToolCallId(parentSessionId, ...)` 和
     // `cancelAllForSession(parentSessionId)` 找不到 run（两侧 key 不匹配）。
     if (name == 'dispatch_subagent') {
       try {
         final parentSessionId =
-            _ref.read(currentChatSessionIdProvider)?.toString() ?? 'unknown';
+            _ref.read(currentChatSessionIdProvider(ScenarioIds.writing))
+                    ?.toString() ??
+                'unknown';
         return await _ref.read(subagentRunnerProvider).dispatch(
               parentSessionId: parentSessionId,
               task: (args['task'] as String?) ?? '',

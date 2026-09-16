@@ -17,7 +17,16 @@ abstract class INovelRepository {
   ///
   /// [novelUrl] 小说的URL
   /// 返回是否在书架中
+  ///
+  /// URL 机械变体（协议/大小写/尾部斜杠/锚点/默认端口，经
+  /// NovelUrlNormalizer 归一化）视为同一本。
   Future<bool> isInBookshelf(String novelUrl);
+
+  /// 查找书架中与 [novelUrl] 归一化后相同的既有行原始 URL
+  ///
+  /// 书架去重与后续写操作的统一判定入口：命中时返回书架里已存的原始 URL
+  /// （章节缓存/阅读进度须沿用该键写入）；未命中返回 null。
+  Future<String?> findExistingBookshelfUrl(String novelUrl);
 
   /// 更新最后阅读章节
   ///

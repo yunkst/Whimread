@@ -5,6 +5,7 @@
 /// - 空数组 / 缺 novels / 非 Map 顶层 / 非法 JSON → null
 /// - 某项缺 title / url → 跳过该项；全部无效 → null
 /// - title/url 首尾空白 trim
+/// - 可选封面槽位 cover_url（缺失/空串/camelCase/非字符串宽容）
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -75,6 +76,70 @@ void main() {
       expect(out, isNotNull);
       expect(out![0].title, '书名');
       expect(out[0].url, 'https://a.com/x');
+    });
+
+    // ===== 封面槽位（可选 cover_url） =====
+
+    test('cover_url 存在 → 解析进 coverUrl', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [
+          {"title": "书A", "url": "https://a.com/1",
+           "cover_url": "https://a.com/img/1.jpg"}
+        ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out![0].coverUrl, 'https://a.com/img/1.jpg');
+    });
+
+    test('cover_url 为空串 → coverUrl 为 null（不视为解析失败）', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [ {"title": "书A", "url": "https://a.com/1", "cover_url": ""} ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out![0].coverUrl, isNull);
+    });
+
+    test('cover_url 缺失（旧脚本）→ coverUrl 为 null', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [ {"title": "书A", "url": "https://a.com/1"} ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out![0].coverUrl, isNull);
+    });
+
+    test('coverUrl camelCase 兜底', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [
+          {"title": "书A", "url": "https://a.com/1",
+           "coverUrl": "https://a.com/img/camel.jpg"}
+        ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out![0].coverUrl, 'https://a.com/img/camel.jpg');
+    });
+
+    test('cover_url 非字符串类型 → toString 宽容处理，不炸解析', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [
+          {"title": "书A", "url": "https://a.com/1", "cover_url": 123},
+          {"title": "书B", "url": "https://a.com/2", "cover_url": null}
+        ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out, hasLength(2));
+      expect(out![0].coverUrl, '123');
+      expect(out[1].coverUrl, isNull);
+    });
+
+    test('cover_url 首尾空白 trim', () {
+      final out = SiteBookshelfParser.parse('''
+        { "novels": [
+          {"title": "书A", "url": "https://a.com/1",
+           "cover_url": "  https://a.com/img/trim.jpg  "}
+        ] }
+      ''');
+      expect(out, isNotNull);
+      expect(out![0].coverUrl, 'https://a.com/img/trim.jpg');
     });
   });
 }

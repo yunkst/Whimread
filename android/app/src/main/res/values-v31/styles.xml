@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 系统 splash（API 31 qualifier，优先生效于 values 与
+         values-night 的 LaunchTheme）：背景色对齐开屏层炭纸，
+         splash 图标沿用默认 launcher icon，与下方 launch_background
+         的居中图标在视觉上连续。 -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_bg</item>
+    </style>
+</resources>

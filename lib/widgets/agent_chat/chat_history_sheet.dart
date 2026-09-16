@@ -21,7 +21,7 @@ class ChatHistorySheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sessionsAsync = ref.watch(chatSessionsByScenarioProvider(scenarioId));
-    final currentSessionId = ref.watch(currentChatSessionIdProvider);
+    final currentSessionId = ref.watch(currentChatSessionIdProvider(scenarioId));
     // 当前会话是否运行中（用于禁用列表中其它项的切换）
     final running = ref.watch(scenarioSessionsProvider.notifier).isRunning(scenarioId);
     final theme = Theme.of(context);

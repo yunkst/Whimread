@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动屏/开屏层统一背景（暗夜书馆炭纸），
+         与 lib/widgets/startup_splash.dart 的 kStartupSplashBackground 对齐 -->
+    <color name="launch_bg">#FF241F16</color>
+</resources>

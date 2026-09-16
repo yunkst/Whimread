@@ -29,7 +29,7 @@ class ChatHistoryListItem extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final currentId = ref.watch(currentChatSessionIdProvider);
+    final currentId = ref.watch(currentChatSessionIdProvider(scenarioId));
     final selected = isCurrent || currentId == session.id;
 
     return ListTile(
@@ -96,8 +96,9 @@ class ChatHistoryListItem extends ConsumerWidget {
       // isRunning 仅用于"进行中"徽章展示（下方 if 子句）；切会话不再禁用——
       // ScenarioSession.adoptSession 内部 cancel 老 agent 兜底避免数据污染。
       onTap: () async {
-        // 切换当前 session
-        ref.read(currentChatSessionIdProvider.notifier).state = session.id;
+        // 切换当前 session（scoped 到本场景）
+        ref.read(currentChatSessionIdProvider(scenarioId).notifier).state =
+            session.id;
         // 通知 ScenarioSession 重新 hydrate（内部 cancel + reload）
         await ref
             .read(scenarioSessionsProvider.notifier)

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:novel_app/core/providers/agent_scenario_provider.dart';
 import 'package:novel_app/core/providers/chat_session_providers.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/agent_chat_message.dart';
@@ -216,7 +217,11 @@ class AgentMessageBubble extends ConsumerWidget {
     if (segments.isEmpty) return const SizedBox.shrink();
 
     final lastIndex = segments.length - 1;
-    final sessionId = ref.watch(currentChatSessionIdProvider)?.toString() ?? '';
+    // subagent 反查 key 与 WritingScenario dispatch 侧对齐：
+    // 双方都读「该场景 scoped 的 current 会话 id」
+    final scenarioId = ref.watch(currentAgentScenarioProvider);
+    final sessionId =
+        ref.watch(currentChatSessionIdProvider(scenarioId))?.toString() ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

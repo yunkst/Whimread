@@ -141,7 +141,9 @@ class _ScenarioMenu extends ConsumerWidget {
         }
         // scenarioId -> 切场景（沿用现有 agent_chat_dialog 切换逻辑）
         ref.read(currentAgentScenarioProvider.notifier).state = value;
-        ref.read(currentChatSessionIdProvider.notifier).state = null;
+        // 会话 id 按场景隔离：只重置目标场景的"当前会话"，
+        // 让 get(value) 从该场景自己的最近会话 hydrate
+        ref.read(currentChatSessionIdProvider(value).notifier).state = null;
         ref.read(scenarioSessionsProvider.notifier).get(value);
       },
       itemBuilder: (_) => [

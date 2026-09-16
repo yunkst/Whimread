@@ -45,8 +45,10 @@ class ScenarioSessionsNotifier
 
   /// 获取指定场景的 session（懒创建）。
   ///
-  /// 第一次调用时，如果当前已经有选中的 sessionId（来自 currentChatSessionIdProvider），
-  /// 用它；否则传 null，让 ScenarioSession 自身从 DB 选最近一个。
+  /// 第一次调用时，如果该场景已经有选中的 sessionId（来自
+  /// currentChatSessionIdProvider(scenarioId)，按场景隔离），用它；
+  /// 否则传 null，让 ScenarioSession 自身从 DB 选该场景最近一个。
+  /// 其他场景选中的会话 id 不会被读到——这是场景上下文隔离的关键。
   ScenarioSession get(String scenarioId) {
     // 更新访问顺序
     _accessOrder.remove(scenarioId);
@@ -63,7 +65,7 @@ class ScenarioSessionsNotifier
       tags: ['sessions', 'create', scenarioId],
     );
 
-    final initialSessionId = _ref.read(currentChatSessionIdProvider);
+    final initialSessionId = _ref.read(currentChatSessionIdProvider(scenarioId));
     final session = ScenarioSession(
       scenarioId: scenarioId,
       initialSessionId: initialSessionId,
@@ -125,7 +127,7 @@ class ScenarioSessionsNotifier
     final id = await repo.createSession(
       ChatSession(scenarioId: scenarioId, title: ''),
     );
-    _ref.read(currentChatSessionIdProvider.notifier).state = id;
+    _ref.read(currentChatSessionIdProvider(scenarioId).notifier).state = id;
     await switchSession(scenarioId, id); // adoptSession + hydrateIfNeeded
     _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
   }
@@ -245,13 +247,14 @@ final scenarioSessionsProvider =
 /// UI 层不直接感知 ScenarioSession 的存在，
 /// 只通过这个 Provider 读取当前场景的 AgentChatState。
 ///
-/// 同时 watch `currentAgentScenarioProvider`（场景）和 `currentChatSessionIdProvider`
+/// 同时 watch `currentAgentScenarioProvider`（场景）和该场景的
+/// `currentChatSessionIdProvider(scenarioId)`
 /// （会话 id）：sessionId 在 ScenarioSession 内部异步解析（冷启动选最近 / 首条消息新建）
 /// 时会被写回，此时 sessions state 尚未携带新 messages，watch sessionId 可让 UI 立即
 /// 反映「已选中某 session」并等待 hydrate 推送的二次重建。
 final currentChatStateProvider = Provider<AgentChatState>((ref) {
   final scenarioId = ref.watch(currentAgentScenarioProvider);
-  ref.watch(currentChatSessionIdProvider);
+  ref.watch(currentChatSessionIdProvider(scenarioId));
   final sessions = ref.watch(scenarioSessionsProvider);
   return sessions[scenarioId] ??
       AgentChatState(
@@ -268,8 +271,9 @@ final currentChatStateProvider = Provider<AgentChatState>((ref) {
 ///
 /// 懒创建：首次访问时自动创建对应场景的 ScenarioSession。
 ///
-/// 会话 id 切换由调用方负责：UI 写入 `currentChatSessionIdProvider` 后再调用
-/// `scenarioSessionsProvider.notifier.switchSession(...)` 触发 in-memory reload。
+/// 会话 id 切换由调用方负责：UI 写入 `currentChatSessionIdProvider(scenarioId)`
+/// 后再调用 `scenarioSessionsProvider.notifier.switchSession(...)`
+/// 触发 in-memory reload。
 final currentSessionProvider = Provider<ScenarioSession?>((ref) {
   final scenarioId = ref.watch(currentAgentScenarioProvider);
   final notifier = ref.read(scenarioSessionsProvider.notifier);

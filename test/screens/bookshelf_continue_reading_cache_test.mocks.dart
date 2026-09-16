@@ -63,6 +63,16 @@ class MockINovelRepository extends _i1.Mock implements _i3.INovelRepository {
       ) as _i4.Future<bool>);
 
   @override
+  _i4.Future<String?> findExistingBookshelfUrl(String? novelUrl) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #findExistingBookshelfUrl,
+          [novelUrl],
+        ),
+        returnValue: _i4.Future<String?>.value(),
+      ) as _i4.Future<String?>);
+
+  @override
   _i4.Future<int> updateLastReadChapter(
     String? novelUrl,
     int? chapterIndex,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers/agent_scenario_provider.dart';
 import '../../core/providers/chat_session_providers.dart';
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/providers/agent_chat_state.dart';
@@ -126,6 +127,8 @@ class _AgentChatMessagesState extends ConsumerState<AgentChatMessages> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(currentChatStateProvider);
+    // 会话 id 按场景隔离：只监听当前场景的"当前会话"变化
+    final scenarioId = ref.watch(currentAgentScenarioProvider);
     final colors = context.appColors;
     final isEmpty =
         chatState.messages.isEmpty && chatState.streamingSegments.isEmpty;
@@ -146,7 +149,7 @@ class _AgentChatMessagesState extends ConsumerState<AgentChatMessages> {
     });
 
     // 切换会话（历史抽屉选中另一条 / 新建会话）：无条件跳到新会话最新消息
-    ref.listen<int?>(currentChatSessionIdProvider, (prev, next) {
+    ref.listen<int?>(currentChatSessionIdProvider(scenarioId), (prev, next) {
       if (prev == next) return;
       _followBottom = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {

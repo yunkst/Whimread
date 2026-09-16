@@ -76,4 +76,14 @@ void main() {
     expect(prompt,
         contains('save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=..., display_name='));
   });
+
+  test('prompt 书架脚本契约含封面槽位（cover_url）说明', () {
+    final scenario = buildScenario();
+    final prompt = scenario.buildSystemPrompt(testContext());
+
+    // 书架脚本的封面槽位：字段名、懒加载属性指引、空串语义
+    expect(prompt, contains('"cover_url"'));
+    expect(prompt, contains('封面槽位'));
+    expect(prompt, contains('data-original'));
+  });
 }

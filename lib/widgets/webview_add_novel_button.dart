@@ -236,14 +236,15 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
         return;
       }
 
-      // 6. 检查是否已在书架
+      // 6. 检查是否已在书架（归一化宽松匹配；命中则沿用已存原始 URL 作为
+      //    后续写键——章节缓存/进度都以它为键，避免变体 URL 写散、书架重复）
       final novelRepo = ref.read(novelRepositoryProvider);
-      final alreadyInBookshelf = await novelRepo.isInBookshelf(currentUrl);
+      final storedUrl = await novelRepo.findExistingBookshelfUrl(currentUrl);
 
-      if (alreadyInBookshelf) {
+      if (storedUrl != null) {
         // 已存在：静默更新章节 + 封面回填后直接跳转
-        await _saveChapters(currentUrl, chapters);
-        await _backfillCoverUrl(currentUrl, extractedCoverUrl);
+        await _saveChapters(storedUrl, chapters);
+        await _backfillCoverUrl(storedUrl, extractedCoverUrl);
         _markScriptUsed(script.id);
         _toast('章节已更新');
         if (mounted) {
@@ -251,7 +252,7 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
           _navigateToChapterList(context, Novel(
             title: extractedTitle,
             author: '',
-            url: currentUrl,
+            url: storedUrl,
           ));
         }
         return;

@@ -6,7 +6,8 @@
 ///   backfillCoverUrl / updateReadProgress / createNovel）
 /// - 每次成功 → 对应 writer 方法被调一次 + `bookshelfNovelsProvider` 被 invalidate
 /// - writer 抛异常 → 异常向上抛 + **不** invalidate（避免半真半假 UI）
-/// - toggleBookshelf 双分支：isInBookshelf=true → remove / false → add
+/// - toggleBookshelf 双分支：已存在（findExistingBookshelfUrl 命中）→ 按已存
+///   URL remove / 未命中 → add
 ///
 /// 新设计：不再有 moveToBookshelf / copyToBookshelf ——书架分类由 URL 派生，
 /// 不存在"把小说从 A 书架搬到 B 书架"的概念。
@@ -277,28 +278,31 @@ void main() {
   });
 
   // ============================================================
-  // toggleBookshelf —— 双分支
+  // toggleBookshelf —— 双分支（按归一化定位的已存 URL 收口）
   // ============================================================
   group('toggleBookshelf', () {
-    test('isInBookshelf=true → removeFromBookshelf + invalidate', () async {
-      when(mockNovelRepo.isInBookshelf('u1')).thenAnswer((_) async => true);
+    test('已存在 → 按已存原始 URL removeFromBookshelf + invalidate', () async {
+      // 传入变体 URL，命中已存行：移除必须用已存 URL（精确 WHERE）
+      when(mockNovelRepo.findExistingBookshelfUrl('https://a.com/1/'))
+          .thenAnswer((_) async => 'https://a.com/1');
 
       final before = novelsReloadCount;
 
-      final novel = makeNovel(url: 'u1');
+      final novel = makeNovel(url: 'https://a.com/1/');
       await container.read(bookshelfMutationProvider.notifier).toggleBookshelf(novel);
 
       await container.read(bookshelfNovelsProvider.future);
 
-      verify(mockNovelRepo.isInBookshelf('u1')).called(1);
+      verify(mockNovelRepo.findExistingBookshelfUrl('https://a.com/1/')).called(1);
       expect(fakeWriter.removeFromBookshelfCalls, 1);
-      expect(fakeWriter.lastRemovedUrl, 'u1');
+      expect(fakeWriter.lastRemovedUrl, 'https://a.com/1');
       expect(fakeWriter.addToBookshelfCalls, 0);
       expect(novelsReloadCount, greaterThan(before));
     });
 
-    test('isInBookshelf=false → addToBookshelf + invalidate', () async {
-      when(mockNovelRepo.isInBookshelf('u2')).thenAnswer((_) async => false);
+    test('不存在 → addToBookshelf + invalidate', () async {
+      when(mockNovelRepo.findExistingBookshelfUrl('u2'))
+          .thenAnswer((_) async => null);
 
       final before = novelsReloadCount;
 
@@ -314,7 +318,8 @@ void main() {
     });
 
     test('remove 分支 writer 抛异常 → 上抛 + 不 invalidate', () async {
-      when(mockNovelRepo.isInBookshelf('u1')).thenAnswer((_) async => true);
+      when(mockNovelRepo.findExistingBookshelfUrl('u1'))
+          .thenAnswer((_) async => 'u1');
       fakeWriter.throwOnce = StateError('db error');
 
       final before = novelsReloadCount;

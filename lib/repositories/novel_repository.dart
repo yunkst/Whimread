@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/novel.dart';
 import '../services/logger_service.dart';
 import '../core/interfaces/repositories/i_novel_repository.dart';
+import '../utils/novel_url_normalizer.dart';
 import 'base_repository.dart';
 
 /// 书架写操作能力接口（[NovelRepository] 实现，不导出）。
@@ -46,14 +47,20 @@ class NovelRepository extends BaseRepository
 
   /// 添加小说到书架
   ///
+  /// 先按归一化 URL 查重（手动添加与书架同步对同一本书常拿到 URL 机械变体，
+  /// 逐字比较会让书架出现两行同一本书）；命中则走既有行刷新分支。
   /// URL 已存在时**不删旧插新**（旧 ConflictAlgorithm.replace 会静默清空
   /// lastReadChapter/lastReadTime/coverMediaId，2026-09 审查 P1）：
-  /// 只刷新内容元数据；coverMediaId 仅在新值非空时覆盖；
+  /// 只刷新内容元数据；coverUrl/coverMediaId 仅在新值非空时覆盖；
   /// 返回既有行的 id，调用方（Agent create_novel 等）拿到的 id 语义不变。
   @override
   Future<int> addToBookshelf(Novel novel) async {
     try {
       final db = await database;
+      final existingUrl = await findExistingBookshelfUrl(novel.url);
+      if (existingUrl != null) {
+        return await _refreshExistingRow(db, existingUrl, novel);
+      }
       final inserted = await db.insert(
         'bookshelf',
         {
@@ -78,39 +85,7 @@ class NovelRepository extends BaseRepository
         return inserted;
       }
 
-      // 已存在:刷新元数据,阅读进度字段(lastReadChapter/lastReadTime)不触碰
-      final updateMap = <String, dynamic>{
-        'title': novel.title,
-        'author': novel.author,
-        'coverUrl': novel.coverUrl,
-        'description': novel.description,
-        'backgroundSetting': novel.backgroundSetting,
-      };
-      if (novel.coverMediaId != null) {
-        updateMap['coverMediaId'] = novel.coverMediaId;
-      }
-      await db.update(
-        'bookshelf',
-        updateMap,
-        where: 'url = ?',
-        whereArgs: [novel.url],
-      );
-
-      final rows = await db.query(
-        'bookshelf',
-        columns: ['id'],
-        where: 'url = ?',
-        whereArgs: [novel.url],
-        limit: 1,
-      );
-      final existingId = rows.isEmpty ? 0 : (rows.first['id'] as int? ?? 0);
-
-      LoggerService.instance.i(
-        '小说已存在,刷新元数据: ${novel.title} (id=$existingId)',
-        category: LogCategory.database,
-        tags: ['novel', 'add', 'existing_refreshed'],
-      );
-      return existingId;
+      return await _refreshExistingRow(db, novel.url, novel);
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         '添加小说到书架失败: ${novel.title} - $e',
@@ -120,6 +95,51 @@ class NovelRepository extends BaseRepository
       );
       rethrow;
     }
+  }
+
+  /// 已存在行的元数据刷新（阅读进度字段 lastReadChapter/lastReadTime 不触碰）
+  ///
+  /// [storedUrl] 书架中已存的原始 URL，更新与回查 id 都以它为键。
+  /// coverUrl 仅在新值非空时覆盖（空值保留原值，与 coverMediaId、
+  /// updateCoverUrlByUrl 同语义）：书架同步的旧脚本不带封面槽位，
+  /// 若无条件覆盖会把既有封面静默抹成 null。
+  Future<int> _refreshExistingRow(
+      Database db, String storedUrl, Novel novel) async {
+    final updateMap = <String, dynamic>{
+      'title': novel.title,
+      'author': novel.author,
+      'description': novel.description,
+      'backgroundSetting': novel.backgroundSetting,
+    };
+    final cover = novel.coverUrl?.trim();
+    if (cover != null && cover.isNotEmpty) {
+      updateMap['coverUrl'] = cover;
+    }
+    if (novel.coverMediaId != null) {
+      updateMap['coverMediaId'] = novel.coverMediaId;
+    }
+    await db.update(
+      'bookshelf',
+      updateMap,
+      where: 'url = ?',
+      whereArgs: [storedUrl],
+    );
+
+    final rows = await db.query(
+      'bookshelf',
+      columns: ['id'],
+      where: 'url = ?',
+      whereArgs: [storedUrl],
+      limit: 1,
+    );
+    final existingId = rows.isEmpty ? 0 : (rows.first['id'] as int? ?? 0);
+
+    LoggerService.instance.i(
+      '小说已存在,刷新元数据: ${novel.title} (id=$existingId)',
+      category: LogCategory.database,
+      tags: ['novel', 'add', 'existing_refreshed'],
+    );
+    return existingId;
   }
 
   /// 从书架移除小说
@@ -181,6 +201,9 @@ class NovelRepository extends BaseRepository
   }
 
   /// 检查小说是否在书架中
+  ///
+  /// 精确匹配走 SQL 快路径；未命中再按归一化 URL 兜底（书架为个人数据，
+  /// 行数量级小，Dart 侧扫描可接受）。
   @override
   Future<bool> isInBookshelf(String novelUrl) async {
     final db = await database;
@@ -188,8 +211,29 @@ class NovelRepository extends BaseRepository
       'bookshelf',
       where: 'url = ?',
       whereArgs: [novelUrl],
+      limit: 1,
     );
-    return maps.isNotEmpty;
+    if (maps.isNotEmpty) return true;
+    return await findExistingBookshelfUrl(novelUrl) != null;
+  }
+
+  /// 查找书架中与 [novelUrl] 归一化后相同的既有行原始 URL
+  ///
+  /// 手动添加存浏览器当前页 URL，书架同步存页面提取的 href，同一本书
+  /// 两者常有机械差异（协议/大小写/尾部斜杠/锚点/默认端口），逐字比较
+  /// 会产生重复条目。命中时返回已存原始 URL——后续章节缓存、阅读进度、
+  /// 移除操作都必须沿用该键，避免关联数据写散到两个 URL 下。
+  @override
+  Future<String?> findExistingBookshelfUrl(String novelUrl) async {
+    final db = await database;
+    final rows = await db.query('bookshelf', columns: ['url']);
+    for (final row in rows) {
+      final stored = row['url'] as String?;
+      if (stored != null && NovelUrlNormalizer.looselyEquals(stored, novelUrl)) {
+        return stored;
+      }
+    }
+    return null;
   }
 
   /// 更新最后阅读章节
