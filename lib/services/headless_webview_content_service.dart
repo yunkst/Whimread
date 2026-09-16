@@ -125,7 +125,7 @@ class HeadlessWebViewContentService {
         LoggerService.instance.i(
           'HeadlessWebView: 高优先级请求抢占，通知低优先级让出 '
           'newUrl=$chapterUrl currentUrl=$_currentFetchingUrl',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'preempt'],
         );
         // 等待低优先级请求退出
@@ -134,7 +134,7 @@ class HeadlessWebViewContentService {
           // 等待超时，返回 busy
           LoggerService.instance.w(
             'HeadlessWebView: 等待让出超时，返回 busy',
-            category: LogCategory.cache,
+            category: LogCategory.crawler,
             tags: ['headless-webview', 'yield-timeout'],
           );
           return FetchContentResult.busy();
@@ -146,7 +146,7 @@ class HeadlessWebViewContentService {
           LoggerService.instance.w(
             'HeadlessWebView: 让出后被并发抢占者抢先，返回 busy '
             'newUrl=$chapterUrl currentUrl=$_currentFetchingUrl',
-            category: LogCategory.cache,
+            category: LogCategory.crawler,
             tags: ['headless-webview', 'preempt', 'lost_race'],
           );
           return FetchContentResult.busy();
@@ -156,7 +156,7 @@ class HeadlessWebViewContentService {
         LoggerService.instance.w(
           'HeadlessWebView: WebView 忙碌，无法抢占 '
           'priority=$priority currentPriority=$_currentPriority',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'busy'],
         );
         return FetchContentResult.busy();
@@ -192,7 +192,7 @@ class HeadlessWebViewContentService {
       LoggerService.instance.i(
         'HeadlessWebView: 开始获取 domain=$domain url=$chapterUrl '
         'priority=$priority',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'fetch'],
       );
 
@@ -203,7 +203,7 @@ class HeadlessWebViewContentService {
       if (_shouldYield) {
         LoggerService.instance.i(
           'HeadlessWebView: 页面加载后被抢占让出 url=$chapterUrl',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'yield'],
         );
         return FetchContentResult.busy();
@@ -219,7 +219,7 @@ class HeadlessWebViewContentService {
       if (_shouldYield) {
         LoggerService.instance.i(
           'HeadlessWebView: 脚本执行后被抢占让出 url=$chapterUrl',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'yield'],
         );
         return FetchContentResult.busy();
@@ -230,7 +230,7 @@ class HeadlessWebViewContentService {
         _recordFailure(script.id);
         LoggerService.instance.w(
           'HeadlessWebView: 脚本返回空内容 domain=$domain',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'empty-result'],
         );
         return FetchContentResult.noScript();
@@ -240,7 +240,7 @@ class HeadlessWebViewContentService {
         _recordFailure(script.id);
         LoggerService.instance.w(
           'HeadlessWebView: 内容过短(${result.content.length}字符) domain=$domain',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'short-content'],
         );
         return FetchContentResult.noScript();
@@ -251,7 +251,7 @@ class HeadlessWebViewContentService {
 
       LoggerService.instance.i(
         'HeadlessWebView: 获取成功 domain=$domain len=${result.content.length}',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'success'],
       );
 
@@ -280,7 +280,7 @@ class HeadlessWebViewContentService {
       if (scriptId != null) _recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebView: 页面加载失败，返回 loadFailed domain=$logDomain url=$chapterUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'fetch', 'load-failed'],
       );
       return FetchContentResult.loadFailed();
@@ -292,7 +292,7 @@ class HeadlessWebViewContentService {
           'HeadlessWebView: 脚本结果 JSON 解析失败（脚本缺陷），返回 scriptError '
           'domain=$logDomain scriptId=$scriptId error=$e',
           stackTrace: stackTrace.toString(),
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'fetch', 'script_error'],
         );
         return FetchContentResult.scriptError();
@@ -301,7 +301,7 @@ class HeadlessWebViewContentService {
         'HeadlessWebView: 获取失败（catch 返回 loadFailed，区分于"真无脚本"） '
         'domain=$logDomain scriptId=$scriptId error=$e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'fetch', 'failed_load_failed'],
       );
       return FetchContentResult.loadFailed();
@@ -350,7 +350,7 @@ class HeadlessWebViewContentService {
       LoggerService.instance.w(
         'HeadlessWebView OCR 跳过：fontFamily 为空，降级返回原文'
         '（可能脚本未返回 font_family 或 DOM 变更）',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'ocr', 'skip-empty-font'],
       );
       return content;
@@ -359,7 +359,7 @@ class HeadlessWebViewContentService {
       final r = await restoreService.restorePuaInText(content, fontFamily);
       LoggerService.instance.i(
         'HeadlessWebView OCR 还原: decoded=${r.decodedCount}/${r.totalPuaCount}',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'ocr', 'restore'],
       );
       return r.text;
@@ -367,7 +367,7 @@ class HeadlessWebViewContentService {
       LoggerService.instance.w(
         'HeadlessWebView OCR 还原失败，降级返回原文: $e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'ocr', 'restore-failed'],
       );
       return content; // 降级
@@ -392,7 +392,7 @@ class HeadlessWebViewContentService {
     } on TimeoutException {
       LoggerService.instance.d(
         'HeadlessWebView: 等待让出超时（5s Completer）',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'wait_yield', 'timeout'],
       );
       return false;
@@ -419,7 +419,7 @@ class HeadlessWebViewContentService {
       // 展示模式切换：销毁重建（服务生命周期与页面导航对齐，重建代价可控）
       LoggerService.instance.i(
         'HeadlessWebView: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'recreate', 'desktop-mode'],
       );
       _headlessWebView?.dispose();
@@ -435,7 +435,7 @@ class HeadlessWebViewContentService {
       }
       LoggerService.instance.w(
         'HeadlessWebView: 初始化超时（30s 轮询）',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'init', 'timeout'],
       );
       throw Exception('HeadlessWebView 初始化超时');
@@ -476,7 +476,7 @@ class HeadlessWebViewContentService {
 
       LoggerService.instance.i(
         'HeadlessWebView: 初始化完成',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'init'],
       );
     } catch (e, stackTrace) {
@@ -487,7 +487,7 @@ class HeadlessWebViewContentService {
       LoggerService.instance.e(
         'HeadlessWebView: 初始化失败 $e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'init', 'failed'],
       );
       rethrow;
@@ -523,7 +523,7 @@ class HeadlessWebViewContentService {
     if (validationError != null) {
       LoggerService.instance.w(
         'HeadlessWebView: 脚本校验失败 $validationError',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'validation'],
       );
       return null;
@@ -551,7 +551,7 @@ class HeadlessWebViewContentService {
         if (result.error != null) {
           LoggerService.instance.w(
             'HeadlessWebView: JS执行错误 ${result.error}',
-            category: LogCategory.cache,
+            category: LogCategory.crawler,
             tags: ['headless-webview', 'js-error'],
           );
           return null;
@@ -591,7 +591,7 @@ class HeadlessWebViewContentService {
     // 整体 120 秒超时
     LoggerService.instance.w(
       'HeadlessWebView: 脚本执行整体超时（120s） pageUrl=$pageUrl',
-      category: LogCategory.cache,
+      category: LogCategory.crawler,
       tags: ['headless-webview', 'execute_script', 'timeout'],
     );
     return null;
@@ -617,7 +617,7 @@ class HeadlessWebViewContentService {
     if (count >= _maxConsecutiveFailures) {
       LoggerService.instance.w(
         'HeadlessWebView: 脚本连续失败$count次，自动标记 unverified id=$scriptId',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'auto-disable'],
       );
       _scriptRepo.setVerified(scriptId, false);

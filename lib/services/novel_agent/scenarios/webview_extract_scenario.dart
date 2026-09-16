@@ -189,10 +189,11 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
     buf.writeln('## 脚本实际使用日志');
     buf.writeln('脚本在对话中 execute_js 跑通，不代表真实使用也能成功。用 get_script_logs 查看实际运行日志：');
-    buf.writeln('- get_script_logs(domain) → 查看脚本在阅读器/预加载等真实场景的运行日志');
+    buf.writeln('- get_script_logs() → 无参数，返回最近 30 条爬虫运行日志（时间倒序）');
+    buf.writeln('- get_script_logs(outcome="failure") → 只看失败记录；outcome="success" 只看成功记录');
     buf.writeln('- 适用：execute_js 通过但用户反馈抓取失败（内容为空、超时、页面结构变化）');
-    buf.writeln('- 日志来源：阅读器获取章节内容、FAB 添加小说、预加载等非对话场景');
-    buf.writeln('- 默认返回 warning 及以上级别（只看问题），填 level=info 可看成功记录');
+    buf.writeln('- 日志来源：阅读器获取章节内容、FAB 添加小说、获取站点书架等非对话场景');
+    buf.writeln('- 消息中含 domain=xxx，可自行按域名区分不同网站');
     buf.writeln();
 
     if (cachedMemories.isNotEmpty) {
@@ -2022,66 +2023,48 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     return jsonEncode(snap);
   }
 
-  /// 查询指定域名的提取脚本在实际使用中的运行日志
+  /// 查询爬虫运行日志（LogCategory.crawler，最近 30 条，可按成功/失败筛选）
   ///
   /// AI 在对话中用 execute_js 测试脚本时，脚本能跑通不代表真实使用也能成功。
-  /// 本工具让 AI 查看 HeadlessWebView 在阅读器/FAB/预加载等真实场景中
+  /// 本工具让 AI 查看 HeadlessWebView 在阅读器/FAB添加小说/获取书架等真实场景中
   /// 执行脚本时的错误、超时、空结果等日志，定位"脚本能跑通但实际抓取失败"的问题。
   ///
-  /// 日志来源：
-  /// - HeadlessWebViewContentService（阅读器获取章节内容）
-  /// - HeadlessWebViewChapterListService（FAB 添加小说获取目录）
-  /// - 预加载服务
+  /// 数据来源：所有 category=crawler 的日志（章节内容/目录/书架获取、
+  /// WebView 池、脚本面板试运行、预加载抓取）。
   ///
-  /// 过滤策略：先按 tag `headless-webview` 过滤（覆盖 ContentService 和
-  /// ChapterListService 的日志），再按 domain 关键词 + 级别过滤。
-  Future<String> _getScriptLogs(Map<String, dynamic> args) async {
-    // 1. 解析参数
-    final domain = args['domain'] as String? ??
-        Uri.tryParse(_currentUrl)?.host ??
-        '';
-    final levelStr = args['level'] as String? ?? 'warning';
-    final limit = (args['limit'] as int?)?.clamp(1, 30) ?? 10;
+  /// 筛选规则：
+  /// - success → 带 success 标签的成功记录
+  /// - failure → 级别 ≥ warning 的记录（爬虫栈中 warning/error 均代表失败或异常）
+  /// - all（默认）→ 不过滤
+  Future<String> _getScriptLogs([Map<String, dynamic>? args]) async {
+    final outcome = args?['outcome'] as String? ?? 'all';
+    final sorted = LoggerService.instance
+        .getLogsByCategory(LogCategory.crawler)
+        .reversed
+        .where((log) {
+      switch (outcome) {
+        case 'success':
+          return log.tags.contains('success');
+        case 'failure':
+          return log.level.index >= LogLevel.warning.index;
+        default:
+          return true;
+      }
+    }).take(30).toList();
 
-    if (domain.isEmpty) {
-      return jsonEncode({
-        'error': 'missing_domain',
-        'message': '无法确定域名',
-        'current_url': _currentUrl,
-        'suggestion': '请传入 domain 参数（如 "www.example.com"）',
-      });
-    }
-
-    // 2. 级别映射
-    final minLevel = _parseLogLevel(levelStr);
-
-    // 3. 从 LoggerService 获取日志
-    //    策略：先按 tag 'headless-webview' 过滤，再按 domain 关键词 + 级别过滤
-    final logs = LoggerService.instance.getLogsByTag('headless-webview');
-    final filtered = logs
-        .where((log) =>
-            log.level.index >= minLevel.index &&
-            log.message.contains(domain))
-        .toList();
-
-    // 按时间倒序（最新在前）
-    final sorted = filtered.reversed.take(limit).toList();
-
-    // 4. 格式化返回
     if (sorted.isEmpty) {
       return jsonEncode({
         'found': false,
-        'domain': domain,
-        'message': '该域名无 headless-webview 运行日志（可能尚未在阅读器中使用过，或日志已被清理）',
+        'outcome': outcome,
+        'message': '暂无爬虫运行日志（可能尚未在阅读器中使用过，或日志已被清理）',
         'suggestion': '如果脚本刚保存，需要在阅读器中打开该网站的章节后才会产生运行日志',
       });
     }
 
     return jsonEncode({
       'found': true,
-      'domain': domain,
+      'outcome': outcome,
       'count': sorted.length,
-      'total_matching': filtered.length,
       'logs': sorted.map((log) {
         final msg = log.message.length > 300
             ? '${log.message.substring(0, 300)}...'
@@ -2090,26 +2073,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           'time': LoggerService.formatTimestamp(log.timestamp),
           'level': log.level.label,
           'message': msg,
-          'tags': log.tags.where((t) => t != 'headless-webview').toList(),
+          'tags': log.tags,
         };
       }).toList(),
     });
-  }
-
-  /// 解析日志级别字符串为 LogLevel 枚举
-  LogLevel _parseLogLevel(String level) {
-    switch (level) {
-      case 'error':
-        return LogLevel.error;
-      case 'warning':
-        return LogLevel.warning;
-      case 'info':
-        return LogLevel.info;
-      case 'debug':
-        return LogLevel.debug;
-      default:
-        return LogLevel.warning;
-    }
   }
 
   // ===== DOM 精简脚本 =====
@@ -2410,28 +2377,20 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     'function': {
       'name': 'get_script_logs',
       'description':
-          '查询指定域名的提取脚本在实际使用中的运行日志。'
+          '查询爬虫运行日志的最近 30 条记录（按时间倒序）。'
           '用于诊断"execute_js 能跑通但实际抓取失败"的问题——查看 HeadlessWebView '
-          '在阅读器/FAB/预加载等真实场景中执行脚本时的错误、超时、空结果、内容过短等记录。'
-          '返回最近 N 条匹配日志（按时间倒序），每条含时间戳、级别、消息摘要。'
+          '在阅读器/FAB添加小说/获取书架等真实场景中执行脚本时的错误、超时、空结果等记录。'
+          '每条含时间戳、级别、消息摘要（消息中含 domain= 可自行区分站点）。'
           '注意：日志来自真实使用场景（非当前对话），用于定位脚本上线后的问题。',
       'parameters': {
         'type': 'object',
         'properties': {
-          'domain': {
+          'outcome': {
             'type': 'string',
-            'description': '要查询的域名（如 www.example.com）。不填则使用当前页面域名。',
-          },
-          'level': {
-            'type': 'string',
-            'enum': ['error', 'warning', 'info', 'debug'],
+            'enum': ['all', 'success', 'failure'],
             'description':
-                '日志级别下限过滤。默认 warning（含 error），只看问题。'
-                '填 info 可包含成功记录，填 error 只看错误。',
-          },
-          'limit': {
-            'type': 'integer',
-            'description': '返回条数上限，默认 10，最大 30（避免日志占满上下文）。',
+                '结果筛选。all=全部（默认）；success=只看成功记录；'
+                'failure=只看失败/异常记录（warning 及以上级别）。',
           },
         },
       },

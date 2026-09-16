@@ -569,13 +569,13 @@ class _ScriptCard extends ConsumerWidget {
     if (errorMsg != null) {
       LoggerService.instance.w(
         '脚本面板验证失败: domain=${script.domain} scriptType=$scriptType url=$testUrl error=$errorMsg',
-        category: LogCategory.ai,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'script-panel-verify', 'failed'],
       );
     } else {
       LoggerService.instance.i(
         '脚本面板验证成功: domain=${script.domain} scriptType=$scriptType url=$testUrl resultLen=${resultStr?.length ?? 0}',
-        category: LogCategory.ai,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'script-panel-verify', 'success'],
       );
     }

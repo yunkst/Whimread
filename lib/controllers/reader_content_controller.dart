@@ -290,7 +290,7 @@ class ReaderContentController {
         if (result.isSuccess) {
           LoggerService.instance.d(
             'ReaderContentController: Headless WebView 获取成功',
-            category: LogCategory.ui,
+            category: LogCategory.crawler,
             tags: ['reader', 'headless-webview'],
           );
           return result.content.content;
@@ -301,7 +301,7 @@ class ReaderContentController {
           LoggerService.instance.w(
             'ReaderContentController: WebView 忙碌，'
             '第${attempt + 1}次重试（共$maxRetries次）',
-            category: LogCategory.ui,
+            category: LogCategory.crawler,
             tags: ['reader', 'headless-webview', 'busy-retry'],
           );
           if (attempt < maxRetries - 1) {

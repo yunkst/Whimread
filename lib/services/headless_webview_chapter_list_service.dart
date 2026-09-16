@@ -93,7 +93,7 @@ class HeadlessWebViewChapterListService {
     if (_isFetching) {
       LoggerService.instance.d(
         'HeadlessWebViewChapterList: 互斥命中，返回 busy url=$novelUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'mutex'],
       );
       return FetchChapterListResult.busy();
@@ -119,7 +119,7 @@ class HeadlessWebViewChapterListService {
 
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 开始获取 domain=$domain url=$novelUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'fetch'],
       );
 
@@ -163,7 +163,7 @@ class HeadlessWebViewChapterListService {
           LoggerService.instance.w(
             'HeadlessWebViewChapterList: OCR 还原异常未降级（理论上不可达）',
             stackTrace: stackTrace.toString(),
-            category: LogCategory.cache,
+            category: LogCategory.crawler,
             tags: ['headless-webview', 'chapter-list', 'ocr', 'unexpected'],
           );
         }
@@ -174,7 +174,7 @@ class HeadlessWebViewChapterListService {
         _recordFailure(scriptId);
         LoggerService.instance.w(
           'HeadlessWebViewChapterList: 脚本返回空章节列表 domain=$logDomain',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['headless-webview', 'chapter-list', 'empty-result'],
         );
         return FetchChapterListResult.noScript();
@@ -185,7 +185,7 @@ class HeadlessWebViewChapterListService {
 
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 获取成功 domain=$logDomain count=${chapters.length} coverUrl=$coverUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'success'],
       );
 
@@ -194,7 +194,7 @@ class HeadlessWebViewChapterListService {
       if (scriptId != null) _recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 页面加载失败 url=$novelUrl domain=$logDomain',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'load-failed'],
       );
       return FetchChapterListResult.loadFailed();
@@ -202,7 +202,7 @@ class HeadlessWebViewChapterListService {
       if (scriptId != null) _recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 获取失败 domain=$logDomain url=$novelUrl error=$e',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'error'],
       );
       rethrow;
@@ -239,7 +239,7 @@ class HeadlessWebViewChapterListService {
       // 展示模式切换：销毁重建（服务生命周期与页面导航对齐，重建代价可控）
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'recreate', 'desktop-mode'],
       );
       _headlessWebView?.dispose();
@@ -255,7 +255,7 @@ class HeadlessWebViewChapterListService {
       }
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 初始化超时（30s 轮询）',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'init', 'timeout'],
       );
       throw Exception('HeadlessWebViewChapterList 初始化超时');
@@ -295,7 +295,7 @@ class HeadlessWebViewChapterListService {
 
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 初始化完成',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'init'],
       );
     } catch (e, stackTrace) {
@@ -306,7 +306,7 @@ class HeadlessWebViewChapterListService {
       LoggerService.instance.e(
         'HeadlessWebViewChapterList: 初始化失败 $e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'init', 'failed'],
       );
       rethrow;
@@ -350,7 +350,7 @@ class HeadlessWebViewChapterListService {
     if (validationError != null) {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 脚本校验失败 $validationError',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'validation'],
       );
       return null;
@@ -372,7 +372,7 @@ class HeadlessWebViewChapterListService {
     } on TimeoutException {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 脚本执行超时（120s） pageUrl=$pageUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'execute_timeout'],
       );
       return null;
@@ -383,7 +383,7 @@ class HeadlessWebViewChapterListService {
     if (result.error != null) {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: JS执行错误 ${result.error}',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'js-error'],
       );
       return null;
@@ -397,7 +397,7 @@ class HeadlessWebViewChapterListService {
     if (chaptersRaw == null || chaptersRaw.isEmpty) {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 脚本返回空 chapters pageUrl=$pageUrl',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'empty_result'],
       );
       return null;
@@ -465,7 +465,7 @@ class HeadlessWebViewChapterListService {
     if (fontFamily == null || fontFamily.isEmpty) {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList OCR 跳过：fontFamily 为空，降级返回原文',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'ocr', 'skip-empty-font'],
       );
       return (title: title, chapters: chapters);
@@ -485,7 +485,7 @@ class HeadlessWebViewChapterListService {
       }
       LoggerService.instance.i(
         'HeadlessWebViewChapterList OCR 还原: n=${chapters.length}',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'ocr', 'restore'],
       );
       return (title: newTitle, chapters: newChapters);
@@ -493,7 +493,7 @@ class HeadlessWebViewChapterListService {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList OCR 还原失败，降级返回原文: $e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'ocr', 'restore-failed'],
       );
       return (title: title, chapters: chapters); // 降级
@@ -520,7 +520,7 @@ class HeadlessWebViewChapterListService {
     if (count >= _maxConsecutiveFailures) {
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 脚本连续失败$count次，自动标记 unverified id=$scriptId',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'auto-disable'],
       );
       _scriptRepo.setVerified(scriptId, false);

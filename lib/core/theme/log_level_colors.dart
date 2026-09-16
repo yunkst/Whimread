@@ -5,7 +5,7 @@
 ///
 /// - **级别色（debug/info/warning/error）**：映射到 [AppColors] 的语义色，
 ///   随主题明暗变化。
-/// - **分类色（database/network/ai/ui/cache/character/backup/general）**：
+/// - **分类色（database/network/ai/ui/cache/crawler/character/backup/general）**：
 ///   属于"业务数据调色板"（用于区分日志分类，类似关系图节点色），
 ///   暂保留固定色调以维持识别度，后续如需主题化可扩展 [AppColors]。
 library;
@@ -51,6 +51,8 @@ class LogLevelColors {
         return Colors.green;
       case LogCategory.cache:
         return Colors.orange;
+      case LogCategory.crawler:
+        return Colors.teal;
       case LogCategory.character:
         return Colors.pink;
       case LogCategory.backup:

@@ -566,7 +566,7 @@ class PreloadService {
       if (result.isSuccess) {
         LoggerService.instance.d(
           '预加载: Headless WebView 获取成功',
-          category: LogCategory.cache,
+          category: LogCategory.crawler,
           tags: ['preload', 'headless-webview'],
         );
         return result;
@@ -578,7 +578,7 @@ class PreloadService {
     // 无 headless 服务
     LoggerService.instance.w(
       '预加载: 无提取脚本或 headless 获取失败: $chapterUrl',
-      category: LogCategory.cache,
+      category: LogCategory.crawler,
       tags: ['preload', 'headless-webview', 'no-script'],
     );
     return FetchContentResult.noScript();

@@ -21,7 +21,7 @@
 
 ### 核心特性
 - ✅ **日志级别**: DEBUG/INFO/WARNING/ERROR 四级分类
-- ✅ **日志分类**: 8种分类（数据库、网络、AI、界面等）
+- ✅ **日志分类**: 9种分类（数据库、网络、AI、爬虫等）
 - ✅ **标签系统**: 支持自定义标签，便于细粒度搜索
 - ✅ **持久化存储**: 自动保存到SharedPreferences，APP重启不丢失
 - ✅ **搜索过滤**: 支持关键词、分类、标签、级别多维度搜索
@@ -251,7 +251,7 @@ try {
 | AI | `LogCategory.ai` | AI | DSL Engine 工作流、LLM 调用、内容生成、流式响应 |
 | 界面 | `LogCategory.ui` | 界面 | 页面跳转、交互事件、用户操作 |
 | 缓存 | `LogCategory.cache` | 缓存 | 缓存读写、清理、命中/未命中 |
-| 语音 | `LogCategory.tts` | 语音 | TTS播放、状态变更、暂停/恢复 |
+| 爬虫 | `LogCategory.crawler` | 爬虫 | HeadlessWebView 提取脚本运行、章节内容/目录/书架抓取、WebView 池、脚本面板试运行、预加载抓取 |
 | 角色 | `LogCategory.character` | 角色 | 角色管理、提取、匹配 |
 | 通用 | `LogCategory.general` | 通用 | 未分类日志、通用操作 |
 

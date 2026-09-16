@@ -57,6 +57,9 @@ enum LogCategory {
   /// 缓存操作
   cache('cache', '缓存'),
 
+  /// 爬虫/章节抓取（HeadlessWebView 提取脚本、目录/书架获取、预加载抓取）
+  crawler('crawler', '爬虫'),
+
   /// 角色管理
   character('character', '角色'),
 

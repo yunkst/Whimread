@@ -75,7 +75,7 @@ class HeadlessWebViewPool {
     _refCount++;
     LoggerService.instance.d(
       'HeadlessWebViewPool.acquire: refCount=$_refCount isInUse=$_isInUse',
-      category: LogCategory.cache,
+      category: LogCategory.crawler,
       tags: ['headless-webview-pool', 'acquire'],
     );
     try {
@@ -89,7 +89,7 @@ class HeadlessWebViewPool {
       LoggerService.instance.w(
         'HeadlessWebViewPool.acquire 失败: $e refCount=$_refCount',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'acquire', 'failed'],
       );
       rethrow;
@@ -112,7 +112,7 @@ class HeadlessWebViewPool {
       LoggerService.instance.w(
         'HeadlessWebViewPool 排他等待失败: $e waitQueue=${_waitQueue.length}',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'acquire', 'timeout'],
       );
       rethrow;
@@ -137,7 +137,7 @@ class HeadlessWebViewPool {
 
     LoggerService.instance.d(
       'HeadlessWebViewPool.release: refCount=$_refCount isInUse=$_isInUse',
-      category: LogCategory.cache,
+      category: LogCategory.crawler,
       tags: ['headless-webview-pool', 'release'],
     );
   }
@@ -152,7 +152,7 @@ class HeadlessWebViewPool {
   void dispose() {
     LoggerService.instance.i(
       'HeadlessWebViewPool.dispose: refCount=$_refCount',
-      category: LogCategory.cache,
+      category: LogCategory.crawler,
       tags: ['headless-webview-pool', 'dispose'],
     );
     // 唤醒所有等待者，避免悬挂 Completer
@@ -177,7 +177,7 @@ class HeadlessWebViewPool {
       // 模式（池为 APP 级单例，不重建则一直停留在旧模式）。
       LoggerService.instance.i(
         'HeadlessWebViewPool: 桌面模式切换 ($_desktopModeAtCreation → $desktopNow)，重建 WebView',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'recreate', 'desktop-mode'],
       );
       _headlessWebView?.dispose();
@@ -194,7 +194,7 @@ class HeadlessWebViewPool {
       }
       LoggerService.instance.w(
         'HeadlessWebViewPool: 初始化超时（30s 轮询）',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'init', 'timeout'],
       );
       throw Exception('HeadlessWebViewPool 初始化超时');
@@ -244,7 +244,7 @@ class HeadlessWebViewPool {
 
       LoggerService.instance.i(
         'HeadlessWebViewPool: 初始化完成',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'init'],
       );
     } catch (e) {
@@ -255,7 +255,7 @@ class HeadlessWebViewPool {
       _controller = null;
       LoggerService.instance.e(
         'HeadlessWebViewPool: 初始化失败 $e',
-        category: LogCategory.cache,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'init', 'error'],
       );
       rethrow;
@@ -280,7 +280,7 @@ class HeadlessWebViewPool {
       LoggerService.instance.w(
         'HeadlessWebViewPool 网络请求记录失败: $e',
         stackTrace: stackTrace.toString(),
-        category: LogCategory.network,
+        category: LogCategory.crawler,
         tags: ['headless-webview-pool', 'network-record', 'failed'],
       );
     }
