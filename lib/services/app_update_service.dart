@@ -75,10 +75,10 @@ class AppUpdateService {
     try {
       // 频率控制
       if (!await _githubService.shouldCheck(forceCheck: forceCheck)) {
-        LoggerService.instance.d(
-          '1 小时内已检查过，跳过',
+        LoggerService.instance.i(
+          '启动期更新检查跳过: 1 小时内已检查过',
           category: LogCategory.general,
-          tags: ['update'],
+          tags: ['update', 'throttled'],
         );
         return const AppUpdateUpToDate();
       }
