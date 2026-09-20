@@ -546,17 +546,35 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   /// 启动期静默检查更新：有新版本则弹窗，失败 / 已是最新均不打扰。
   ///
   /// 通道跟随用户设置：预览版开关开启时含 prerelease，否则仅查 stable。
+  /// 全程打 info 级日志（release 可见），便于排查「为什么没弹更新」。
   Future<void> _silentCheckStableUpdate() async {
     try {
       final updateService = AppUpdateService();
+      final previewChannel = await AppUpdateService.isPreviewChannelEnabled();
+      LoggerService.instance.i(
+        '启动期更新检查开始 (channel=${previewChannel ? 'preview' : 'stable'})',
+        category: LogCategory.network,
+        tags: ['update', 'startup-check'],
+      );
       final result = await updateService.checkForUpdateDetailed(
         forceCheck: false, // 走 1 小时节流
-        includePrerelease: await AppUpdateService.isPreviewChannelEnabled(),
+        includePrerelease: previewChannel,
       );
       if (!mounted) return;
 
       if (result is! AppUpdateAvailable) {
-        // UpToDate / CheckFailed：静默吞掉，不打扰用户
+        // UpToDate / CheckFailed：静默吞掉，不打扰用户。
+        // CheckFailed 的详细 reason 已由 checkForUpdateDetailed 内部以
+        // w 级记录，此处只补一条结果摘要日志便于串联时间线。
+        final summary = switch (result) {
+          AppUpdateCheckFailed(:final reason) => 'CheckFailed($reason)',
+          _ => result.runtimeType.toString(),
+        };
+        LoggerService.instance.i(
+          '启动期更新检查结束: $summary',
+          category: LogCategory.network,
+          tags: ['update', 'startup-check'],
+        );
         return;
       }
 
@@ -564,9 +582,19 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
       // 用户此前已点过「稍后提醒」忽略该版本 → 不再弹
       if (await updateService.isVersionIgnored(version.version)) {
+        LoggerService.instance.i(
+          '启动期更新检查: 新版本 ${version.version} 已被用户忽略, 不弹窗',
+          category: LogCategory.network,
+          tags: ['update', 'startup-check'],
+        );
         return;
       }
 
+      LoggerService.instance.i(
+        '启动期更新检查: 发现新版本 ${version.version}, 弹出更新弹窗',
+        category: LogCategory.network,
+        tags: ['update', 'startup-check'],
+      );
       await showAppUpdateDialog(
         context,
         version: version,
