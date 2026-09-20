@@ -663,7 +663,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
     // ── 参数注入：将 {{URL}} 替换为 test_url 或当前页面 URL ──
     final testUrl = (args['test_url'] as String?) ?? _currentUrl;
-    final resolvedScript = effectiveScript.replaceAll('{{URL}}', testUrl);
+    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(effectiveScript, testUrl);
 
     // ── 提取 IIFE 函数体 ──
     final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolvedScript);
@@ -1357,6 +1357,42 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       if (err != null) return err; // 参数错误直接返回（错误 JSON 已构造好）
     }
 
+    // 安全校验（2026-09 审查必修项）：
+    // 1) test_url 必须是 http(s) 绝对地址 — 与 _navigateTo 同强度，
+    //    防止 LLM 被提示注入后传 file:///、javascript: 等伪协议加载；
+    // 2) domain 必须是合法主机名 — 落库为 site_scripts.domain 主键，
+    //    后续 HeadlessWebView*Service 会在用户访问该域名时回放脚本，
+    //    恶意/伪造 domain 会把脚本注入到用户真实浏览的站点。
+    final testUri = Uri.tryParse(testUrl);
+    if (testUri == null ||
+        !testUri.isAbsolute ||
+        (testUri.scheme != 'http' && testUri.scheme != 'https') ||
+        testUri.host.isEmpty) {
+      return jsonEncode({
+        'error': 'INVALID_TEST_URL',
+        'message': 'test_url 必须是带主机名的 http(s) 绝对地址: $testUrl',
+        'suggestion': '请传入完整的站点页面 URL（包含 http/https 与主机名）',
+      });
+    }
+    final domainPattern = RegExp(r'^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$');
+    if (!domainPattern.hasMatch(domain) || !domain.contains('.')) {
+      return jsonEncode({
+        'error': 'INVALID_DOMAIN',
+        'message': 'domain 必须是合法主机名（仅字母/数字/点/连字符）: $domain',
+        'suggestion': '请传入站点真实域名，如 www.example.com',
+      });
+    }
+    // domain 与 test_url 主机一致性：防止把 A 站脚本持久化到 B 站域名下
+    final testHost = testUri.host.toLowerCase();
+    final domainHost = domain.toLowerCase();
+    if (testHost != domainHost && !testHost.endsWith('.$domainHost')) {
+      return jsonEncode({
+        'error': 'DOMAIN_MISMATCH',
+        'message': 'domain($domain) 与 test_url 主机($testHost)不一致',
+        'suggestion': 'domain 必须与 test_url 的主机名一致（或为其父域）',
+      });
+    }
+
     if (scriptType != 'chapter_list' &&
         scriptType != 'chapter_content' &&
         scriptType != 'bookshelf') {
@@ -1411,7 +1447,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       );
 
       // 替换 {{URL}} → test_url（提取脚本约定含 {{URL}}）
-      final resolved = scriptJs.replaceAll('{{URL}}', testUrl);
+      final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptJs, testUrl);
       final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolved);
       LoggerService.instance.i(
         'save_script: 执行提取脚本 scriptLen=${resolved.length} bodyLen=${functionBody.length}',

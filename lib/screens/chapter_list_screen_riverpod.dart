@@ -44,9 +44,6 @@ class _ChapterListScreenRiverpodState
     extends ConsumerState<ChapterListScreenRiverpod> {
   final ScrollController _scrollController = ScrollController();
 
-  // 标记是否已经设置了监听
-  bool _hasSetupListener = false;
-
   // 标记是否已经自动滚动到上次阅读位置
   bool _hasScrolledToLastRead = false;
 
@@ -90,8 +87,8 @@ class _ChapterListScreenRiverpodState
     super.dispose();
   }
 
-  /// 监听预加载进度
-  void _listenToPreloadProgress() {
+  /// 监听预加载进度（直接放 build 内由 Riverpod 管理生命周期，移除原手写 flag）
+  void _listenPreloadProgressInBuild() {
     ref.listen(
       preloadProgressProvider(widget.novel),
       (previous, next) {
@@ -113,25 +110,25 @@ class _ChapterListScreenRiverpodState
 
   @override
   Widget build(BuildContext context) {
-    // 设置监听（只设置一次）
-    if (!_hasSetupListener) {
-      _hasSetupListener = true;
-      _listenToPreloadProgress();
-    }
+    // 预加载进度监听：直接放在 build 中，由 Riverpod 自动管理 listener 生命周期，
+    // 不再使用手写 _hasSetupListener 标志位。
+    _listenPreloadProgressInBuild();
 
     final state = ref.watch(chapterListProvider(widget.novel));
     final notifier = ref.read(chapterListProvider(widget.novel).notifier);
 
-    // 首次加载完成时，自动滚动到上次阅读位置（只执行一次）
-    // 修复: 使用-1作为未加载的默认值，避免异步加载时序问题
-    if (!_hasScrolledToLastRead &&
-        state.chapters.isNotEmpty &&
-        state.lastReadChapterIndex >= 0) {
-      _hasScrolledToLastRead = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToLastReadChapter();
-      });
-    }
+    // 首次加载完成时，自动滚动到上次阅读位置（通过 ref.listen 副作用驱动，
+    // 不在 build 体内直接写 _hasScrolledToLastRead + 调度 postFrameCallback）
+    ref.listen(chapterListProvider(widget.novel), (previous, next) {
+      if (!_hasScrolledToLastRead &&
+          next.chapters.isNotEmpty &&
+          next.lastReadChapterIndex >= 0) {
+        _hasScrolledToLastRead = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _scrollToLastReadChapter();
+        });
+      }
+    });
 
     return AgentFloatingShell(
       scenarioId: ScenarioIds.writing,

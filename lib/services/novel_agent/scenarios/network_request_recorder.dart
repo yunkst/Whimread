@@ -57,6 +57,25 @@ class NetworkRequestRecorder {
     'x-xsrf-token',
   };
 
+  /// 敏感 query 参数名（大小写不敏感匹配）：
+  /// URL 里的 token/access_token/... 经常承载签名/凭据，
+  /// 与 header redact 同样处理，避免被 list_network_requests 喂给 LLM
+  /// 或写入持久化会话。
+  static const _sensitiveQueryParamNames = <String>{
+    'token',
+    'access_token',
+    'refresh_token',
+    'id_token',
+    'api_key',
+    'apikey',
+    'sign',
+    'signature',
+    'code',
+    'secret',
+    'session',
+    'sessionid',
+  };
+
   final List<NetworkRequestRecord> _records = [];
   int _nextIndex = 0;
   bool _disposed = false;
@@ -149,10 +168,20 @@ class NetworkRequestRecorder {
   }
 
   /// 从 URL 解析 query_params。URL 解析失败时返回 {}。
+  ///
+  /// 敏感参数名（token/access_token/...）的值 redact 为 `<redacted>`，
+  /// 与 header redact 同一策略，避免凭据经 list_network_requests
+  /// 喂给 LLM 上下文或写入持久化会话。
   Map<String, String> _parseQueryParams(String url) {
     try {
       final uri = Uri.parse(url);
-      return Map<String, String>.from(uri.queryParameters);
+      final params = Map<String, String>.from(uri.queryParameters);
+      for (final entry in params.entries.toList()) {
+        if (_sensitiveQueryParamNames.contains(entry.key.toLowerCase())) {
+          params[entry.key] = '<redacted>';
+        }
+      }
+      return params;
     } catch (_) {
       return const {};
     }

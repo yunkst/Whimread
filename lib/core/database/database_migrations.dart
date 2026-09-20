@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 46;
+  static const int currentVersion = 47;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -129,6 +129,9 @@ class DatabaseMigrations {
   /// 入口：
   /// - 新安装：fromVersion=1
   /// - 版本升级：由 sqflite 的 onUpgrade 回调传入
+  ///
+  /// 每个版本一个事务：版本内任一语句失败时整版本回滚，
+  /// 避免设备断电/磁盘满时 schema 处于半完成的中间态。
   static Future<void> upgrade(
       Database db, int fromVersion, int toVersion) async {
     final startTime = DateTime.now();
@@ -136,7 +139,15 @@ class DatabaseMigrations {
     // 执行每个版本的迁移
     for (int version = fromVersion + 1; version <= toVersion; version++) {
       _log('开始迁移 v${version - 1} → v$version...');
-      await _migrateToVersion(db, version);
+      // v31 需要开启 foreign_keys，但 SQLite 的 `PRAGMA foreign_keys`
+      // 在事务内是 no-op（只允许在事务外启用/禁用），因此必须在
+      // 开事务之前执行；迁移体内的同语句保持幂等，两种调用方式都正确。
+      if (version == 31) {
+        await db.execute('PRAGMA foreign_keys = ON');
+      }
+      await db.transaction((txn) async {
+        await _migrateToVersion(txn, version);
+      });
       _log('迁移完成 v$version');
     }
 
@@ -149,7 +160,11 @@ class DatabaseMigrations {
   /// 每个版本一个迁移块，版本号对应数据库 schema 版本。
   /// 迁移使用 `IF NOT EXISTS` / `IF NOT EXISTS` 等安全写法，
   /// 确保在已有表/字段时不报错。
-  static Future<void> _migrateToVersion(Database db, int version) async {
+  ///
+  /// 调用方（[upgrade]）已经把整个版本包进事务，方法内不应再开新事务。
+  /// 参数改为 `DatabaseExecutor` 以兼容事务内的 `txn`。
+  static Future<void> _migrateToVersion(
+      DatabaseExecutor db, int version) async {
     switch (version) {
       // ========== 版本 2：用户插入章节标记 ==========
       case 2:
@@ -953,6 +968,37 @@ class DatabaseMigrations {
             db, 'site_scripts', 'preferred_mode', 'INTEGER NOT NULL DEFAULT 0');
         _log('迁移 v45 → v46: site_scripts 加 preferred_mode 列（脚本创作模式）');
         break;
+
+      // ========== 版本 47：脚本来源与共享状态 ==========
+      // 爬虫脚本共享功能：区分本地自建与云端下载，记录远端版本/指纹/同步时间，
+      // 并提供与 verified（自动验证语义）解耦的显式启用开关。
+      // - source: 'local'=本地自建（默认），'remote'=从云端脚本仓库下载
+      // - remote_id: 云端脚本主键（uuid），local 时为 NULL
+      // - remote_version: 云端版本号，用于检查更新
+      // - sha256: 脚本载荷指纹，上传去重与下载完整性校验
+      // - shared: 本地脚本是否已共享到云端（0/1）
+      // - last_synced_at: 最近一次与云端同步的毫秒时间戳
+      // - enabled: 用户显式启停开关，默认 1；与 verified（连续失败自动
+      //   unverified 的自动化语义）互不覆盖
+      case 47:
+        await _addColumnIfNotExists(db, 'site_scripts', 'source',
+            "TEXT NOT NULL DEFAULT 'local'");
+        await _addColumnIfNotExists(db, 'site_scripts', 'remote_id', 'TEXT');
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'remote_version', 'INTEGER NOT NULL DEFAULT 0');
+        await _addColumnIfNotExists(db, 'site_scripts', 'sha256', 'TEXT');
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'shared', 'INTEGER NOT NULL DEFAULT 0');
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'last_synced_at', 'INTEGER NOT NULL DEFAULT 0');
+        await _addColumnIfNotExists(
+            db, 'site_scripts', 'enabled', 'INTEGER NOT NULL DEFAULT 1');
+        await _createIndexIfNotExists(
+            db, 'idx_site_scripts_remote_id', 'site_scripts', 'remote_id');
+        await _createIndexIfNotExists(
+            db, 'idx_site_scripts_source', 'site_scripts', 'source');
+        _log('迁移 v46 → v47: site_scripts 加来源/共享/启用列（脚本共享）');
+        break;
     }
   }
 
@@ -971,7 +1017,9 @@ class DatabaseMigrations {
 
   /// 安全添加列（如果不存在）
   static Future<void> _addColumnIfNotExists(
-      Database db, String table, String column, String type) async {
+      DatabaseExecutor db, String table, String column, String type) async {
+    _assertSafeIdentifier(table, role: 'table');
+    _assertSafeIdentifier(column, role: 'column');
     try {
       final columns = await db.rawQuery("PRAGMA table_info($table)");
       final hasColumn = columns.any((c) => c['name'] == column);
@@ -995,7 +1043,9 @@ class DatabaseMigrations {
   /// - 单列：`'scenarioId'`（向后兼容旧调用）
   /// - 复合列：`'scenarioId, updatedAt DESC'`（不带外层括号，模板会加）
   static Future<void> _createIndexIfNotExists(
-      Database db, String indexName, String table, String columnExpr) async {
+      DatabaseExecutor db, String indexName, String table, String columnExpr) async {
+    _assertSafeIdentifier(indexName, role: 'indexName');
+    _assertSafeIdentifier(table, role: 'table');
     try {
       final indexes = await db.rawQuery(
           "SELECT name FROM sqlite_master WHERE type='index' AND name = ?",
@@ -1022,12 +1072,15 @@ class DatabaseMigrations {
   /// 主键约束，避免旧实现只取列名导致约束丢失（PRIMARY KEY、NOT NULL、
   /// UNIQUE、DEFAULT 全部丢失，重建后的表是"裸列"）。
   static Future<void> _renameColumnIfExists(
-    Database db,
+    DatabaseExecutor db,
     String table,
     String oldColumn,
     String newColumn,
     String newColumnType,
   ) async {
+    _assertSafeIdentifier(table, role: 'table');
+    _assertSafeIdentifier(oldColumn, role: 'oldColumn');
+    _assertSafeIdentifier(newColumn, role: 'newColumn');
     try {
       // 检查旧字段是否存在，新字段是否不存在
       final tableInfo = await db.rawQuery("PRAGMA table_info($table)");
@@ -1106,6 +1159,17 @@ class DatabaseMigrations {
   /// 拼接 "列名 列定义"，空定义时仅返回列名。
   static String _buildColumnDef(String name, String def) {
     return def.isEmpty ? name : '$name $def';
+  }
+
+  /// 校验 SQL 标识符（表名/列名/索引名）安全 — 只允许字母、数字、下划线，
+  /// 且必须以字母或下划线开头。SQLite 标识符本身不支持包含特殊字符，
+  /// 通过此函数可在静态分析时拒绝非法拼接，防止把用户输入拼到 DDL。
+  static void _assertSafeIdentifier(String name, {String role = 'identifier'}) {
+    final ok = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name);
+    if (!ok) {
+      throw ArgumentError.value(
+          name, role, 'SQL identifier 包含非法字符（仅允许字母/数字/下划线）');
+    }
   }
 
   /// 记录日志（统一使用 LoggerService）

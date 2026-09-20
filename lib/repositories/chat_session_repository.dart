@@ -314,33 +314,24 @@ class ChatSessionRepository extends BaseRepository
 
   @override
   Future<int> updateMessageContent(int messageId, String content) async {
-    try {
-      final db = await database;
-      final updated = await db.update(
-        _tableMessages,
-        {
-          'content': content,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [messageId],
-      );
-      LoggerService.instance.d(
-        '更新消息内容: messageId=$messageId 影响 $updated 行',
-        category: LogCategory.database,
-        tags: ['chat_message', 'update_content', 'success'],
-      );
-      return updated;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新消息内容失败: messageId=$messageId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'update_content', 'failed'],
-      );
-      // 落库失败不应影响 UI 已更新的结果，返回 0 表示无影响
-      return 0;
-    }
+    final db = await database;
+    final updated = await db.update(
+      _tableMessages,
+      {
+        'content': content,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+    LoggerService.instance.d(
+      '更新消息内容: messageId=$messageId 影响 $updated 行',
+      category: LogCategory.database,
+      tags: ['chat_message', 'update_content', 'success'],
+    );
+    // 真实错误（db 已关闭、表不存在、唯一约束冲突等）抛给上层，
+    // 让 UI 层决定重试或回滚；不再静默吞错返回 0，避免 UI/DB 数据漂移。
+    return updated;
   }
 
   @override

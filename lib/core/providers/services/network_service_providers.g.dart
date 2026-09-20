@@ -178,7 +178,7 @@ final preloadServiceProvider = Provider<PreloadService>.internal(
 // ignore: unused_element
 typedef PreloadServiceRef = ProviderRef<PreloadService>;
 String _$headlessWebViewContentServiceHash() =>
-    r'a9d7bd3e61f61370fc731bf3303f7af9a222c0b8';
+    r'0b12506f21a8e06715b1f08f9177eb31f9d74d7c';
 
 /// SceneIllustrationService 和 SceneIllustrationCacheService 已删除，相关 provider 已移除。
 /// HeadlessWebViewContentService Provider
@@ -224,7 +224,7 @@ final headlessWebViewContentServiceProvider =
 typedef HeadlessWebViewContentServiceRef
     = ProviderRef<HeadlessWebViewContentService>;
 String _$headlessWebViewChapterListServiceHash() =>
-    r'c0c666e0516358c3e4254c8eaa78a7ad2e3301f6';
+    r'10035472b3ed1c0c167609df3b3b25f051945d2f';
 
 /// HeadlessWebViewChapterListService Provider
 ///
@@ -263,7 +263,7 @@ final headlessWebViewChapterListServiceProvider =
 typedef HeadlessWebViewChapterListServiceRef
     = ProviderRef<HeadlessWebViewChapterListService>;
 String _$headlessWebViewBookshelfServiceHash() =>
-    r'aaf85e96a3303dac89a0deab4a89cfa9de67d008';
+    r'881d620d46e2bbd09881a9a622441760fa6ca22e';
 
 /// HeadlessWebViewBookshelfService Provider
 ///
@@ -300,5 +300,28 @@ final headlessWebViewBookshelfServiceProvider =
 // ignore: unused_element
 typedef HeadlessWebViewBookshelfServiceRef
     = ProviderRef<HeadlessWebViewBookshelfService>;
+String _$crawlRequestResolverHash() =>
+    r'0d6153300fe0fd9e9ffed7058254d94acda2c297';
+
+/// 爬取请求解析器 Provider
+///
+/// 「URL×脚本×模式」对齐的唯一入口（P1 架构）。所有爬取组件共用，
+/// 不得各自另写 host 提取或脚本查找逻辑。
+///
+/// Copied from [crawlRequestResolver].
+@ProviderFor(crawlRequestResolver)
+final crawlRequestResolverProvider = Provider<CrawlRequestResolver>.internal(
+  crawlRequestResolver,
+  name: r'crawlRequestResolverProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$crawlRequestResolverHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef CrawlRequestResolverRef = ProviderRef<CrawlRequestResolver>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

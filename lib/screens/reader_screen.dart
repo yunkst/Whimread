@@ -102,15 +102,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       widget.chapters.indexWhere((c) => c.url == _currentChapter.url);
 
   late Chapter _currentChapter;
-  double? _fontSize;
 
   // 文字亮度 0.0=最暗, 1.0=最亮（默认）
-  double? _textBrightness;
+  // 以下设置项统一从 readerSettingsStateNotifierProvider 即时读取（getter），
+  // 避免在 build 中给可变字段赋值产生副作用（build 期间修改 State 成员）。
+  double get _fontSize =>
+      ref.read(readerSettingsStateNotifierProvider).value?.fontSize ?? 18.0;
 
-  // 注意：自动滚动相关的字段和方法已提取到 AutoScrollMixin
+  double get _textBrightness =>
+      ref.read(readerSettingsStateNotifierProvider).value?.textBrightness ??
+      1.0;
 
-  // 保留滚动速度配置（供 AutoScrollMixin 使用）
-  double? _scrollSpeed; // 滚动速度倍数，1.0为默认速度
+  // 滚动速度倍数，1.0为默认速度（供 AutoScrollMixin 使用）
+  double get _scrollSpeed =>
+      ref.read(readerSettingsStateNotifierProvider).value?.scrollSpeed ?? 1.0;
 
   // 当前章节的段落标注（key = 段落序号）
   Map<int, ParagraphAnnotation> _annotations = {};
@@ -999,9 +1004,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       context: context,
       barrierDismissible: false, // 禁用空白区域点击关闭
       builder: (context) => ReaderSettingsDialog(
-        initialFontSize: _fontSize ?? 18.0,
-        initialTextBrightness: _textBrightness ?? 1.0,
-        initialScrollSpeed: _scrollSpeed ?? 1.0,
+        initialFontSize: _fontSize,
+        initialTextBrightness: _textBrightness,
+        initialScrollSpeed: _scrollSpeed,
         onConfirm: ({
           required double fontSize,
           required double textBrightness,
@@ -1054,11 +1059,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    // 使用 ref.watch 监听设置状态变化
-    final settingsState = ref.watch(readerSettingsStateNotifierProvider);
-    _fontSize = settingsState.value?.fontSize ?? 18.0;
-    _scrollSpeed = settingsState.value?.scrollSpeed ?? 1.0;
-    _textBrightness = settingsState.value?.textBrightness ?? 1.0;
+    // 监听设置状态变化（仅用于触发 rebuild；字段值通过 getter 实时读取）
+    ref.watch(readerSettingsStateNotifierProvider);
 
     // 使用 ref.watch 监听编辑模式状态
     final isEditMode = ref.watch(readerEditModeProvider);
@@ -1170,8 +1172,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         // 主要内容区域（段落级延迟揭示：进入视口才淡出+打字机替换）
         ReaderContentView(
           paragraphs: paragraphs,
-          fontSize: _fontSize ?? 18.0,
-          textBrightness: _textBrightness ?? 1.0,
+          fontSize: _fontSize,
+          textBrightness: _textBrightness,
           isEditMode: isEditMode,
           isAutoScrolling: isAutoScrolling,
           annotations: _annotations,
@@ -1238,5 +1240,5 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   ScrollController get scrollController => _scrollController;
 
   @override
-  double get scrollSpeed => _scrollSpeed ?? 1.0;
+  double get scrollSpeed => _scrollSpeed;
 }

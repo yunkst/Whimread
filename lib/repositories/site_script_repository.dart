@@ -5,6 +5,7 @@
 library;
 
 import '../models/site_script.dart';
+import '../services/crawler/site_key.dart';
 import '../services/logger_service.dart';
 import 'base_repository.dart';
 
@@ -25,11 +26,19 @@ class SiteScriptRepository extends BaseRepository {
   }
 
   /// 查询所有脚本（按最后使用时间倒序）
-  Future<List<SiteScript>> getAll({int limit = 50}) async {
+  ///
+  /// [sourceFilter] 非 null 时仅返回指定 [ScriptSource] 的脚本，便于
+  /// 「云端下载」Tab 与「本地自建」Tab 的拆分展示。
+  Future<List<SiteScript>> getAll({
+    int limit = 50,
+    ScriptSource? sourceFilter,
+  }) async {
     try {
       final db = await database;
       final results = await db.query(
         'site_scripts',
+        where: sourceFilter != null ? 'source = ?' : null,
+        whereArgs: sourceFilter != null ? [sourceFilter.storageValue] : null,
         orderBy: 'last_used_at DESC',
         limit: limit,
       );
@@ -40,6 +49,42 @@ class SiteScriptRepository extends BaseRepository {
         stackTrace: stackTrace.toString(),
         category: LogCategory.database,
         tags: ['site_script', 'get_all', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 按 host 变体等价查询脚本（P1 起 FAB / headless 服务的标准查找入口）
+  ///
+  /// 先按 [host] 精确匹配（走 DB 索引，绝大多数请求一次命中）；
+  /// 未命中再做 [SiteKey] 变体等价匹配——`www.alice.com` 与 `m.alice.com`
+  /// 视为同一站点（修复：可见浏览器切换桌面/手机模式后 host 变体导致
+  /// 找不到已保存脚本、误报 noScript）。
+  ///
+  /// 变体匹配需要全表扫描，但 site_scripts 是用户级小表（<100 行），
+  /// 可接受；精确路径仍是主路径。
+  Future<SiteScript?> findByUrlHost(String host) async {
+    final exact = await getByDomain(host);
+    if (exact != null) return exact;
+
+    final key = SiteKey.tryFromHost(host);
+    if (key == null) return null;
+
+    try {
+      final db = await database;
+      final results = await db.query('site_scripts');
+      for (final row in results) {
+        if (key.matchesHost(row['domain'] as String?)) {
+          return SiteScript.fromMap(row);
+        }
+      }
+      return null;
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '按 host 变体查询脚本失败: host=$host - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'find_by_url_host', 'failed'],
       );
       rethrow;
     }
@@ -468,6 +513,275 @@ class SiteScriptRepository extends BaseRepository {
         stackTrace: stackTrace.toString(),
         category: LogCategory.database,
         tags: ['site_script', 'update_part', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 按 remote_id 查询（v47，云端下载脚本的本地副本定位）
+  Future<SiteScript?> findByRemoteId(String remoteId) async {
+    try {
+      final db = await database;
+      final results = await db.query(
+        'site_scripts',
+        where: 'remote_id = ?',
+        whereArgs: [remoteId],
+        limit: 1,
+      );
+      if (results.isEmpty) return null;
+      return SiteScript.fromMap(results.first);
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '按 remote_id 查询脚本失败: remoteId=$remoteId - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'find_by_remote_id', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 落库一条云端下载的脚本（v47）。
+  ///
+  /// - 若同 domain 已存在**本地自建**脚本（source='local'），**不覆盖**，
+  ///   返回已有 id（isInsert=false），由调用方决定「替换 / 保留 / 另存」。
+  /// - 若同 domain 已存在**同一 remote_id** 的副本，走 UPDATE 覆盖载荷
+  ///   （重新下载/升级场景），返回 (id, isInsert=false)。
+  /// - 否则 INSERT 一条 source='remote' 新记录，写入 sha256 /
+  ///   remote_version / last_synced_at=now，verified 沿用云端已审核
+  ///   语义置 1（管理员审核通过才允许下载）。
+  Future<({String id, bool isInsert})> insertRemoteDownload(
+    SiteScript script,
+  ) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      final existing = await db.query(
+        'site_scripts',
+        where: 'domain = ?',
+        whereArgs: [script.domain],
+        orderBy: 'last_used_at DESC',
+      );
+      if (existing.isNotEmpty) {
+        final row = existing.first;
+        final existingSource = row['source'] as String? ?? 'local';
+        if (existingSource == 'local') {
+          // 本地自建脚本优先，不覆盖——调用方提示用户决策
+          LoggerService.instance.i(
+            'insertRemoteDownload: domain=${script.domain} 已有本地脚本，不覆盖 '
+            '(id=${row['id']})',
+            category: LogCategory.database,
+            tags: ['site_script', 'remote_download', 'skip_local'],
+          );
+          return (id: row['id'] as String, isInsert: false);
+        }
+        // 已有 remote 副本：覆盖载荷（重新下载 / 升级）
+        await db.update(
+          'site_scripts',
+          {
+            'chapter_list_js': script.chapterListJs,
+            'chapter_content_js': script.chapterContentJs,
+            'bookshelf_js': script.bookshelfJs,
+            'chapter_list_ocr': script.chapterListOcr ? 1 : 0,
+            'chapter_content_ocr': script.chapterContentOcr ? 1 : 0,
+            'url_pattern': script.urlPattern,
+            'sample_url': script.sampleUrl,
+            'remote_id': script.remoteId,
+            'remote_version': script.remoteVersion,
+            'sha256': script.sha256,
+            'last_synced_at': now,
+            'last_used_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        // 清理同 domain 的其他 remote 重复副本（同 upsert 策略）
+        if (existing.length > 1) {
+          final keepId = row['id'] as String;
+          await db.delete(
+            'site_scripts',
+            where: 'domain = ? AND id != ?',
+            whereArgs: [script.domain, keepId],
+          );
+        }
+        LoggerService.instance.i(
+          'insertRemoteDownload (update): domain=${script.domain} '
+          'id=${row['id']} version=${script.remoteVersion}',
+          category: LogCategory.database,
+          tags: ['site_script', 'remote_download', 'update'],
+        );
+        return (id: row['id'] as String, isInsert: false);
+      }
+
+      final id = _newScriptId();
+      await db.insert('site_scripts', {
+        ...script.toMap(),
+        'id': id,
+        'created_at': now,
+        'last_used_at': now,
+        'use_count': 0,
+        'verified': 1, // 云端已过审脚本，下载即视为已验证
+        'last_synced_at': now,
+        'source': ScriptSource.remote.storageValue,
+      });
+      LoggerService.instance.i(
+        'insertRemoteDownload (insert): domain=${script.domain} id=$id '
+        'remoteId=${script.remoteId} version=${script.remoteVersion}',
+        category: LogCategory.database,
+        tags: ['site_script', 'remote_download', 'insert'],
+      );
+      return (id: id, isInsert: true);
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        'insertRemoteDownload 失败: domain=${script.domain} - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'remote_download', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 已下载脚本升级到新版本（v47）：仅覆盖载荷与远端元信息。
+  Future<void> updateFromRemote(
+    String id, {
+    required String chapterListJs,
+    required String chapterContentJs,
+    String bookshelfJs = '',
+    String urlPattern = '',
+    String sampleUrl = '',
+    bool chapterListOcr = false,
+    bool chapterContentOcr = false,
+    required String sha256,
+    required int remoteVersion,
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.update(
+        'site_scripts',
+        {
+          'chapter_list_js': chapterListJs,
+          'chapter_content_js': chapterContentJs,
+          'bookshelf_js': bookshelfJs,
+          'chapter_list_ocr': chapterListOcr ? 1 : 0,
+          'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+          'url_pattern': urlPattern,
+          'sample_url': sampleUrl,
+          'sha256': sha256,
+          'remote_version': remoteVersion,
+          'last_synced_at': now,
+          'verified': 1,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      LoggerService.instance.i(
+        'updateFromRemote: id=$id version=$remoteVersion',
+        category: LogCategory.database,
+        tags: ['site_script', 'update_from_remote', 'success'],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        'updateFromRemote 失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'update_from_remote', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 本地脚本共享成功后回写远端元信息（v47）。
+  Future<void> markShared(
+    String id, {
+    required String remoteId,
+    required int version,
+    required String sha256,
+  }) async {
+    try {
+      final db = await database;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.update(
+        'site_scripts',
+        {
+          'remote_id': remoteId,
+          'remote_version': version,
+          'sha256': sha256,
+          'shared': 1,
+          'last_synced_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      LoggerService.instance.i(
+        'markShared: id=$id remoteId=$remoteId version=$version',
+        category: LogCategory.database,
+        tags: ['site_script', 'mark_shared', 'success'],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        'markShared 失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'mark_shared', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 取消共享（v47）：清空 shared 标记与远端元信息。
+  Future<void> markUnshared(String id) async {
+    try {
+      final db = await database;
+      await db.update(
+        'site_scripts',
+        {
+          'remote_id': null,
+          'remote_version': 0,
+          'shared': 0,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      LoggerService.instance.i(
+        'markUnshared: id=$id',
+        category: LogCategory.database,
+        tags: ['site_script', 'mark_unshared', 'success'],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        'markUnshared 失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'mark_unshared', 'failed'],
+      );
+      rethrow;
+    }
+  }
+
+  /// 设置用户显式启停开关（v47，与 verified 自动化语义解耦）。
+  Future<void> setEnabled(String id, bool enabled) async {
+    try {
+      final db = await database;
+      await db.update(
+        'site_scripts',
+        {'enabled': enabled ? 1 : 0},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      LoggerService.instance.i(
+        '脚本 enabled 状态变更: id=$id enabled=$enabled',
+        category: LogCategory.database,
+        tags: ['site_script', 'set_enabled'],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '设置脚本 enabled 失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'set_enabled', 'failed'],
       );
       rethrow;
     }

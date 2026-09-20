@@ -11,6 +11,11 @@ class PromptTagRepository extends BaseRepository
 
   static const String _table = 'prompt_tags';
 
+  /// 复用单个 Random 实例，避免每次 getRandom* 调用都新建实例。
+  /// 静态 + 懒初始化在首次访问时完成；多 isolate 环境各自独立，
+  /// 但 prompt tag 随机选取不要求跨 isolate 共享同一序列。
+  static final Random _random = Random();
+
   @override
   Future<List<PromptTag>> getByCategory(int categoryId) async {
     final db = await database;
@@ -238,7 +243,7 @@ class PromptTagRepository extends BaseRepository
       whereArgs: [categoryId, name],
     );
     if (maps.isEmpty) return null;
-    final picked = maps[Random().nextInt(maps.length)];
+    final picked = maps[_random.nextInt(maps.length)];
     return picked['prompt_text'] as String?;
   }
 
@@ -256,7 +261,7 @@ class PromptTagRepository extends BaseRepository
       whereArgs: [categoryId, name],
     );
     if (maps.isEmpty) return null;
-    final picked = maps[Random().nextInt(maps.length)];
+    final picked = maps[_random.nextInt(maps.length)];
     return PromptTag.fromMap(picked);
   }
 

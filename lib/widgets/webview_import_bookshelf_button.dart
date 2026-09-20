@@ -95,9 +95,9 @@ class _WebViewImportBookshelfFabState
       _toast('当前页面不是 http(s) 页面', isError: true);
       return;
     }
-    // 直接查库，避免触发 FutureProvider 的异步加载链
+    // 直接查库，避免触发 FutureProvider 的异步加载链（P1 起变体等价匹配）
     final script =
-        await ref.read(siteScriptRepositoryProvider).getByDomain(domain);
+        await ref.read(siteScriptRepositoryProvider).findByUrlHost(domain);
     if (script == null || !script.hasBookshelfJs) {
       _toast('当前域名无书架脚本', isError: true);
       return;
@@ -170,7 +170,7 @@ class _WebViewImportBookshelfFabState
       );
       return null;
     }
-    final resolved = scriptTemplate.replaceAll('{{URL}}', pageUrl);
+    final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
     final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolved);
 
     final jsResult = await controller

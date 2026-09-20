@@ -175,8 +175,10 @@ class CharacterRepository extends BaseRepository
 
   /// 更新或插入角色（去重逻辑）
   ///
-  /// 如果角色已存在（按novelUrl和name匹配），则更新现有角色
-  /// 如果角色不存在，则创建新角色
+  /// 使用单条 `INSERT ... ON CONFLICT(novelUrl, name) DO UPDATE` 原子完成
+  /// "查重 + 更新/插入"，消除旧实现 `SELECT → 判断 → INSERT/UPDATE` 三步
+  /// 非事务在并发调用时的 UNIQUE 冲突竞态（AI 伴读同时刷新多个角色时曾
+  /// 触发唯一约束冲突异常）。
   ///
   /// [newCharacter] 要更新或插入的角色
   /// 返回操作后的角色对象
@@ -184,55 +186,60 @@ class CharacterRepository extends BaseRepository
   Future<Character> updateOrInsertCharacter(Character newCharacter) async {
     try {
       final db = await database;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final m = newCharacter.toMap();
 
-      // 查找是否已存在同名角色
-      final existingCharacter = await findCharacterByName(
+      // 原子 upsert：冲突时仅更新可变字段，保留原有 id / createdAt
+      await db.execute(
+        '''
+        INSERT INTO characters (
+          novelUrl, name, age, gender, occupation, personality,
+          bodyType, clothingStyle, appearanceFeatures, backgroundStory, createdAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(novelUrl, name) DO UPDATE SET
+          age = excluded.age,
+          gender = excluded.gender,
+          occupation = excluded.occupation,
+          personality = excluded.personality,
+          bodyType = excluded.bodyType,
+          clothingStyle = excluded.clothingStyle,
+          appearanceFeatures = excluded.appearanceFeatures,
+          backgroundStory = excluded.backgroundStory,
+          updatedAt = ?
+        ''',
+        [
+          newCharacter.novelUrl,
+          newCharacter.name,
+          m['age'],
+          m['gender'],
+          m['occupation'],
+          m['personality'],
+          m['bodyType'],
+          m['clothingStyle'],
+          m['appearanceFeatures'],
+          m['backgroundStory'],
+          m['createdAt'],
+          now,
+        ],
+      );
+
+      // upsert 后回读最终行（含原 id / createdAt）
+      final existing = await findCharacterByName(
         newCharacter.novelUrl,
         newCharacter.name,
       );
-
-      if (existingCharacter != null) {
-        // 更新现有角色，保留原有ID和创建时间
-        final updatedCharacter = existingCharacter.copyWith(
-          age: newCharacter.age,
-          gender: newCharacter.gender,
-          occupation: newCharacter.occupation,
-          personality: newCharacter.personality,
-          bodyType: newCharacter.bodyType,
-          clothingStyle: newCharacter.clothingStyle,
-          appearanceFeatures: newCharacter.appearanceFeatures,
-          backgroundStory: newCharacter.backgroundStory,
-          updatedAt: DateTime.now(),
-        );
-
-        await db.update(
-          'characters',
-          updatedCharacter.toMap(),
-          where: 'id = ?',
-          whereArgs: [existingCharacter.id],
-        );
-
-        LoggerService.instance.i(
-          '更新角色: ${newCharacter.name} (ID: ${existingCharacter.id})',
-          category: LogCategory.character,
-          tags: ['update', 'success'],
-        );
-        return updatedCharacter;
-      } else {
-        // 创建新角色
-        final id = await db.insert(
-          'characters',
-          newCharacter.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-
-        LoggerService.instance.i(
-          '创建新角色: ${newCharacter.name} (ID: $id)',
-          category: LogCategory.character,
-          tags: ['create', 'success'],
-        );
-        return newCharacter.copyWith(id: id);
+      if (existing == null) {
+        // 理论不可达：upsert 刚成功写入
+        throw StateError(
+            'updateOrInsertCharacter: upsert 后读不到角色 ${newCharacter.name}');
       }
+
+      LoggerService.instance.i(
+        '更新或插入角色: ${newCharacter.name} (ID: ${existing.id})',
+        category: LogCategory.character,
+        tags: ['upsert', 'success'],
+      );
+      return existing;
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         '更新或插入角色失败: ${newCharacter.name} - $e',

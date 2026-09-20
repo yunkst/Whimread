@@ -5,6 +5,7 @@ import 'package:built_value/serializer.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import '../core/backend/backend_config.dart';
+import '../models/remote_script.dart';
 import 'logger_service.dart';
 import 'preferences_service.dart';
 
@@ -108,11 +109,8 @@ class ApiServiceWrapper {
     _dio.options.headers = {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
-      // CORS headers for web requests
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-          'Access-Control-Allow-Headers':
-              'Content-Type, Authorization',
+      // 注：CORS 响应头（Access-Control-Allow-*）由后端返回，客户端请求头
+      // 不应携带（2026-09 审查修复：原误写在请求头里，无效且污染日志）。
     };
 
     // 重置 httpClientAdapter（关闭旧 client,创建新的）
@@ -598,6 +596,116 @@ class ApiServiceWrapper {
       );
       return (null, 0);
     }
+  }
+
+  // ========================================================================
+  // 云端脚本仓库 API（v47 起）
+  // ========================================================================
+
+  /// 按 host 搜索云端脚本（仅返回管理员已审核通过的最新版本）
+  ///
+  /// 返回空列表 = 云端无命中。网络 / 服务错误抛 [_guard] 统一异常，
+  /// 由上层（RemoteScriptService）决定降级到 AI 写脚本。
+  Future<List<RemoteScriptMeta>> searchRemoteScripts({
+    required String host,
+  }) {
+    return _guard('云端脚本搜索失败: host=$host', () async {
+      final headers = await _authHeaders();
+      final response = await _dio.get<List<dynamic>>(
+        '/api/v1/scripts/search',
+        queryParameters: {'host': host},
+        options: Options(headers: headers),
+      );
+      final data = response.data ?? const [];
+      return data
+          .map((e) =>
+              RemoteScriptMeta.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });
+  }
+
+  /// 拉取云端脚本完整载荷（仅 approved 可下）
+  Future<RemoteScriptPayload> getRemoteScript(String remoteId) {
+    return _guard('云端脚本下载失败: remoteId=$remoteId', () async {
+      final headers = await _authHeaders();
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/v1/scripts/$remoteId',
+        options: Options(headers: headers),
+      );
+      return RemoteScriptPayload.fromJson(response.data!);
+    });
+  }
+
+  /// 共享本地脚本到云端（初始状态 pending_review，待管理员审核）
+  Future<RemoteShareResult> shareScriptToRemote({
+    required String domain,
+    required String displayName,
+    required String chapterListJs,
+    required String chapterContentJs,
+    required String bookshelfJs,
+    required String sampleUrl,
+    required String urlPattern,
+    required bool chapterListOcr,
+    required bool chapterContentOcr,
+    required int preferredMode,
+    required String sha256,
+  }) {
+    return _guard('脚本共享提交失败: domain=$domain', () async {
+      final headers = await _authHeaders();
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/api/v1/scripts',
+        data: {
+          'domain': domain,
+          'display_name': displayName,
+          'chapter_list_js': chapterListJs,
+          'chapter_content_js': chapterContentJs,
+          'bookshelf_js': bookshelfJs,
+          'sample_url': sampleUrl,
+          'url_pattern': urlPattern,
+          'chapter_list_ocr': chapterListOcr,
+          'chapter_content_ocr': chapterContentOcr,
+          'preferred_mode': preferredMode,
+          'sha256': sha256,
+        },
+        options: Options(headers: headers),
+      );
+      return RemoteShareResult.fromJson(response.data!);
+    });
+  }
+
+  /// 取消共享（仅作者本人有效）
+  Future<void> unshareRemoteScript(String remoteId) {
+    return _guard('取消共享失败: remoteId=$remoteId', () async {
+      final headers = await _authHeaders();
+      await _dio.delete<void>(
+        '/api/v1/scripts/$remoteId',
+        options: Options(headers: headers),
+      );
+    });
+  }
+
+  /// 批量检查更新：返回 (remoteId, localVersion) 中云端版本更高的条目
+  Future<List<RemoteScriptUpdate>> checkRemoteScriptUpdates({
+    required List<({String remoteId, int version})> items,
+  }) {
+    return _guard('云端脚本更新检查失败', () async {
+      if (items.isEmpty) return const [];
+      final headers = await _authHeaders();
+      final response = await _dio.post<List<dynamic>>(
+        '/api/v1/scripts/updates',
+        data: {
+          'items': items
+              .map((e) => {'remote_id': e.remoteId, 'version': e.version})
+              .toList(),
+        },
+        options: Options(headers: headers),
+      );
+      final data = response.data ?? const [];
+      return data
+          .map((e) =>
+              RemoteScriptUpdate.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });
   }
 }
 

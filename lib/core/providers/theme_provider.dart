@@ -30,7 +30,7 @@ class ThemeState {
   const ThemeState({
     required this.themeMode,
     // 书馆美学种子色：琥珀（暗夜书馆 / 晨读书馆 共用基调）
-    this.seedColor = const Color(0xFFB8843A),
+    this.seedColor = kBrandSeedColor,
   });
 
   /// 获取Flutter的ThemeMode（用于MaterialApp）

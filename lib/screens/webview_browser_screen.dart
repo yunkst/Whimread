@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../core/providers/database_providers.dart';
 import '../core/providers/script_presence_provider.dart';
+import '../services/crawler/site_key.dart';
 import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/theme/app_colors.dart';
@@ -115,17 +116,22 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
     // widget 测试环境（sqflite 无平台 channel）若在 build 中直接查库会留下
     // pending Timer，导致 "A Timer is still pending" 失败；测试侧应将
     // `webviewCurrentUrlProvider` 置空（domain=null）或预置缓存。
-    void refreshFor(String? domain) {
-      if (domain == null) return;
-      if (ref.read(scriptPresenceByDomainProvider).containsKey(domain)) {
+    void refreshFor(String? rawDomain) {
+      final siteKey = SiteKey.tryFromHost(rawDomain);
+      if (siteKey == null) return;
+      final bareKey = siteKey.value;
+      if (ref.read(scriptPresenceByDomainProvider).containsKey(bareKey)) {
         return;
       }
       refreshScriptPresence(
-        domain: domain,
-        fetch: (d) async =>
-            (await ref.read(siteScriptRepositoryProvider).getByDomain(d))
-                    ?.hasChapterListJs ??
-                false,
+        domain: bareKey,
+        fetch: (_) async {
+          // rawDomain 已在 refreshFor 入口非空校验过
+          final script = await ref
+              .read(siteScriptRepositoryProvider)
+              .findByUrlHost(rawDomain!);
+          return script?.hasChapterListJs ?? false;
+        },
         onResult: (d, has) {
           ref.read(scriptPresenceByDomainProvider.notifier).put(d, has);
         },

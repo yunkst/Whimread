@@ -27,16 +27,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/agent_launcher_providers.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/chapter_mutation_provider.dart';
+import '../core/providers/remote_script_providers.dart';
 import '../core/providers/script_presence_provider.dart';
 import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/providers/database_providers.dart';
+import '../core/providers/services/network_service_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
+import '../models/remote_script.dart';
 import '../models/site_script.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
+import '../services/remote/remote_script_service.dart';
 import '../screens/chapter_list_screen_riverpod.dart';
 import '../utils/toast_utils.dart';
 import 'add_novel_preview_sheet.dart';
@@ -89,7 +93,10 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
   // 核心流程
   // ===================================================================
 
-  Future<void> _handleAddNovel(BuildContext context) async {
+  Future<void> _handleAddNovel(
+    BuildContext context, {
+    bool isRemoteRetry = false,
+  }) async {
     // 1. 取当前 URL 与域名
     final currentUrl = ref.read(webviewCurrentUrlProvider);
     if (currentUrl.isEmpty) {
@@ -124,8 +131,27 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
       return;
     }
 
-    // 4. 无脚本分支 -> 降级 agent
+    // 4. 无脚本分支：先查云端仓库（v47 起脚本共享），命中且用户确认下载后
+    //    重走本流程（isRemoteRetry=true 直接执行本地提取）；未命中 / 用户
+    //    选择 AI 写脚本 / 云端不可达 → 降级 agent
     if (script == null) {
+      if (isRemoteRetry) {
+        // 防御：远程下载流程内重入仍无脚本 → 直接 AI 写脚本，不再查远程
+        await _launchAgent(context, currentUrl, domain, null,
+            FabFailureReason.noScript);
+        return;
+      }
+      final remoteHandled =
+          await _tryRemoteScriptDownload(context, currentUrl, domain);
+      if (!mounted) return;
+      if (remoteHandled) {
+        // 下载已落库：失效 presence 缓存并重走主流程
+        ref.read(scriptPresenceByDomainProvider.notifier).invalidateDomain(
+              domain,
+            );
+        await _handleAddNovel(context, isRemoteRetry: true);
+        return;
+      }
       await _launchAgent(context, currentUrl, domain, null,
           FabFailureReason.noScript);
       return;
@@ -154,7 +180,7 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
 
       // 替换 {{URL}} → 当前 URL
       final resolvedScript =
-          script.chapterListJs.replaceAll('{{URL}}', currentUrl);
+          WebViewJsExecutor.replaceUrlPlaceholder(script.chapterListJs, currentUrl);
 
       // 提取 IIFE 函数体（适配 callAsyncJavaScript）
       final functionBody =
@@ -423,4 +449,226 @@ class _WebViewAddNovelFabState extends ConsumerState<WebViewAddNovelFab> {
     }
     ToastUtils.showSuccess(message);
   }
+
+  // ===================================================================
+  // 远程脚本下载（v47 起）
+  // ===================================================================
+
+  /// FAB 无脚本分支：尝试从云端脚本仓库下载管理员已审核通过的脚本。
+  ///
+  /// 流程：
+  /// 1. 查 [RemoteScriptService.findApprovedCandidate]；无候选或网络失败 → 返回 false（调用方降级 AI）；
+  /// 2. 弹确认对话框展示元信息（域名 / 版本 / 下载数 / sha256 / 提交设备 / 含书架脚本）；
+  ///    用户选择「下载并启用」 → 调 `downloadAndPersist`；选择「仍让 AI 写」或关闭 → 返回 false。
+  /// 3. 下载落库失败 → toast 错误并返回 false。
+  ///
+  /// 返回 true 表示云端脚本已成功写入本地 [SiteScriptRepository]，调用方应
+  /// 失效 `webviewHasCachedChapterListScriptProvider` 并重走主流程。
+  Future<bool> _tryRemoteScriptDownload(
+    BuildContext context,
+    String currentUrl,
+    String domain,
+  ) async {
+    // 未启用托管后端 / 鉴权未注入（测试与离线场景）：直接返回 false 走
+    // AI 写脚本路径，避免对未初始化的 ApiServiceWrapper 发请求。
+    final api = ref.read(apiServiceWrapperProvider);
+    if (!api.isInitialized || api.authHeaderProvider == null) {
+      return false;
+    }
+    final service = ref.read(remoteScriptServiceProvider);
+    RemoteScriptMeta? candidate;
+    try {
+      candidate = await service.findApprovedCandidate(domain);
+    } catch (e) {
+      LoggerService.instance.w(
+        'FAB: 云端脚本搜索失败 domain=$domain - $e, 降级 AI 写脚本',
+        category: LogCategory.crawler,
+        tags: ['fab-add-novel', 'remote_search', 'failed'],
+      );
+      return false;
+    }
+    if (candidate == null) {
+      LoggerService.instance.d(
+        'FAB: 云端无 host=$domain 的已审核脚本, 降级 AI 写脚本',
+        category: LogCategory.crawler,
+        tags: ['fab-add-novel', 'remote_search', 'empty'],
+      );
+      return false;
+    }
+
+    if (!mounted) return false;
+    final choice = await _showRemoteScriptDialog(context, candidate);
+    if (choice != _RemoteScriptChoice.download) {
+      LoggerService.instance.i(
+        'FAB: 用户拒绝下载云端脚本 domain=$domain choice=$choice, 走 AI 写脚本',
+        category: LogCategory.crawler,
+        tags: ['fab-add-novel', 'remote_search', 'rejected'],
+      );
+      return false;
+    }
+
+    try {
+      final result = await service.downloadAndPersist(candidate);
+      _toast(
+        result.isInsert
+            ? '已下载云端脚本并启用'
+            : '已更新本地脚本为云端最新版',
+      );
+      return true;
+    } on LocalScriptConflictException catch (e) {
+      // 同 domain 已有本地自建脚本：弹「替换 / 保留 / 另存」对话框
+      if (!mounted) return false;
+      final conflictChoice =
+          await _showLocalConflictDialog(context, e.existingLocal, e.meta);
+      if (conflictChoice == _LocalConflictChoice.replace) {
+        await service.forceReplaceLocalWithRemote(e.existingLocal, e.meta);
+        _toast('已用云端脚本覆盖本地版本');
+        return true;
+      } else if (conflictChoice == _LocalConflictChoice.saveAsNew) {
+        await service.insertAsNewScript(e.meta);
+        _toast('已另存为新脚本（仍保留本地原版）');
+        // 另存分支：当前 FAB 流程继续用本地原版，但本地原版已存在于 site_scripts。
+        // 这里直接返回 false，让 FAB 走主流程的二次执行（此时会命中本地原版）。
+        return false;
+      }
+      return false;
+    } catch (e) {
+      LoggerService.instance.w(
+        'FAB: 下载云端脚本失败 domain=$domain - $e',
+        category: LogCategory.crawler,
+        tags: ['fab-add-novel', 'remote_download', 'failed'],
+      );
+      _toast('下载云端脚本失败', isError: true);
+      return false;
+    }
+  }
+
+  /// 「从云端下载脚本」确认对话框
+  Future<_RemoteScriptChoice> _showRemoteScriptDialog(
+    BuildContext context,
+    RemoteScriptMeta meta,
+  ) async {
+    final choice = await showDialog<_RemoteScriptChoice>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('云端脚本可用'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('域名：${meta.domain}',
+                    style: const TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 6),
+                Text('版本：v${meta.version}'),
+                Text('已通过 ${meta.downloadCount} 位用户下载使用'),
+                if (meta.displayName.isNotEmpty)
+                  Text('站点名：${meta.displayName}'),
+                if (meta.hasBookshelfJs) const Text('含：网站书架脚本'),
+                const SizedBox(height: 8),
+                Text(
+                  '指纹：${meta.sha256.substring(0, 16)}…',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '提交设备：${meta.authorDisplayId}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  '该脚本由其他用户提交并经管理员审核通过。下载后会在当前页面运行，与本地自建脚本权限一致。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _RemoteScriptChoice.letAiWrite,
+              ),
+              child: const Text('让 AI 写'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, _RemoteScriptChoice.cancel),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, _RemoteScriptChoice.download),
+              child: const Text('下载并启用'),
+            ),
+          ],
+        );
+      },
+    );
+    return choice ?? _RemoteScriptChoice.cancel;
+  }
+
+  /// 「同 domain 已有本地脚本」冲突对话框
+  Future<_LocalConflictChoice> _showLocalConflictDialog(
+    BuildContext context,
+    SiteScript existing,
+    RemoteScriptMeta meta,
+  ) async {
+    final choice = await showDialog<_LocalConflictChoice>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('该域名已有本地脚本'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('本地：${existing.domain}（已使用 ${existing.useCount} 次）'),
+                Text('云端：v${meta.version}（${meta.downloadCount} 次下载）'),
+                const SizedBox(height: 10),
+                const Text(
+                  '请选择：覆盖本地版本、保留本地、或者另存为新脚本（云端脚本 domain 会加 +remote 后缀以共存）。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LocalConflictChoice.cancel,
+              ),
+              child: const Text('保留本地'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LocalConflictChoice.saveAsNew,
+              ),
+              child: const Text('另存为新脚本'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _LocalConflictChoice.replace,
+              ),
+              child: const Text('覆盖本地'),
+            ),
+          ],
+        );
+      },
+    );
+    return choice ?? _LocalConflictChoice.cancel;
+  }
 }
+
+enum _RemoteScriptChoice { download, letAiWrite, cancel }
+
+enum _LocalConflictChoice { replace, saveAsNew, cancel }

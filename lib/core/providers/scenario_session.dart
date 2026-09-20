@@ -788,7 +788,21 @@ class ScenarioSession {
 
     // 11. 落库（LLM 下次 hydrate 看到的 = 用户看到的）
     if (messageId != null) {
-      unawaited(repo.updateMessageContent(messageId, newResultStr));
+      // 落库失败抛异常会被 fire-and-forget 吞掉变成 unhandled async error；
+      // 这里显式 catch 仅记录日志，UI 已更新结果保持不变。
+      // 返回 0 让 catchError 与原返回类型 Future<int> 保持一致。
+      unawaited(repo
+          .updateMessageContent(messageId, newResultStr)
+          .catchError((Object e, StackTrace st) {
+        LoggerService.instance.e(
+          'ScenarioSession [$scenarioId] 重写后落库失败: '
+          'messageId=$messageId - $e',
+          stackTrace: st.toString(),
+          category: LogCategory.ai,
+          tags: ['session', 'persist', 'failed', scenarioId],
+        );
+        return 0;
+      }));
     }
   }
 
@@ -1210,8 +1224,26 @@ class ScenarioSession {
   }
 
   void dispose() {
+    // 同步通知 agent loop 停止，避免 LLM/工具资源继续消耗；
+    // cancelFor 内部用 _isTokenCancelled 做软中断，不会抛错。
+    if (_isRunning) {
+      try {
+        _ref.read(novelAgentServiceProvider).cancelFor(scenarioId);
+      } catch (e, st) {
+        LoggerService.instance.e(
+          'ScenarioSession [$scenarioId] dispose 时取消 Agent 失败: $e',
+          stackTrace: st.toString(),
+          category: LogCategory.ai,
+          tags: ['session', 'dispose', 'cancel-error', scenarioId],
+        );
+      }
+    }
     _agentSub?.cancel();
     _agentSub = null;
+    // 兜底：若有调用方正 await _rewriteCompleter.future，dispose 时必须完成，
+    // 否则协程永久挂起。
+    _maybeCompleteRewriteCompleter(error: 'session disposed');
+    _pendingRewriteTarget = null;
     _lifecycle = SessionLifecycle.disposed;
   }
 

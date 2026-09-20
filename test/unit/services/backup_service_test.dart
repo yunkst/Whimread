@@ -244,18 +244,32 @@ void main() {
     });
 
     test('回滚: 恢复不兼容 DB 后能从 .bak 恢复', () async {
-      // 先创建一个合法的源数据库
+      // 先创建一个合法的源数据库（将被 rename 成 .bak）
       final conn = DatabaseConnection();
       await conn.initialize();
       await conn.close();
       expect(File(dbPath).existsSync(), isTrue);
 
-      // 下载内容是「仅 header」的无效 SQLite（能通过 header 校验，但迁移会失败）
-      final headerOnlyBytes = _validSqliteHeaderBytes();
-      final headerOnlyDb = p.join(dbDir, 'header_only.db');
-      // 用一个完整但表结构不对的 SQLite 文件
-      await _createRealSqliteDb(headerOnlyDb);
-      final wrongSchemaBytes = File(headerOnlyDb).readAsBytesSync();
+      // 构造「不兼容 DB」：已有与 App v1 同名的 bookshelf 表，但
+      // user_version=0（sqflite 视为全新库 → 走 onCreate）。
+      // DatabaseMigrations.createV1Tables 的建表语句没有 IF NOT EXISTS，
+      // 必然抛 'table bookshelf already exists' → openDatabase 失败 →
+      // 触发回滚分支。
+      //
+      // 不可用的构造（均已被实测排除）：
+      // - 「表结构不对」的真实库：幂等迁移会把它救活，不抛；
+      // - header 合法 + 垃圾内容：SQLite 过于宽容，同样视为空库重建，不抛。
+      final incompatibleDb = p.join(dbDir, 'incompatible.db');
+      // 该目录跨运行持久存在，先清残留（上一次运行的 incompatible.db
+      // 已带 bookshelf 表，会撞 "table already exists"）
+      try {
+        File(incompatibleDb).deleteSync();
+      } catch (_) {}
+      final raw = await databaseFactoryFfi.openDatabase(incompatibleDb);
+      await raw.execute('CREATE TABLE bookshelf (id INTEGER PRIMARY KEY)');
+      await raw.execute('PRAGMA user_version = 0');
+      await raw.close();
+      final incompatibleBytes = File(incompatibleDb).readAsBytesSync();
 
       final mockApi = MockApiServiceWrapper();
       when(mockApi.downloadBackup(
@@ -263,13 +277,16 @@ void main() {
         savePath: anyNamed('savePath'),
       )).thenAnswer((invocation) async {
         final sp = invocation.namedArguments[#savePath] as String;
-        File(sp).writeAsBytesSync(wrongSchemaBytes);
+        File(sp).writeAsBytesSync(incompatibleBytes);
         return sp;
       });
 
       final service = BackupService();
-      // 恢复会因迁移失败而抛异常
-      expect(
+      // restoreBackup 会在打开损坏 DB 时抛异常（内部捕获并重抛为
+      // Exception('数据库恢复失败，已回滚到原数据库: ...')）；用 expectLater
+      // 显式 await 异步闭包，否则 throwsA 会在异步未完成时被误判为通过，
+      // 且后续断言会在回滚未完成时执行——历史 bug 根因。
+      await expectLater(
         () => service.restoreBackup(
           apiWrapper: mockApi,
           backupId: '2026-06-15/wrong.db',
@@ -277,9 +294,8 @@ void main() {
         throwsA(isA<Exception>()),
       );
 
-      // 但原数据库应该被 .bak 恢复（回滚成功）
+      // 回滚成功后，原数据库应被 .bak 恢复
       expect(File(dbPath).existsSync(), isTrue);
-      try { File(headerOnlyDb).deleteSync(); } catch (_) {}
     });
 
     test('恢复失败时异常应向上抛出', () async {

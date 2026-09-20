@@ -11,15 +11,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import '../core/providers/remote_script_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/providers/ocr_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
+import '../models/remote_script.dart';
 import '../models/site_script.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
 import '../services/ocr_pua_renderer.dart';
 import '../services/ocr_restore_service.dart';
+import '../services/remote/remote_script_service.dart';
 import 'common/bottom_sheet_header.dart';
 import 'empty_states/empty_state_view.dart';
 
@@ -45,11 +48,22 @@ class SiteScriptPanel extends ConsumerWidget {
               fontSize: 16,
               color: Theme.of(context).colorScheme.onSurface,
             ),
-            trailing: Text(
-              '${scriptsAsync.valueOrNull?.length ?? 0} 个站点',
-              style: AppTypography.metaItalic.copyWith(
-                color: context.appColors.inkSoft,
-              ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${scriptsAsync.valueOrNull?.length ?? 0} 个站点',
+                  style: AppTypography.metaItalic.copyWith(
+                    color: context.appColors.inkSoft,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: '从云端下载脚本',
+                  icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                  onPressed: () => _showRemoteDownloadDialog(context, ref),
+                ),
+              ],
             ),
           ),
           // 列表区域
@@ -102,7 +116,177 @@ class SiteScriptPanel extends ConsumerWidget {
       subtitle: 'AI 生成脚本后会自动出现在这里',
     );
   }
+
+  /// 「从云端下载脚本」入口：输入域名 → 搜索云端已审核脚本 → 选择下载
+  Future<void> _showRemoteDownloadDialog(
+      BuildContext context, WidgetRef ref) async {
+    final domainController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从云端下载脚本'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('输入站点域名（如 www.example.com）：'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: domainController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+                hintText: 'www.example.com',
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '仅搜索管理员审核通过的脚本。',
+              style: TextStyle(fontSize: 11),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('搜索'),
+          ),
+        ],
+      ),
+    ).whenComplete(domainController.dispose);
+    if (confirmed != true || !context.mounted) return;
+
+    final domain = domainController.text.trim();
+    if (domain.isEmpty) return;
+
+    // 搜索并展示候选
+    final service = ref.read(remoteScriptServiceProvider);
+    RemoteScriptMeta? candidate;
+    try {
+      candidate = await service.findApprovedCandidate(domain);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('云端搜索失败，请稍后重试')),
+        );
+      }
+      return;
+    }
+    if (candidate == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('云端没有 $domain 的已审核脚本')),
+        );
+      }
+      return;
+    }
+    if (!context.mounted) return;
+
+    final doDownload = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('找到云端脚本'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('域名：${candidate!.domain}'),
+            Text('版本：v${candidate.version}'),
+            Text('已通过 ${candidate.downloadCount} 位用户下载使用'),
+            if (candidate.hasBookshelfJs) const Text('含：网站书架脚本'),
+            const SizedBox(height: 6),
+            Text(
+              '指纹：${candidate.sha256.substring(0, 16)}…',
+              style: const TextStyle(
+                  fontSize: 11, fontFamily: 'monospace', color: Colors.black54),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('下载并启用'),
+          ),
+        ],
+      ),
+    );
+    if (doDownload != true || !context.mounted) return;
+
+    try {
+      final result = await ref
+          .read(siteScriptListProvider.notifier)
+          .downloadRemoteScript(candidate);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.isInsert ? '已下载并启用' : '已更新为云端最新版'),
+        ),
+      );
+    } on LocalScriptConflictException catch (e) {
+      if (!context.mounted) return;
+      final choice = await _showLocalConflictDialog(context, e);
+      if (choice == _LocalConflictChoice.replace) {
+        await ref
+            .read(siteScriptListProvider.notifier)
+            .forceReplaceLocalWithRemote(e.existingLocal, e.meta);
+      } else if (choice == _LocalConflictChoice.saveAsNew) {
+        await ref
+            .read(siteScriptListProvider.notifier)
+            .saveRemoteAsNewScript(e.meta);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('下载失败，请稍后重试')),
+        );
+      }
+    }
+  }
+
+  /// 「同 domain 已有本地脚本」冲突对话框（脚本面板版本）
+  static Future<_LocalConflictChoice> _showLocalConflictDialog(
+    BuildContext context,
+    LocalScriptConflictException e,
+  ) {
+    return showDialog<_LocalConflictChoice>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('该域名已有本地脚本'),
+        content: Text(
+          '本地：${e.existingLocal.domain}（已使用 ${e.existingLocal.useCount} 次）\n'
+          '云端：v${e.meta.version}（${e.meta.downloadCount} 次下载）\n\n'
+          '选择覆盖则丢弃本地版本；选择另存则云端脚本以 +remote 后缀共存。',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, _LocalConflictChoice.cancel),
+            child: const Text('保留本地'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(ctx, _LocalConflictChoice.saveAsNew),
+            child: const Text('另存为新脚本'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, _LocalConflictChoice.replace),
+            child: const Text('覆盖本地'),
+          ),
+        ],
+      ),
+    ).then((v) => v ?? _LocalConflictChoice.cancel);
+  }
 }
+
+enum _LocalConflictChoice { replace, saveAsNew, cancel }
 
 /// 单个脚本卡片
 class _ScriptCard extends ConsumerWidget {
@@ -170,102 +354,167 @@ class _ScriptCard extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          // 脚本状态标签
-          Row(
+          // 脚本槽位状态 + 来源标签
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
             children: [
               _buildScriptChip(
                 context,
                 '目录脚本',
                 script.hasChapterListJs,
               ),
-              const SizedBox(width: 8),
               _buildScriptChip(
                 context,
                 '内容脚本',
                 script.hasChapterContentJs,
               ),
+              if (script.isRemote)
+                _buildScriptChip(
+                  context,
+                  '云端 v${script.remoteVersion}',
+                  true,
+                  color: colorScheme.tertiary,
+                )
+              else
+                _buildScriptChip(context, '本地', true,
+                    color: context.appColors.inkSoft),
+              if (script.isShared)
+                _buildScriptChip(context, '已共享', true,
+                    color: context.appColors.success),
+              if (!script.isEnabled)
+                _buildScriptChip(context, '已停用', false,
+                    color: context.appColors.error),
             ],
           ),
-          const SizedBox(height: 4),
-          // 使用统计
-          Text(
-            '使用 ${script.useCount} 次 · ${_formatDate(script.createdAtDateTime)}',
-            style: AppTypography.metaItalic.copyWith(
-              fontSize: 11,
-              color: context.appColors.inkSoft,
+      const SizedBox(height: 4),
+      // 使用统计
+      Text(
+        '使用 ${script.useCount} 次 · ${_formatDate(script.createdAtDateTime)}',
+        style: AppTypography.metaItalic.copyWith(
+          fontSize: 11,
+          color: context.appColors.inkSoft,
+        ),
+      ),
+      const SizedBox(height: 8),
+      // 操作按钮
+      Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          _buildActionButton(
+            context,
+            icon: Icons.visibility_outlined,
+            label: '查看',
+            onTap: () => _showViewDialog(context, script),
+          ),
+          _buildActionButton(
+            context,
+            icon: Icons.edit_outlined,
+            label: '改名',
+            onTap: () => _showRenameDialog(context, ref, script),
+          ),
+          _buildActionButton(
+            context,
+            icon: Icons.check_circle_outline,
+            label: '验证',
+            onTap: () => _showVerifyConfirm(context, ref, script),
+          ),
+          _buildActionButton(
+            context,
+            icon: script.isEnabled
+                ? Icons.toggle_on_outlined
+                : Icons.toggle_off_outlined,
+            label: script.isEnabled ? '停用' : '启用',
+            onTap: () async {
+              await ref
+                  .read(siteScriptListProvider.notifier)
+                  .setScriptEnabled(script.id, !script.isEnabled);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(script.isEnabled ? '已停用脚本' : '已启用脚本'),
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              }
+            },
+          ),
+          if (script.isRemote)
+            _buildActionButton(
+              context,
+              icon: Icons.cloud_sync_outlined,
+              label: '检查更新',
+              onTap: () => _onCheckUpdate(context, ref, script),
+            )
+          else if (!script.isShared)
+            _buildActionButton(
+              context,
+              icon: Icons.cloud_upload_outlined,
+              label: '共享到云端',
+              onTap: () => _onShareScript(context, ref, script),
+            )
+          else
+            _buildActionButton(
+              context,
+              icon: Icons.cloud_off_outlined,
+              label: '取消共享',
+              onTap: () => _onUnshareScript(context, ref, script),
             ),
-          ),
-          const SizedBox(height: 8),
-          // 操作按钮
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              _buildActionButton(
-                context,
-                icon: Icons.visibility_outlined,
-                label: '查看',
-                onTap: () => _showViewDialog(context, script),
-              ),
-              const SizedBox(width: 8),
-              _buildActionButton(
-                context,
-                icon: Icons.edit_outlined,
-                label: '改名',
-                onTap: () => _showRenameDialog(context, ref, script),
-              ),
-              const SizedBox(width: 8),
-              _buildActionButton(
-                context,
-                icon: Icons.check_circle_outline,
-                label: '验证',
-                onTap: () => _showVerifyConfirm(context, ref, script),
-              ),
-              const SizedBox(width: 8),
-              _buildActionButton(
-                context,
-                icon: Icons.delete_outline,
-                label: '删除',
-                color: appColors.error,
-                onTap: () => _showDeleteConfirm(context, ref, script),
-              ),
-            ],
+          _buildActionButton(
+            context,
+            icon: Icons.delete_outline,
+            label: '删除',
+            color: appColors.error,
+            onTap: () => _showDeleteConfirm(context, ref, script),
           ),
         ],
       ),
-    );
-  }
+    ],
+  ),
+);
+}
 
   Widget _buildScriptChip(
-      BuildContext context, String label, bool hasScript) {
+      BuildContext context, String label, bool hasScript,
+      {Color? color}) {
     final appColors = context.appColors;
     final colorScheme = Theme.of(context).colorScheme;
+    final effectiveColor = color ??
+        (hasScript ? appColors.success : colorScheme.outline);
+    final effectiveContainer = color != null
+        ? color.withValues(alpha: 0.12)
+        : hasScript
+            ? appColors.successContainer
+            : colorScheme.surfaceContainerHighest;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: hasScript
-            ? appColors.successContainer
-            : colorScheme.surfaceContainerHighest,
+        color: effectiveContainer,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(
-          color: hasScript ? appColors.success : colorScheme.outline,
-        ),
+        border: Border.all(color: effectiveColor),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            hasScript ? Icons.check : Icons.close,
-            size: 12,
-            color: hasScript ? appColors.success : colorScheme.outline,
+            color != null
+                ? Icons.circle
+                : (hasScript ? Icons.check : Icons.close),
+            size: color != null ? 6 : 12,
+            color: effectiveColor,
           ),
-          const SizedBox(width: 2),
+          const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 11,
-              color: hasScript
-                  ? appColors.onSuccessContainer
-                  : colorScheme.onSurfaceVariant,
+              color: color != null
+                  ? effectiveColor
+                  : hasScript
+                      ? appColors.onSuccessContainer
+                      : colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -302,6 +551,123 @@ class _ScriptCard extends ConsumerWidget {
   }
 
   /// 查看脚本详情对话框
+  // ------------------------------------------------------------------
+  // 云端共享操作（v47 起）
+  // ------------------------------------------------------------------
+
+  /// 「共享到云端」：本地脚本上传（提交后进入管理员审核，成功提示等待审核）
+  Future<void> _onShareScript(
+      BuildContext context, WidgetRef ref, SiteScript script) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('共享到云端'),
+        content: Text(
+          '将 ${script.domain} 的提取脚本上传到云端脚本仓库，供其他用户下载使用。\n\n'
+          '上传后需经管理员安全审核，审核通过后其他用户才可见。',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('上传'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final result = await ref
+          .read(siteScriptListProvider.notifier)
+          .shareScript(script.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.deduplicated ? '该脚本已提交过，正在审核中' : '已提交，等待管理员审核',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('共享失败，请稍后重试')),
+      );
+    }
+  }
+
+  /// 「取消共享」：从云端撤下（需为作者本人）
+  Future<void> _onUnshareScript(
+      BuildContext context, WidgetRef ref, SiteScript script) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('取消共享'),
+        content: Text(
+          '从云端脚本仓库撤下 ${script.domain} 的脚本？\n\n'
+          '已下载的用户不受影响，但新用户将无法再搜到。',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('撤下'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await ref
+          .read(siteScriptListProvider.notifier)
+          .unshareScript(script.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已从云端撤下')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('取消共享失败，请稍后重试')),
+      );
+    }
+  }
+
+  /// 「检查更新」：云端脚本是否有新版本，有则直接应用
+  Future<void> _onCheckUpdate(
+      BuildContext context, WidgetRef ref, SiteScript script) async {
+    try {
+      final newVersion = await ref
+          .read(siteScriptListProvider.notifier)
+          .checkAndApplyUpdate(script.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newVersion == null
+                ? '已是最新版本（v${script.remoteVersion}）'
+                : '已升级到 v$newVersion',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('检查更新失败，请稍后重试')),
+      );
+    }
+  }
+
   void _showViewDialog(BuildContext context, SiteScript script) {
     showDialog(
       context: context,
@@ -535,7 +901,7 @@ class _ScriptCard extends ConsumerWidget {
     }
 
     // 替换 {{URL}} 为测试 URL
-    final resolvedScript = scriptCode.replaceAll('{{URL}}', testUrl);
+    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(scriptCode, testUrl);
 
     // 提取 IIFE 函数体（Agent 生成的脚本是 async IIFE，
     // 需拆出函数体供 callAsyncJavaScript 执行）

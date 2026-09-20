@@ -12,6 +12,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+/// 书馆美学种子色（琥珀）：暗夜书馆 / 晨读书馆 共用基调。
+/// ThemeState 默认值与 main() 兜底主题必须引用同一常量，避免启动闪色差。
+const Color kBrandSeedColor = Color(0xFFB8843A);
+
 /// 应用自定义颜色主题扩展
 @immutable
 class AppColors extends ThemeExtension<AppColors> {

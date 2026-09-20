@@ -38,6 +38,9 @@ import 'dart:ui' show Size;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../repositories/site_script_repository.dart';
+import '../services/crawler/browser_mode.dart';
+import '../services/crawler/crawl_request.dart';
+import '../services/crawler/crawl_request_resolver.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
 import '../services/site_bookshelf_parser.dart';
@@ -47,10 +50,13 @@ import 'webview_page_loader.dart';
 
 class HeadlessWebViewBookshelfService {
   final SiteScriptRepository _scriptRepo;
+  final CrawlRequestResolver _resolver;
 
   HeadlessWebViewBookshelfService({
     required SiteScriptRepository scriptRepo,
-  }) : _scriptRepo = scriptRepo;
+    required CrawlRequestResolver resolver,
+  })  : _scriptRepo = scriptRepo,
+        _resolver = resolver;
 
   // ===== 自管 Headless WebView 单例 =====
 
@@ -89,51 +95,48 @@ class HeadlessWebViewBookshelfService {
     String? logDomain;
     final stopwatch = Stopwatch()..start();
     try {
-      final domain = _extractDomain(url);
-      if (domain == null) {
-        LoggerService.instance.w(
-          'HeadlessWebViewBookshelf: outcome=noScript reason=invalid_url '
-          'url=$url durationMs=${stopwatch.elapsedMilliseconds}',
-          category: LogCategory.crawler,
-          tags: ['headless-webview', 'site-bookshelf', 'no-script'],
-        );
-        return FetchSiteBookshelfResult.noScript();
-      }
-      logDomain = domain;
-
-      final script = await _scriptRepo.getByDomain(domain);
-      if (script == null || !script.hasBookshelfJs) {
+      // ===== P1: URL×脚本×模式对齐（resolver 是唯一入口） =====
+      final inputUri = Uri.tryParse(url);
+      final resolution = await _resolver.resolve(inputUri, ScriptSlot.bookshelf);
+      if (resolution is! CrawlAligned) {
+        final noScript = resolution as CrawlNoScript;
         LoggerService.instance.i(
           'HeadlessWebViewBookshelf: outcome=noScript '
-          'reason=${script == null ? 'no_script' : 'no_bookshelf_js'} '
-          'domain=$logDomain url=$url durationMs=${stopwatch.elapsedMilliseconds}',
+          'reason=${inputUri == null || inputUri.host.isEmpty ? 'invalid_url' : (noScript.siteKey == null ? 'invalid_url' : 'no_bookshelf_js')} '
+          'domain=${noScript.siteKey} url=$url durationMs=${stopwatch.elapsedMilliseconds}',
           category: LogCategory.crawler,
           tags: ['headless-webview', 'site-bookshelf', 'no-script'],
         );
         return FetchSiteBookshelfResult.noScript();
       }
-      scriptId = script.id;
+      final request = resolution.request;
+      scriptId = request.script.id;
+      logDomain = request.script.domain;
+      final canonicalUrl = request.canonicalUrl;
+      final hostRewrite = request.hostRewriteLog;
 
       LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 开始 domain=$domain scriptId=$scriptId '
-        'url=$url mode=${_modeLabel(script.preferredMode)}',
+        'HeadlessWebViewBookshelf: 开始 domain=${request.script.domain} '
+        'scriptId=$scriptId canonicalUrl=$canonicalUrl '
+        'mode=${request.mode.logName}'
+        '${hostRewrite == null ? '' : ' hostRewrite=$hostRewrite'}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'site-bookshelf', 'fetch'],
       );
 
       await _ensureWebView(
+        mode: request.mode,
         domain: logDomain,
         scriptId: scriptId,
-        requiredPreferredMode: script.preferredMode,
       );
 
-      // 等待 onLoadStop（超时抛 PageLoadFailedException）
-      await _loadPage(url);
+      // 加载对齐后的 URL（host 已与脚本验证环境自洽，理论上不再触发跳转）
+      await _loadPage(canonicalUrl.toString());
 
       final result = await _executeBookshelfScript(
         _controller!,
-        script.bookshelfJs,
-        url,
+        request.script.bookshelfJs,
+        canonicalUrl.toString(),
         domain: logDomain,
         scriptId: scriptId,
       );
@@ -164,7 +167,7 @@ class HeadlessWebViewBookshelfService {
       LoggerService.instance.i(
         'HeadlessWebViewBookshelf: outcome=success '
         'domain=$logDomain scriptId=$scriptId count=${result.length} '
-        'mode=${_modeLabel(script.preferredMode)} '
+        'mode=${request.mode.logName} '
         'durationMs=${stopwatch.elapsedMilliseconds}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'site-bookshelf', 'success'],
@@ -207,36 +210,16 @@ class HeadlessWebViewBookshelfService {
 
   // ===== 内部实现 =====
 
-  String? _extractDomain(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.host.isNotEmpty ? uri.host : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 解析目标模式：脚本创作模式优先（1=桌面 / 2=手机），未设置回退全局设置
-  static bool _resolveTargetDesktop(int? preferredMode) {
-    if (preferredMode == 1) return true;
-    if (preferredMode == 2) return false;
-    return BrowserSettingsService.desktopModeSync;
-  }
+  /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
   static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
 
-  static String _modeLabel(int preferredMode) {
-    if (preferredMode == 1) return 'desktop';
-    if (preferredMode == 2) return 'mobile';
-    return 'global';
-  }
-
   Future<void> _ensureWebView({
+    required BrowserMode mode,
     String? domain,
     String? scriptId,
-    int? requiredPreferredMode,
   }) async {
-    final targetDesktop = _resolveTargetDesktop(requiredPreferredMode);
+    final targetDesktop = mode == BrowserMode.desktop;
     if (_controller != null) {
       if (_desktopModeAtCreation == targetDesktop) return;
       LoggerService.instance.i(
@@ -272,7 +255,7 @@ class HeadlessWebViewBookshelfService {
       final completer = Completer<InAppWebViewController>();
 
       _headlessWebView = HeadlessInAppWebView(
-        initialSize: BrowserSettingsService.desktopModeSync
+        initialSize: targetDesktop
             ? BrowserSettingsService.headlessDesktopSize
             : const Size(-1, -1),
         onWebViewCreated: (controller) {
@@ -281,8 +264,10 @@ class HeadlessWebViewBookshelfService {
         onLoadStop: _pageLoader.onLoadStopCallback,
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
-          // UA 跟随用户内置浏览器的桌面模式：站点按 UA 分流电脑版/手机版
-          userAgent: BrowserSettingsService.headlessUserAgent,
+          // UA 与已对齐的 target 模式一致（不再读全局，保证「创建即目标模式」）
+          userAgent: targetDesktop
+              ? BrowserSettingsService.headlessUserAgent
+              : '',
           loadsImagesAutomatically: false,
           mediaPlaybackRequiresUserGesture: true,
         ),
@@ -343,7 +328,7 @@ class HeadlessWebViewBookshelfService {
       );
       return null;
     }
-    final resolved = scriptTemplate.replaceAll('{{URL}}', pageUrl);
+    final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
     final functionBody =
         WebViewJsExecutor.extractAsyncFunctionBody(resolved);
 

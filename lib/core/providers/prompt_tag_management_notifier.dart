@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/prompt_tag.dart';
 import '../../models/prompt_tag_category.dart';
 import '../../models/tag_group.dart';
+import '../../services/logger_service.dart';
 import 'database_providers.dart';
 
 /// 提示词标签管理聚合状态
@@ -84,7 +85,21 @@ class PromptTagManagementNotifier
     extends StateNotifier<PromptTagManagementState> {
   PromptTagManagementNotifier(this._ref)
       : super(const PromptTagManagementState()) {
-    _loadCategories();
+    // 构造期启动的初始化必须包 try/catch，否则任一错误会变成
+    // unhandled async exception，且 isLoadingCategories=true 永久保留，
+    // UI 卡死。失败时降级为空列表 + 错误状态供 UI 展示。
+    _loadCategories().catchError((Object e, StackTrace st) {
+      LoggerService.instance.e(
+        'PromptTagManagementNotifier 初始化失败: $e',
+        stackTrace: st.toString(),
+        category: LogCategory.ui,
+        tags: ['prompt-tag', 'init', 'failed'],
+      );
+      state = state.copyWith(
+        isLoadingCategories: false,
+        categories: const [],
+      );
+    });
   }
 
   final Ref _ref;

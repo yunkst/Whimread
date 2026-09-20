@@ -43,9 +43,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chapter_content_result.dart';
 import '../repositories/site_script_repository.dart';
-import 'browser_settings_service.dart';
+import '../services/crawler/browser_mode.dart';
+import '../services/crawler/crawl_request.dart';
+import '../services/crawler/crawl_request_resolver.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
+import 'browser_settings_service.dart';
 import 'headless_webview_errors.dart';
 import 'ocr_pua_renderer.dart';
 import 'ocr_restore_service.dart';
@@ -53,12 +56,15 @@ import 'webview_page_loader.dart';
 
 class HeadlessWebViewContentService {
   final SiteScriptRepository _scriptRepo;
+  final CrawlRequestResolver _resolver;
   final Ref? _ref; // 产品路径非 null（读 ocrPredictorProvider），测试可不传
 
   HeadlessWebViewContentService({
     required SiteScriptRepository scriptRepo,
+    required CrawlRequestResolver resolver,
     Ref? ref,
   })  : _scriptRepo = scriptRepo,
+        _resolver = resolver,
         _ref = ref;
 
   // ===== Headless WebView 单例 =====
@@ -175,29 +181,34 @@ class HeadlessWebViewContentService {
     String? logDomain;
 
     try {
-      // 1. 查找该域名的提取脚本
-      final domain = _extractDomain(chapterUrl);
-      if (domain == null) return FetchContentResult.noScript();
-      logDomain = domain;
-
-      final script = await _scriptRepo.getByDomain(domain);
-      if (script == null || !script.hasChapterContentJs) {
+      // ===== P1: URL×脚本×模式对齐（resolver 是唯一入口） =====
+      final inputUri = Uri.tryParse(chapterUrl);
+      final resolution =
+          await _resolver.resolve(inputUri, ScriptSlot.chapterContent);
+      if (resolution is! CrawlAligned) {
         return FetchContentResult.noScript();
       }
+      final request = resolution.request;
+      final script = request.script;
       scriptId = script.id;
+      logDomain = script.domain;
+      final canonicalUrl = request.canonicalUrl;
+      final hostRewrite = request.hostRewriteLog;
 
-      // 2. 确保 WebView 就绪（按脚本创作模式决定实例桌面/手机）
-      await _ensureWebView(requiredPreferredMode: script.preferredMode);
+      // 2. 确保 WebView 就绪（模式已由 resolver 对齐）
+      await _ensureWebView(mode: request.mode);
 
       LoggerService.instance.i(
-        'HeadlessWebView: 开始获取 domain=$domain scriptId=$scriptId url=$chapterUrl '
-        'priority=$priority mode=${_modeLabel(script.preferredMode)}',
+        'HeadlessWebView: 开始获取 domain=${script.domain} scriptId=$scriptId '
+        'canonicalUrl=$canonicalUrl priority=$priority '
+        'mode=${request.mode.logName}'
+        '${hostRewrite == null ? '' : ' hostRewrite=$hostRewrite'}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'fetch'],
       );
 
-      // 3. 加载页面
-      await _loadPage(chapterUrl);
+      // 3. 加载对齐后的 URL
+      await _loadPage(canonicalUrl.toString());
 
       // 抢占检查点：页面加载后
       if (_shouldYield) {
@@ -212,7 +223,7 @@ class HeadlessWebViewContentService {
       // 4. 执行提取脚本
       final result = await _executeContentScript(
         script.chapterContentJs,
-        chapterUrl,
+        canonicalUrl.toString(),
       );
 
       // 抢占检查点：脚本执行后
@@ -229,7 +240,7 @@ class HeadlessWebViewContentService {
       if (result == null || result.content.trim().isEmpty) {
         _recordFailure(script.id);
         LoggerService.instance.w(
-          'HeadlessWebView: 脚本返回空内容 domain=$domain',
+          'HeadlessWebView: 脚本返回空内容 domain=$logDomain',
           category: LogCategory.crawler,
           tags: ['headless-webview', 'empty-result'],
         );
@@ -239,7 +250,7 @@ class HeadlessWebViewContentService {
       if (result.content.trim().length < 50) {
         _recordFailure(script.id);
         LoggerService.instance.w(
-          'HeadlessWebView: 内容过短(${result.content.length}字符) domain=$domain',
+          'HeadlessWebView: 内容过短(${result.content.length}字符) domain=$logDomain',
           category: LogCategory.crawler,
           tags: ['headless-webview', 'short-content'],
         );
@@ -250,8 +261,8 @@ class HeadlessWebViewContentService {
       _recordSuccess(script.id);
 
       LoggerService.instance.i(
-        'HeadlessWebView: 获取成功 domain=$domain scriptId=$scriptId '
-        'len=${result.content.length} mode=${_modeLabel(script.preferredMode)}',
+        'HeadlessWebView: 获取成功 domain=$logDomain scriptId=$scriptId '
+        'len=${result.content.length} mode=${request.mode.logName}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'success'],
       );
@@ -402,38 +413,16 @@ class HeadlessWebViewContentService {
 
   // ===== 内部实现 =====
 
-  /// 从 URL 提取域名
-  String? _extractDomain(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.host.isNotEmpty ? uri.host : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 解析目标模式：脚本创作模式优先（1=桌面 / 2=手机），未设置回退全局设置
-  static bool _resolveTargetDesktop(int? preferredMode) {
-    if (preferredMode == 1) return true;
-    if (preferredMode == 2) return false;
-    return BrowserSettingsService.desktopModeSync;
-  }
+  /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
   static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
 
-  static String _modeLabel(int preferredMode) {
-    if (preferredMode == 1) return 'desktop';
-    if (preferredMode == 2) return 'mobile';
-    return 'global';
-  }
-
   /// 确保 HeadlessInAppWebView 已初始化
   ///
-  /// [requiredPreferredMode] 为本次要执行的脚本的 preferredMode
-  /// （v46 起：1=桌面 / 2=手机 / 0=未设置）；未设置时回退到全局桌面模式设置。
+  /// [mode] 是 Resolver 对齐后的目标模式（已是「脚本模式优先 / 全局兜底」结果）。
   /// 实例模式与目标不一致则销毁重建（一次 fetch 内部应自洽，不中途切 UA）。
-  Future<void> _ensureWebView({int? requiredPreferredMode}) async {
-    final targetDesktop = _resolveTargetDesktop(requiredPreferredMode);
+  Future<void> _ensureWebView({required BrowserMode mode}) async {
+    final targetDesktop = mode == BrowserMode.desktop;
     if (_controller != null) {
       if (_desktopModeAtCreation == targetDesktop) return;
       LoggerService.instance.i(
@@ -466,7 +455,7 @@ class HeadlessWebViewContentService {
       final completer = Completer<InAppWebViewController>();
 
       _headlessWebView = HeadlessInAppWebView(
-        initialSize: BrowserSettingsService.desktopModeSync
+        initialSize: targetDesktop
             ? BrowserSettingsService.headlessDesktopSize
             : const Size(-1, -1),
         onWebViewCreated: (controller) {
@@ -478,8 +467,10 @@ class HeadlessWebViewContentService {
         onLoadStop: _pageLoader.onLoadStopCallback,
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
-          // UA 跟随用户内置浏览器的桌面模式：站点按 UA 分流电脑版/手机版
-          userAgent: BrowserSettingsService.headlessUserAgent,
+          // UA 与已对齐的 target 模式一致（不再读全局，保证「创建即目标模式」）
+          userAgent: targetDesktop
+              ? BrowserSettingsService.headlessUserAgent
+              : '',
           // 不加载图片，节省流量和时间
           loadsImagesAutomatically: false,
           // 禁用不需要的功能
@@ -550,7 +541,7 @@ class HeadlessWebViewContentService {
     }
 
     // 替换 {{URL}} → 实际 URL
-    final resolvedScript = scriptTemplate.replaceAll('{{URL}}', pageUrl);
+    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
 
     // 提取 IIFE 函数体
     final functionBody =

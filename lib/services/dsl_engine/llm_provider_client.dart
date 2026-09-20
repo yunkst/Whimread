@@ -46,6 +46,14 @@ class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
   /// 白名单内，会按瞬态错误走重试预算。
   static const Duration _responseReadTimeout = Duration(minutes: 2);
 
+  /// 流式响应空闲超时：两个连续 chunk 之间最长允许的间隔。
+  ///
+  /// 服务方接受请求、返回 200 与部分 chunk 后挂起（既不流结束也不报错），
+  /// `_wrapStreamWithLogging` 的 `await for` 会无限等待。
+  /// 设 90s 与连接空闲超时（60s）保留 30s buffer，超过则抛 TimeoutException
+  /// 触发 withRetry 的瞬态错误重试。
+  static const Duration _streamIdleTimeout = Duration(seconds: 90);
+
   // connectionTimeout: TCP/TLS 建连超时；idleTimeout: 空闲连接超时
   final io.HttpClient _client = io.HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
@@ -213,7 +221,14 @@ class IoLlmHttpClient implements LlmHttpClient, DisposableTransport {
     Stopwatch stopwatch, StringBuffer buffer,
   ) async* {
     try {
-      await for (final chunk in source) {
+      // 流式读取在每个 chunk 上加空闲超时：服务端接受请求但卡死时
+      // （200 + 部分 chunk 后挂起），不至于 await for 永久阻塞。
+      await for (final chunk in source.timeout(_streamIdleTimeout,
+          onTimeout: (EventSink<String> sink) {
+        sink.addError(TimeoutException(
+            'LLM 流式响应空闲超过 $_streamIdleTimeout', _streamIdleTimeout));
+        sink.close();
+      })) {
         buffer.write(chunk);
         yield chunk;
       }

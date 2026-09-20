@@ -11,7 +11,9 @@ import '../core/providers/bookshelf_providers.dart';
 ///
 /// 用自定义 Row 而非 Material TabBar——状态由 Riverpod 持有，
 /// TabBar 走 controller 同步较重；此处只需要"点击即切 + 下划线指示器"。
-/// Tab 少于视口宽度时均分铺满，超出时横向滚动。
+/// Tab 总宽未超视口时按自然宽度比例分配 flex 铺满（每个 Tab 分到的宽度
+/// ≥ 自身自然宽度，避免长站点名被压缩折行）；超出时横向滚动。
+/// Tab 文字兜底设了 maxLines:1 + ellipsis，任何情况下都不会变两行。
 class BookshelfTabBar extends ConsumerWidget {
   const BookshelfTabBar({super.key});
 
@@ -51,13 +53,26 @@ class BookshelfTabBar extends ConsumerWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          // 用 TextPainter 按真实样式量宽（含系统字体缩放），
+          // 替代字符数估算，保证"是否超宽"与"flex 分配"都贴合实际渲染
+          final tabWidths = [
+            for (final t in tabs)
+              _measureTabTextWidth(
+                    context,
+                    label: t.label,
+                    selected: t.selected,
+                  ) +
+                  _tabHorizontalPadding,
+          ];
           final totalWidth =
-              tabs.fold<double>(0, (w, t) => w + _estimateTabWidth(t.label));
+              tabWidths.fold<double>(0, (w, x) => w + x);
           if (totalWidth <= constraints.maxWidth) {
-            // 未超宽：均分铺满（与旧三档 Tab 的视觉一致）
+            // 未超宽：按自然宽度比例分配 flex 铺满。总 flex ≈ 总自然宽度 ≤
+            // 视口宽，故每个 Tab 分到的宽度 ≥ 自身自然宽度，长标签不折行
             return Row(
               children: [
-                for (final t in tabs) Expanded(child: t),
+                for (var i = 0; i < tabs.length; i++)
+                  Expanded(flex: tabWidths[i].round(), child: tabs[i]),
               ],
             );
           }
@@ -71,13 +86,27 @@ class BookshelfTabBar extends ConsumerWidget {
     );
   }
 
-  /// 估算 Tab 自然宽度（中文按 fontSize 全宽、西文按 ~0.62 倍宽 + 水平 padding）
-  static double _estimateTabWidth(String label) {
-    var textWidth = 0.0;
-    for (final rune in label.runes) {
-      textWidth += rune > 0x2E7F ? 15.0 : 15.0 * 0.62; // fontSize 15
-    }
-    return textWidth + 32; // 水平 padding 16 * 2
+  /// Tab 水平 padding（_BookshelfTab 的 EdgeInsets.symmetric(horizontal: 16)）
+  static const double _tabHorizontalPadding = 32;
+
+  /// 量取 Tab 标签文字的真实渲染宽度（fontSize/字重与 [_BookshelfTab] 一致）
+  static double _measureTabTextWidth(
+    BuildContext context, {
+    required String label,
+    required bool selected,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(); // 默认 maxWidth 无穷，单行量出自然宽度
+    return painter.width;
   }
 }
 
@@ -115,6 +144,8 @@ class _BookshelfTab extends StatelessWidget {
         child: Center(
           child: Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 15,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,

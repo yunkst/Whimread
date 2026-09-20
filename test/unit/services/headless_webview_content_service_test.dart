@@ -14,6 +14,7 @@ import 'package:mockito/mockito.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:novel_app/services/headless_webview_content_service.dart';
+import 'package:novel_app/services/crawler/crawl_request_resolver.dart';
 import 'package:novel_app/services/headless_webview_errors.dart';
 import 'package:novel_app/repositories/site_script_repository.dart';
 import 'package:novel_app/models/site_script.dart';
@@ -29,6 +30,14 @@ class MockSiteScriptRepository extends Mock implements SiteScriptRepository {
   Future<SiteScript?> getByDomain(String domain) =>
       super.noSuchMethod(
         Invocation.method(#getByDomain, [domain]),
+        returnValue: Future<SiteScript?>.value(null),
+        returnValueForMissingStub: Future<SiteScript?>.value(null),
+      ) as Future<SiteScript?>;
+
+  @override
+  Future<SiteScript?> findByUrlHost(String host) =>
+      super.noSuchMethod(
+        Invocation.method(#findByUrlHost, [host]),
         returnValue: Future<SiteScript?>.value(null),
         returnValueForMissingStub: Future<SiteScript?>.value(null),
       ) as Future<SiteScript?>;
@@ -95,7 +104,12 @@ void main() {
   setUp(() {
     LoggerService.resetForTesting();
     mockScriptRepo = MockSiteScriptRepository();
-    service = HeadlessWebViewContentService(scriptRepo: mockScriptRepo);
+    // P1 后 fetchContent 走 resolver；旧版测试大多用 stub 的方法直接验证，
+    // 这里构造一个带默认全局模式=desktop 的 resolver 即可。
+    service = HeadlessWebViewContentService(
+      scriptRepo: mockScriptRepo,
+      resolver: CrawlRequestResolver(scriptRepo: mockScriptRepo),
+    );
   });
 
   tearDown(() {
@@ -108,60 +122,60 @@ void main() {
   group('_extractDomain', () {
     test('标准 HTTPS URL → 提取域名', () async {
       // 通过 fetchContent 间接验证：传入有效 URL + 无脚本 → 返回 null
-      // 说明 _extractDomain 成功提取了域名
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      // 说明 Resolver 成功按 host 变体等价匹配脚本
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => null);
 
       final result = await service.fetchContent(
         'https://www.example.com/chapter/1.html',
       );
       expect(result.isNoScript, isTrue);
-      verify(mockScriptRepo.getByDomain('www.example.com')).called(1);
+      verify(mockScriptRepo.findByUrlHost('www.example.com')).called(1);
     });
 
     test('带端口号的 URL → 正确提取域名', () async {
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => null);
 
       final result = await service.fetchContent(
         'https://www.example.com:8080/chapter/1.html',
       );
       expect(result.isNoScript, isTrue);
-      verify(mockScriptRepo.getByDomain('www.example.com')).called(1);
+      verify(mockScriptRepo.findByUrlHost('www.example.com')).called(1);
     });
 
     test('带查询参数的 URL → 正确提取域名', () async {
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => null);
 
       final result = await service.fetchContent(
         'https://www.example.com/chapter/1.html?page=2&ref=home',
       );
       expect(result.isNoScript, isTrue);
-      verify(mockScriptRepo.getByDomain('www.example.com')).called(1);
+      verify(mockScriptRepo.findByUrlHost('www.example.com')).called(1);
     });
 
     test('子域名 URL → 完整提取子域名', () async {
-      when(mockScriptRepo.getByDomain('m.alicesw.com'))
+      when(mockScriptRepo.findByUrlHost('m.alicesw.com'))
           .thenAnswer((_) async => null);
 
       final result = await service.fetchContent(
         'https://m.alicesw.com/chapter/1.html',
       );
       expect(result.isNoScript, isTrue);
-      verify(mockScriptRepo.getByDomain('m.alicesw.com')).called(1);
+      verify(mockScriptRepo.findByUrlHost('m.alicesw.com')).called(1);
     });
 
     test('非法 URL → 返回 noScript', () async {
       final result = await service.fetchContent('not-a-valid-url');
       expect(result.isNoScript, isTrue);
-      // 非法 URL 不应调用 getByDomain
+      // 非法 URL 不应调用 findByUrlHost
     });
 
     test('空字符串 → 返回 noScript', () async {
       final result = await service.fetchContent('');
       expect(result.isNoScript, isTrue);
-      // 空字符串不应调用 getByDomain
+      // 空字符串不应调用 findByUrlHost
     });
   });
 
@@ -170,7 +184,7 @@ void main() {
   // ================================================================
   group('fetchContent 路由决策', () {
     test('域名无脚本 → 返回 noScript', () async {
-      when(mockScriptRepo.getByDomain('www.noscript.com'))
+      when(mockScriptRepo.findByUrlHost('www.noscript.com'))
           .thenAnswer((_) async => null);
 
       final result = await service.fetchContent(
@@ -184,7 +198,7 @@ void main() {
         domain: 'www.example.com',
         chapterContentJs: '', // 空的内容脚本
       );
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => script);
 
       final result = await service.fetchContent(
@@ -203,7 +217,7 @@ void main() {
 
     test('有脚本且 verified=1 → 尝试 WebView（因无原生运行时抛异常，返回 noScript）', () async {
       final script = _makeScript(domain: 'www.example.com');
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => script);
 
       // 有 verified 脚本时会走到 _ensureWebView()，纯 Dart 测试中
@@ -221,7 +235,7 @@ void main() {
       // 这个测试验证并发保护：当已有请求在进行中时，新请求直接返回 null
       // 由于 _isFetching 是私有字段，通过连续两次调用间接验证
       final script = _makeScript(domain: 'www.example.com');
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => script);
 
       // 第一次调用会设置 _isFetching = true，然后因 WebView 失败重置
@@ -238,7 +252,7 @@ void main() {
   group('脚本健康度追踪', () {
     test('连续失败 3 次 → 自动标记 verified=0', () async {
       final script = _makeScript(domain: 'www.example.com');
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => script);
 
       // 3 次 fetchContent 都会因 WebView 不可用而失败
@@ -255,7 +269,7 @@ void main() {
 
     test('失败 2 次 → 不标记 unverified', () async {
       final script = _makeScript(domain: 'www.example.com');
-      when(mockScriptRepo.getByDomain('www.example.com'))
+      when(mockScriptRepo.findByUrlHost('www.example.com'))
           .thenAnswer((_) async => script);
 
       for (var i = 0; i < 2; i++) {
@@ -279,9 +293,9 @@ void main() {
       final script1 = _makeScript(id: 'script-1', domain: 'www.site1.com');
       final script2 = _makeScript(id: 'script-2', domain: 'www.site2.com');
 
-      when(mockScriptRepo.getByDomain('www.site1.com'))
+      when(mockScriptRepo.findByUrlHost('www.site1.com'))
           .thenAnswer((_) async => script1);
-      when(mockScriptRepo.getByDomain('www.site2.com'))
+      when(mockScriptRepo.findByUrlHost('www.site2.com'))
           .thenAnswer((_) async => script2);
 
       // script1 失败 2 次

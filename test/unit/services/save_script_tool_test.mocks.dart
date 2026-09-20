@@ -82,15 +82,31 @@ class MockSiteScriptRepository extends _i1.Mock
       ) as bool);
 
   @override
-  _i3.Future<List<_i6.SiteScript>> getAll({int? limit = 50}) =>
+  _i3.Future<List<_i6.SiteScript>> getAll({
+    int? limit = 50,
+    _i6.ScriptSource? sourceFilter,
+  }) =>
       (super.noSuchMethod(
         Invocation.method(
           #getAll,
           [],
-          {#limit: limit},
+          {
+            #limit: limit,
+            #sourceFilter: sourceFilter,
+          },
         ),
         returnValue: _i3.Future<List<_i6.SiteScript>>.value(<_i6.SiteScript>[]),
       ) as _i3.Future<List<_i6.SiteScript>>);
+
+  @override
+  _i3.Future<_i6.SiteScript?> findByUrlHost(String? host) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #findByUrlHost,
+          [host],
+        ),
+        returnValue: _i3.Future<_i6.SiteScript?>.value(),
+      ) as _i3.Future<_i6.SiteScript?>);
 
   @override
   _i3.Future<_i6.SiteScript?> getByDomain(String? domain) =>
@@ -258,6 +274,117 @@ class MockSiteScriptRepository extends _i1.Mock
             _i3.Future<({String? id, String? reason, bool success})>.value(
                 (id: null, reason: null, success: false)),
       ) as _i3.Future<({String? id, String? reason, bool success})>);
+
+  @override
+  _i3.Future<_i6.SiteScript?> findByRemoteId(String? remoteId) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #findByRemoteId,
+          [remoteId],
+        ),
+        returnValue: _i3.Future<_i6.SiteScript?>.value(),
+      ) as _i3.Future<_i6.SiteScript?>);
+
+  @override
+  _i3.Future<({String id, bool isInsert})> insertRemoteDownload(
+          _i6.SiteScript? script) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #insertRemoteDownload,
+          [script],
+        ),
+        returnValue: _i3.Future<({String id, bool isInsert})>.value((
+          id: _i7.dummyValue<String>(
+            this,
+            Invocation.method(
+              #insertRemoteDownload,
+              [script],
+            ),
+          ),
+          isInsert: false
+        )),
+      ) as _i3.Future<({String id, bool isInsert})>);
+
+  @override
+  _i3.Future<void> updateFromRemote(
+    String? id, {
+    required String? chapterListJs,
+    required String? chapterContentJs,
+    String? bookshelfJs = '',
+    String? urlPattern = '',
+    String? sampleUrl = '',
+    bool? chapterListOcr = false,
+    bool? chapterContentOcr = false,
+    required String? sha256,
+    required int? remoteVersion,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #updateFromRemote,
+          [id],
+          {
+            #chapterListJs: chapterListJs,
+            #chapterContentJs: chapterContentJs,
+            #bookshelfJs: bookshelfJs,
+            #urlPattern: urlPattern,
+            #sampleUrl: sampleUrl,
+            #chapterListOcr: chapterListOcr,
+            #chapterContentOcr: chapterContentOcr,
+            #sha256: sha256,
+            #remoteVersion: remoteVersion,
+          },
+        ),
+        returnValue: _i3.Future<void>.value(),
+        returnValueForMissingStub: _i3.Future<void>.value(),
+      ) as _i3.Future<void>);
+
+  @override
+  _i3.Future<void> markShared(
+    String? id, {
+    required String? remoteId,
+    required int? version,
+    required String? sha256,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #markShared,
+          [id],
+          {
+            #remoteId: remoteId,
+            #version: version,
+            #sha256: sha256,
+          },
+        ),
+        returnValue: _i3.Future<void>.value(),
+        returnValueForMissingStub: _i3.Future<void>.value(),
+      ) as _i3.Future<void>);
+
+  @override
+  _i3.Future<void> markUnshared(String? id) => (super.noSuchMethod(
+        Invocation.method(
+          #markUnshared,
+          [id],
+        ),
+        returnValue: _i3.Future<void>.value(),
+        returnValueForMissingStub: _i3.Future<void>.value(),
+      ) as _i3.Future<void>);
+
+  @override
+  _i3.Future<void> setEnabled(
+    String? id,
+    bool? enabled,
+  ) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #setEnabled,
+          [
+            id,
+            enabled,
+          ],
+        ),
+        returnValue: _i3.Future<void>.value(),
+        returnValueForMissingStub: _i3.Future<void>.value(),
+      ) as _i3.Future<void>);
 
   @override
   _i3.Future<T> guard<T>(

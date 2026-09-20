@@ -372,7 +372,12 @@ class BackupService {
 
     // 验证恢复
     try {
-      await dbConnection.database;
+      final db = await dbConnection.database;
+      // 必须真正跑一次查询：sqflite 对打开是惰性的，header 合法但页数据
+      // 损坏的文件 openDatabase 不会立刻报错，直到首次查询才抛
+      // 'file is not a database'。缺少这一步时，损坏备份会被当作恢复
+      // 成功（旧库已被覆盖成空表结构），回滚分支永远不可达。
+      await db.rawQuery('SELECT count(*) FROM sqlite_master');
       LoggerService.instance.i(
         '数据库重新打开成功',
         category: LogCategory.backup,

@@ -21,6 +21,7 @@ import 'package:dio/io.dart';
 import 'dart:io';
 import '../../../services/api_service_wrapper.dart';
 import '../../../services/preload_service.dart';
+import '../../../services/crawler/crawl_request_resolver.dart';
 import '../../../services/headless_webview_bookshelf_service.dart';
 import '../../../services/headless_webview_content_service.dart';
 import '../../../services/headless_webview_chapter_list_service.dart';
@@ -258,7 +259,11 @@ PreloadService preloadService(Ref ref) {
 @Riverpod(keepAlive: true)
 HeadlessWebViewContentService headlessWebViewContentService(Ref ref) {
   final scriptRepo = ref.watch(siteScriptRepositoryProvider);
-  return HeadlessWebViewContentService(scriptRepo: scriptRepo, ref: ref);
+  return HeadlessWebViewContentService(
+    scriptRepo: scriptRepo,
+    ref: ref,
+    resolver: ref.watch(crawlRequestResolverProvider),
+  );
 }
 
 /// HeadlessWebViewChapterListService Provider
@@ -282,7 +287,11 @@ HeadlessWebViewContentService headlessWebViewContentService(Ref ref) {
 @Riverpod(keepAlive: true)
 HeadlessWebViewChapterListService headlessWebViewChapterListService(Ref ref) {
   final scriptRepo = ref.watch(siteScriptRepositoryProvider);
-  return HeadlessWebViewChapterListService(scriptRepo: scriptRepo, ref: ref);
+  return HeadlessWebViewChapterListService(
+    scriptRepo: scriptRepo,
+    ref: ref,
+    resolver: ref.watch(crawlRequestResolverProvider),
+  );
 }
 
 /// HeadlessWebViewBookshelfService Provider
@@ -305,5 +314,19 @@ HeadlessWebViewChapterListService headlessWebViewChapterListService(Ref ref) {
 @Riverpod(keepAlive: true)
 HeadlessWebViewBookshelfService headlessWebViewBookshelfService(Ref ref) {
   final scriptRepo = ref.watch(siteScriptRepositoryProvider);
-  return HeadlessWebViewBookshelfService(scriptRepo: scriptRepo);
+  return HeadlessWebViewBookshelfService(
+    scriptRepo: scriptRepo,
+    resolver: ref.watch(crawlRequestResolverProvider),
+  );
+}
+
+/// 爬取请求解析器 Provider
+///
+/// 「URL×脚本×模式」对齐的唯一入口（P1 架构）。所有爬取组件共用，
+/// 不得各自另写 host 提取或脚本查找逻辑。
+@Riverpod(keepAlive: true)
+CrawlRequestResolver crawlRequestResolver(Ref ref) {
+  return CrawlRequestResolver(
+    scriptRepo: ref.watch(siteScriptRepositoryProvider),
+  );
 }

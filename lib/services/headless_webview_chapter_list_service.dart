@@ -43,22 +43,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chapter.dart';
 import '../repositories/site_script_repository.dart';
-import 'browser_settings_service.dart';
+import '../services/crawler/browser_mode.dart';
+import '../services/crawler/crawl_request.dart';
+import '../services/crawler/crawl_request_resolver.dart';
 import '../services/logger_service.dart';
 import '../services/novel_agent/scenarios/webview_js_executor.dart';
 import '../services/ocr_restore_service.dart';
+import 'browser_settings_service.dart';
 import 'headless_webview_errors.dart';
 import 'ocr_pua_renderer.dart';
 import 'webview_page_loader.dart';
 
 class HeadlessWebViewChapterListService {
   final SiteScriptRepository _scriptRepo;
-  final Ref? _ref; // 产品路径非 null（读 ocrPredictorProvider），测试可不传
+  final CrawlRequestResolver _resolver;
+  final Ref? _ref;
 
   HeadlessWebViewChapterListService({
     required SiteScriptRepository scriptRepo,
+    required CrawlRequestResolver resolver,
     Ref? ref,
   })  : _scriptRepo = scriptRepo,
+        _resolver = resolver,
         _ref = ref;
 
   // ===== 自管 Headless WebView 单例 =====
@@ -104,37 +110,42 @@ class HeadlessWebViewChapterListService {
     String? scriptId;
     String? logDomain;
     try {
-      // 1. 查找该域名的提取脚本
-      final domain = _extractDomain(novelUrl);
-      if (domain == null) return FetchChapterListResult.noScript();
-      logDomain = domain;
-
-      final script = await _scriptRepo.getByDomain(domain);
-      if (script == null || !script.hasChapterListJs) {
+      // ===== P1: URL×脚本×模式对齐（resolver 是唯一入口） =====
+      final inputUri = Uri.tryParse(novelUrl);
+      final resolution =
+          await _resolver.resolve(inputUri, ScriptSlot.chapterList);
+      if (resolution is! CrawlAligned) {
         return FetchChapterListResult.noScript();
       }
+      final request = resolution.request;
+      final script = request.script;
 
       // 捕获 script.id 用于失败计数与日志，避免 catch 中重复查库
       scriptId = script.id;
+      logDomain = script.domain;
+      final canonicalUrl = request.canonicalUrl;
+      final hostRewrite = request.hostRewriteLog;
 
       LoggerService.instance.i(
-        'HeadlessWebViewChapterList: 开始获取 domain=$domain scriptId=$scriptId '
-        'url=$novelUrl mode=${_modeLabel(script.preferredMode)}',
+        'HeadlessWebViewChapterList: 开始获取 domain=${script.domain} '
+        'scriptId=$scriptId canonicalUrl=$canonicalUrl '
+        'mode=${request.mode.logName}'
+        '${hostRewrite == null ? '' : ' hostRewrite=$hostRewrite'}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'fetch'],
       );
 
-      // 2. 确保 WebView 就绪（按脚本创作模式决定实例桌面/手机）
-      await _ensureWebView(requiredPreferredMode: script.preferredMode);
+      // 2. 确保 WebView 就绪（模式已由 resolver 对齐）
+      await _ensureWebView(mode: request.mode);
 
-      // 3. 加载页面（onLoadStop 等待，超时抛 PageLoadFailedException）
-      await _loadPage(novelUrl);
+      // 3. 加载对齐后的 URL
+      await _loadPage(canonicalUrl.toString());
 
       // 4. 执行提取脚本（返回 title + coverUrl + chapters + 可选 fontFamily）
       final result = await _executeChapterListScript(
         _controller!,
         script.chapterListJs,
-        novelUrl,
+        canonicalUrl.toString(),
       );
       if (result == null) {
         _recordFailure(scriptId);
@@ -186,7 +197,7 @@ class HeadlessWebViewChapterListService {
 
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 获取成功 domain=$logDomain scriptId=$scriptId '
-        'count=${chapters.length} coverUrl=$coverUrl mode=${_modeLabel(script.preferredMode)}',
+        'count=${chapters.length} coverUrl=$coverUrl mode=${request.mode.logName}',
         category: LogCategory.crawler,
         tags: ['headless-webview', 'chapter-list', 'success'],
       );
@@ -224,37 +235,16 @@ class HeadlessWebViewChapterListService {
 
   // ===== 内部实现 =====
 
-  String? _extractDomain(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.host.isNotEmpty ? uri.host : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 解析目标模式：脚本创作模式优先（1=桌面 / 2=手机），未设置回退全局设置
-  static bool _resolveTargetDesktop(int? preferredMode) {
-    if (preferredMode == 1) return true;
-    if (preferredMode == 2) return false;
-    return BrowserSettingsService.desktopModeSync;
-  }
+  /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
   static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
 
-  static String _modeLabel(int preferredMode) {
-    if (preferredMode == 1) return 'desktop';
-    if (preferredMode == 2) return 'mobile';
-    return 'global';
-  }
-
   /// 确保 HeadlessInAppWebView 已初始化
   ///
-  /// [requiredPreferredMode] 为本次要执行的脚本的 preferredMode
-  /// （v46 起：1=桌面 / 2=手机 / 0=未设置）；未设置时回退到全局桌面模式设置。
+  /// [mode] 是 Resolver 对齐后的目标模式（已是「脚本模式优先 / 全局兜底」结果）。
   /// 实例模式与目标不一致则销毁重建（一次 fetch 内部应自洽，不中途切 UA）。
-  Future<void> _ensureWebView({int? requiredPreferredMode}) async {
-    final targetDesktop = _resolveTargetDesktop(requiredPreferredMode);
+  Future<void> _ensureWebView({required BrowserMode mode}) async {
+    final targetDesktop = mode == BrowserMode.desktop;
     if (_controller != null) {
       if (_desktopModeAtCreation == targetDesktop) return;
       LoggerService.instance.i(
@@ -287,7 +277,7 @@ class HeadlessWebViewChapterListService {
       final completer = Completer<InAppWebViewController>();
 
       _headlessWebView = HeadlessInAppWebView(
-        initialSize: BrowserSettingsService.desktopModeSync
+        initialSize: targetDesktop
             ? BrowserSettingsService.headlessDesktopSize
             : const Size(-1, -1),
         onWebViewCreated: (controller) {
@@ -300,7 +290,9 @@ class HeadlessWebViewChapterListService {
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
           // UA 跟随用户内置浏览器的桌面模式：站点按 UA 分流电脑版/手机版
-          userAgent: BrowserSettingsService.headlessUserAgent,
+          userAgent: targetDesktop
+              ? BrowserSettingsService.headlessUserAgent
+              : '',
           // 不加载图片，节省流量和时间
           loadsImagesAutomatically: false,
           // 禁用不需要的功能
@@ -378,7 +370,7 @@ class HeadlessWebViewChapterListService {
     }
 
     // 替换 {{URL}} → 实际 URL
-    final resolvedScript = scriptTemplate.replaceAll('{{URL}}', pageUrl);
+    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
 
     // 提取 IIFE 函数体
     final functionBody =

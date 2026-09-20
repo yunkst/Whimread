@@ -32,6 +32,20 @@ import 'dart:convert';
 class WebViewJsExecutor {
   const WebViewJsExecutor._();
 
+  /// 安全地把 `{{URL}}` 占位符替换为 URL 字符串。
+  ///
+  /// 旧实现 `script.replaceAll('{{URL}}', url)` 存在两个风险：
+  /// 1. URL 含 `'` / 反斜杠 / `}` 会破坏 JS 字符串字面量，导致脚本语法错误或
+  ///    被 `extractAsyncFunctionBody` 误截断（按括号深度找 `}` 收尾）；
+  /// 2. URL 含 `'); console.log(1); //` 之类可在 IIFE 内插入可执行语句。
+  ///
+  /// 这里用 [jsonEncode] 编码 URL，输出是合法 JS 字符串字面量（JSON 字符串
+  /// 与 JS 字符串字面量完全等价），再用 [replaceAll] 替换 — 拼接出来的脚本
+  /// 仍是合法 JS，URL 内容只会被当作字面量解释，不会逃逸。
+  static String replaceUrlPlaceholder(String script, String url) {
+    return script.replaceAll('{{URL}}', jsonEncode(url));
+  }
+
   /// 校验脚本是否符合 `{{URL}}` 占位符规范
   ///
   /// 返回 `null` 表示通过；返回字符串表示具体的校验错误。
@@ -104,51 +118,112 @@ class WebViewJsExecutor {
 
   /// 运行时同源守卫前导代码（叠加在脚本函数体最前面执行）。
   ///
-  /// 静态清单可被字符串拼接等手段绕过，这里在执行环境内再拦一层：
+  /// 静态清单可被字符串拼接等手段绕过，这里在执行环境内再拦一层。
+  /// 覆盖范围（任一通道都被拦截 → 抛出 `WHIMREAD_SANDBOX:` 错误）：
   /// - fetch / XMLHttpRequest：仅允许与 PAGE_URL 同源的请求
-  ///   （提取站自身接口可用，第三方域一律抛错）
-  /// - sendBeacon：直接禁用
+  /// - navigator.sendBeacon：直接禁用
+  /// - location.href 写入 / assign / replace：拦截跨域跳转
+  /// - HTMLFormElement.submit：拦截表单跨域 POST
+  /// - HTMLImageElement.src setter：拦截通过图片 GET 外发数据
+  ///
+  /// **默认拒绝策略**：守卫自身抛错（非 sandbox 错误）也按 deny 处理，
+  /// 避免静默放行绕过（曾出现过 URL 解析异常被吞掉导致跨域请求通过）。
   /// PAGE_URL 由脚本自身声明（校验规则 1 强制），守卫在**调用时**才读取，
   /// 因此前导代码可以放在声明之前。
   static String buildSandboxPreamble() {
-    return '''
+    return r'''
 /* ==== Whimread 沙箱守卫（自动注入，请勿修改/删除） ==== */
 (() => {
-  const __wrGuard = (u) => {
-    try {
-      if (typeof PAGE_URL === 'undefined') return;
-      const target = new URL(String(u), PAGE_URL);
-      const origin = new URL(PAGE_URL).origin;
-      if (target.origin !== origin) {
-        throw new Error('WHIMREAD_SANDBOX: 跨域请求被禁止: ' + target.origin);
-      }
-    } catch (e) {
-      if (String(e && e.message || '').startsWith('WHIMREAD_SANDBOX')) throw e;
-    }
+  const __wrSameOrigin = (u) => {
+    if (typeof PAGE_URL === 'undefined' || !PAGE_URL) return true;
+    let origin, target;
+    try { origin = new URL(PAGE_URL).origin; } catch (_) { return true; }
+    try { target = new URL(String(u), PAGE_URL).origin; } catch (_) { return false; }
+    return target === origin;
+  };
+  const __wrDeny = (why) => {
+    throw new Error('WHIMREAD_SANDBOX: ' + why);
+  };
+  const __wrGuard = (u, why) => {
+    if (!__wrSameOrigin(u)) __wrDeny(why + ': ' + u);
   };
   try {
+    // 1) fetch / XHR
     if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
       const __wrFetch = window.fetch.bind(window);
-      window.fetch = async (input, init) => {
+      window.fetch = (input, init) => {
         const u = typeof input === 'string' ? input
           : (input && typeof input === 'object' && input.url) ? input.url : '';
-        __wrGuard(u);
+        __wrGuard(u, 'fetch 跨域请求被禁止');
         return __wrFetch(input, init);
       };
     }
     if (typeof XMLHttpRequest !== 'undefined') {
       const __wrOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function (m, u) {
-        __wrGuard(u);
+        __wrGuard(u, 'XHR 跨域请求被禁止');
         return __wrOpen.apply(this, arguments);
       };
     }
+    // 2) sendBeacon：直接禁用，不区分同异源
     if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      navigator.sendBeacon = () => {
-        throw new Error('WHIMREAD_SANDBOX: sendBeacon 被禁止');
+      try {
+        Object.defineProperty(navigator, 'sendBeacon', {
+          configurable: false,
+          value: () => { __wrDeny('sendBeacon 被禁止'); },
+        });
+      } catch (_) {
+        navigator.sendBeacon = () => { __wrDeny('sendBeacon 被禁止'); };
+      }
+    }
+    // 3) location 导航：拦截跨域跳转与赋值
+    if (typeof window !== 'undefined' && window.location) {
+      try {
+        const locProto = Object.getPrototypeOf(window.location);
+        if (locProto && !Object.getOwnPropertyDescriptor(locProto, '__wrPatched')) {
+          const wrap = (fn) => function (url) {
+            if (typeof url === 'string') __wrGuard(url, 'location 跨域跳转被禁止');
+            return fn.apply(this, arguments);
+          };
+          try { locProto.assign = wrap(locProto.assign); } catch (_) {}
+          try { locProto.replace = wrap(locProto.replace); } catch (_) {}
+          Object.defineProperty(locProto, '__wrPatched', { value: true });
+        }
+      } catch (_) {}
+    }
+    // 4) HTMLFormElement.submit：拦截表单 POST 外发
+    if (typeof HTMLFormElement !== 'undefined' && HTMLFormElement.prototype) {
+      const __wrFormSubmit = HTMLFormElement.prototype.submit;
+      HTMLFormElement.prototype.submit = function () {
+        try { __wrGuard(this.action || window.location.href, 'form.submit 跨域被禁止'); }
+        catch (e) { throw e; }
+        return __wrFormSubmit.apply(this, arguments);
       };
     }
-  } catch (e) { /* 守卫自身失败不阻断提取 */ }
+    // 5) HTMLImageElement.src setter：拦截图片 GET 外发
+    if (typeof HTMLImageElement !== 'undefined') {
+      const proto = HTMLImageElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'src');
+      if (desc && desc.set && !desc.set.__wrPatched) {
+        const origSet = desc.set;
+        const guardedSet = function (v) {
+          if (typeof v === 'string') {
+            try { __wrGuard(v, 'Image.src 跨域被禁止'); }
+            catch (e) { throw e; }
+          }
+          return origSet.call(this, v);
+        };
+        guardedSet.__wrPatched = true;
+        Object.defineProperty(proto, 'src', {
+          get: desc.get, set: guardedSet,
+          configurable: desc.configurable, enumerable: desc.enumerable,
+        });
+      }
+    }
+  } catch (e) {
+    // 守卫自身初始化失败：拒绝执行以避免安全降级
+    throw new Error('WHIMREAD_SANDBOX: 守卫初始化失败 ' + (e && e.message || e));
+  }
 })();
 /* ==== 沙箱守卫结束 ==== */
 ''';

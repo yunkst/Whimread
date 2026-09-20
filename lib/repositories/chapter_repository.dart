@@ -742,16 +742,18 @@ class ChapterRepository extends BaseRepository
       String novelUrl, List<Chapter> chapters) async {
     final db = await database;
 
-    // 使用事务批量更新章节索引
+    // 使用事务批量更新章节索引（用 batch 减少事务内 IO 开销）
     await db.transaction((txn) async {
+      final batch = txn.batch();
       for (var i = 0; i < chapters.length; i++) {
-        await txn.update(
+        batch.update(
           'novel_chapters',
           {'chapterIndex': i},
           where: 'novelUrl = ? AND chapterUrl = ?',
           whereArgs: [novelUrl, chapters[i].url],
         );
       }
+      await batch.commit(noResult: true);
     });
 
     LoggerService.instance.i(

@@ -23,6 +23,11 @@ class DatabaseConnection implements IDatabaseConnection {
   static DatabaseConnection? _instance;
   static Database? _database;
 
+  /// 初始化屏障：保证并发调用 `database` getter 时 `_initDatabase` 只执行一次，
+  /// 消除"两个调用同时看到 _database == null → 各自初始化 → 第二次抛 database
+  /// already open"的 TOCTOU 竞态。
+  static Future<Database>? _initCompleter;
+
   /// 私有构造函数，防止外部直接创建实例
   DatabaseConnection._internal();
 
@@ -55,6 +60,7 @@ class DatabaseConnection implements IDatabaseConnection {
   static Future<void> resetInstance() async {
     await _database?.close();
     _database = null;
+    _initCompleter = null;
     _instance = null;
   }
 
@@ -64,10 +70,22 @@ class DatabaseConnection implements IDatabaseConnection {
   bool get isInitialized => _database != null;
 
   @override
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+  Future<Database> get database {
+    final existing = _database;
+    if (existing != null) return Future.value(existing);
+    // Completer 屏障：并发调用共享同一次初始化 Future
+    return _initCompleter ??= () async {
+      try {
+        final db = await _initDatabase();
+        _database = db;
+        return db;
+      } catch (e) {
+        // 初始化失败要清掉 completer，让下一次调用能重试，
+        // 否则失败的 Future 会被永久缓存
+        _initCompleter = null;
+        rethrow;
+      }
+    }();
   }
 
   @override
@@ -79,6 +97,10 @@ class DatabaseConnection implements IDatabaseConnection {
   Future<void> close() async {
     await _database?.close();
     _database = null;
+    // 必须同时清掉初始化屏障，否则 close 后再调 `database` getter 会拿到
+    // 指向已关闭旧库的已完成 Future——openDatabase 不会执行，恢复备份的
+    // 「损坏库 → 回滚」分支永远不会触发（backup_service_test 回滚用例）。
+    _initCompleter = null;
   }
 
   // ==================== 数据库初始化 ====================

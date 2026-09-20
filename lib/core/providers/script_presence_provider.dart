@@ -20,6 +20,7 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../services/crawler/site_key.dart';
 import 'webview_add_novel_providers.dart';
 
 /// 域名 → 是否有 chapter_list_js 缓存脚本 的同步缓存
@@ -74,9 +75,13 @@ Future<void> refreshScriptPresence({
 ///
 /// FAB `webview_add_novel_button` watch 此值：有 → 金色（快速提取可用）；
 /// 无 → 默认色，点击降级到 Agent 生成脚本流程。
+///
+/// **缓存 key 是裸注册域（SiteKey.value）**——同一站点的 `www.`/`m.` 变体
+/// 共享一份查询结果；这是爱丽丝网 bug 修复的一部分。
 final webviewHasCachedChapterListScriptProvider = Provider<bool>((ref) {
-  final domain = ref.watch(webviewCurrentDomainProvider);
-  if (domain == null) return false;
+  final rawDomain = ref.watch(webviewCurrentDomainProvider);
+  final key = SiteKey.tryFromHost(rawDomain);
+  if (key == null) return false;
   final cache = ref.watch(scriptPresenceByDomainProvider);
-  return cache[domain] ?? false;
+  return cache[key.value] ?? false;
 });

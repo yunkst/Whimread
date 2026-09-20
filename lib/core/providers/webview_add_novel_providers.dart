@@ -32,18 +32,17 @@ final webviewCurrentDomainProvider = Provider<String?>((ref) {
 });
 
 /// 当前域名的 SiteScript 缓存
-///
 /// - domain 为 null → 返回 `null`（同步），不触发 IO
-/// - 否则通过 `SiteScriptRepository.getByDomain` 异步查询
+/// - 否则通过 `SiteScriptRepository.findByUrlHost` 异步查询（P1 起变体等价匹配）
 ///
 /// FAB 按钮可见性 + 提取流程都通过此 Provider 复用查询结果。
 final webviewCurrentSiteScriptProvider =
     FutureProvider<SiteScript?>((ref) async {
-  final domain = ref.watch(webviewCurrentDomainProvider);
-  if (domain == null) return null;
+  final rawDomain = ref.watch(webviewCurrentDomainProvider);
+  if (rawDomain == null) return null;
 
   final repository = ref.watch(siteScriptRepositoryProvider);
-  return repository.getByDomain(domain);
+  return repository.findByUrlHost(rawDomain);
 });
 
 /// 是否显示"添加到书架"FAB

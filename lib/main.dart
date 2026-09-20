@@ -37,9 +37,32 @@ import 'widgets/app_update_dialog.dart';
 import 'widgets/star_prompt_dialog.dart';
 import 'widgets/startup_splash.dart';
 
-/// 最近记录的全局异常签名（前 200 字符 hash），用于去重。
-/// 同一异常在多层捕获中只记录第一条。
-final _recentGlobalErrorSigs = <int>{};
+/// 已记录的全局异常签名 hash（前 200 字符）集合，用于去重。
+///
+/// 4 层全局异常捕获可能对同一条异常触发多次回调，
+/// 此函数对签名去重避免日志中重复 2-3 次。
+///
+/// 容量上限 8 条；溢出时按 FIFO 移除最早插入的条目（而非 LRU），
+/// 因为这里只想压住同一异常的重复上报，不需要"最近最常抛出"的语义。
+final _seenErrorSignatures = <int>{};
+
+/// 应用标题（用于 MaterialApp.title，在任务切换器/窗口标题上展示）。
+/// 遵循项目规则：UI 文案中文、品牌名「随心阅读」。
+const String kAppTitle = '随心阅读';
+
+/// 启动期对账：进程被杀遗留的 downloading/converting 行归位为
+/// paused/failed（可续传/可重试）。异步执行，失败仅记日志，不阻塞启动。
+Future<void> _recoverImageModelDownloads(ProviderContainer container) async {
+  try {
+    await container.read(imageModelDownloadServiceProvider).recoverOnStartup();
+  } catch (e) {
+    LoggerService.instance.w(
+      '生图模型下载对账失败: $e',
+      category: LogCategory.general,
+      tags: ['startup', 'image-model', 'recover'],
+    );
+  }
+}
 
 /// 记录全局异常（带去重）。
 ///
@@ -49,10 +72,10 @@ void _logGlobalError(String source, Object error, StackTrace? stack,
     {LogCategory category = LogCategory.general}) {
   final raw = error.toString();
   final sig = raw.length > 200 ? raw.substring(0, 200).hashCode : raw.hashCode;
-  if (_recentGlobalErrorSigs.contains(sig)) return;
-  _recentGlobalErrorSigs.add(sig);
-  if (_recentGlobalErrorSigs.length > 8) {
-    _recentGlobalErrorSigs.remove(_recentGlobalErrorSigs.first);
+  if (_seenErrorSignatures.contains(sig)) return;
+  _seenErrorSignatures.add(sig);
+  if (_seenErrorSignatures.length > 8) {
+    _seenErrorSignatures.remove(_seenErrorSignatures.first);
   }
 
   LoggerService.instance.e(
@@ -117,6 +140,42 @@ void main() async {
         category: LogCategory.general);
   };
 
+  // 捕获并记录所有 Widget 构建错误（带去重）— 在 main() 顶层一次性注册，
+  // 不随 Widget rebuild 反复赋值；错误兜底页使用固定 dark 主题，
+  // 保证 `context.appColors` 永远命中真实扩展而非兜底值。
+  ErrorWidget.builder = (FlutterErrorDetails errorDetails) {
+    _logGlobalError('widget-error', errorDetails.exception, errorDetails.stack,
+        category: LogCategory.ui);
+    return MaterialApp(
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: kBrandSeedColor,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Error Occurred')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error, size: 64, color: Colors.redAccent),
+              const SizedBox(height: 16),
+              const Text('An error occurred. Check console for details.'),
+              const SizedBox(height: 8),
+              Text(
+                errorDetails.exception.toString(),
+                style: const TextStyle(fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  };
+
   // 捕获 isolate / 平台层异步错误（绕过 runZonedGuarded 的最后一道网）
   //
   // FlutterError.onError 只接管框架抛出的同步错误，runZonedGuarded 只接管 zone 内的
@@ -160,19 +219,8 @@ void main() async {
       // 继续运行，用户可以在设置中配置
     }
 
-    // 生图模型下载/转换的对账：进程被杀遗留的 downloading/converting 行
-    // 归位为 paused/failed（可续传/可重试）。异步执行，不阻塞启动。
-    unawaited(() async {
-      try {
-        await container
-            .read(imageModelDownloadServiceProvider)
-            .recoverOnStartup();
-      } catch (e) {
-        LoggerService.instance.w('生图模型下载对账失败: $e',
-            category: LogCategory.general,
-            tags: ['startup', 'image-model', 'recover']);
-      }
-    }());
+    // 生图模型下载/转换的对账（异步执行，不阻塞启动）
+    unawaited(_recoverImageModelDownloads(container));
 
     // 额度自动刷新桥：任何 LLM 请求到达终态 → 1.5s 防抖后强刷额度。
     // 注册在容器创建后、runApp 前后皆可；放 try 块外避免 apiService
@@ -206,7 +254,7 @@ class NovelReaderApp extends ConsumerWidget {
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(
         // 书馆美学种子色，与 ThemeState 默认一致，避免启动闪蓝
-        seedColor: const Color(0xFFB8843A),
+        seedColor: kBrandSeedColor,
         brightness: Brightness.dark,
       ),
       useMaterial3: true,
@@ -221,6 +269,18 @@ class NovelReaderApp extends ConsumerWidget {
     // 监听主题提供者
     final themeAsync = ref.watch(themeNotifierProvider);
 
+    // 同步主题色到 Toast 工具 — 通过 ref.listen 在主题变更时副作用执行，
+    // 不再写在 build 方法体内，避免每次 rebuild 都覆盖全局 Toast 配置。
+    ref.listen(themeNotifierProvider, (_, next) {
+      next.whenData((themeState) {
+        final platformBrightness = MediaQuery.platformBrightnessOf(context);
+        final isLight = themeState.flutterThemeMode == ThemeMode.light ||
+            (themeState.flutterThemeMode == ThemeMode.system &&
+                platformBrightness == Brightness.light);
+        ToastUtils.setThemeColors(isLight ? AppColors.light : AppColors.dark);
+      });
+    });
+
     // 系统主题下 Toast 颜色跟随平台亮度，保持与 MaterialApp 实际渲染一致
     final platformBrightness = MediaQuery.platformBrightnessOf(context);
     return themeAsync.when(
@@ -228,46 +288,17 @@ class NovelReaderApp extends ConsumerWidget {
         final isLight = themeState.flutterThemeMode == ThemeMode.light ||
             (themeState.flutterThemeMode == ThemeMode.system &&
                 platformBrightness == Brightness.light);
-        // 同步主题色到 Toast 工具，使其能感知当前主题
+        // 首次渲染同步一次主题色（ref.listen 只在变更时触发，初始值需在这里补一次）
         ToastUtils.setThemeColors(isLight ? AppColors.light : AppColors.dark);
         return MaterialApp(
-          title: 'Novel App',
+          title: kAppTitle,
           theme: themeState.getLightTheme(),
           darkTheme: themeState.getDarkTheme(),
           themeMode: themeState.flutterThemeMode,
           home: const _AppRoot(),
           debugShowCheckedModeBanner: true,
           builder: (context, child) {
-            // 捕获并记录所有Widget错误（带去重）
-            ErrorWidget.builder = (FlutterErrorDetails errorDetails) {
-              _logGlobalError('widget-error', errorDetails.exception,
-                  errorDetails.stack,
-                  category: LogCategory.ui);
-              final theme = Theme.of(context);
-              return MaterialApp(
-                home: Scaffold(
-                  appBar: AppBar(title: const Text('Error Occurred')),
-                  body: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error,
-                            size: 64, color: context.appColors.error),
-                        const SizedBox(height: 16),
-                        const Text(
-                            'An error occurred. Check console for details.'),
-                        const SizedBox(height: 8),
-                        Text(
-                          errorDetails.exception.toString(),
-                          style: theme.textTheme.bodySmall,
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            };
+            // 注：ErrorWidget.builder 已在 main() 顶层一次性注册，此处仅返回子组件。
             return child!;
           },
         );
@@ -275,7 +306,7 @@ class NovelReaderApp extends ConsumerWidget {
       loading: () {
         // 主题加载中：品牌开屏层（与原生启动屏同底色，无背景跳变）
         return MaterialApp(
-          title: 'Novel App',
+          title: kAppTitle,
           theme: _buildFallbackThemeData(),
           home: const AppStartupSplash(),
           debugShowCheckedModeBanner: true,
@@ -290,7 +321,7 @@ class NovelReaderApp extends ConsumerWidget {
         );
         // 错误时显示错误信息
         return MaterialApp(
-          title: 'Novel App',
+          title: kAppTitle,
           theme: _buildFallbackThemeData(),
           home: Center(
             child: Column(
@@ -450,15 +481,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   static const int _browserTabIndex = 1;
 
   void _onItemTapped(int index, WidgetRef ref) {
-    // 更新 Tab 索引（单一真相源：homeTabIndexNotifierProvider）
+    // 更新 Tab 索引（单一真相源：homeTabIndexNotifierProvider）。
+    // AI Agent 场景切换由 build() 中的 ref.listen(homeTabIndexNotifierProvider)
+    // 统一响应，此处不再直接写 currentAgentScenarioProvider，避免双写。
     ref.read(homeTabIndexNotifierProvider.notifier).switchTo(index);
-
-    // 根据当前 Tab 切换 AI Agent 场景：
-    // 浏览器 Tab 用网页提取场景，其余 Tab 用写作场景。
-    ref.read(currentAgentScenarioProvider.notifier).state =
-        index == _browserTabIndex
-            ? ScenarioIds.webviewExtract
-            : ScenarioIds.writing;
   }
 
   @override
@@ -470,42 +496,51 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
       category: LogCategory.ui,
       tags: ['lifecycle', 'init'],
     );
-    // post-frame 后检查（crash 优先，star 其后，更新最后；互不干扰）。
-    // 只检查一次（_HomePageState 在 app 生命周期内只 initState 一次）。
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // post-frame 后执行启动期副作用（只执行一次：
+    // _HomePageState 在 app 生命周期内只 initState 一次）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-
-      // 1. 上次 native crash 报告
-      await NativeCrashReporter.checkAndReport(context);
-      if (!mounted) return;
-
-      // 2. GitHub star 引导
-      try {
-        await StarPromptService.instance.recordLaunch();
-        if (!mounted) return;
-        final shouldShow = await StarPromptService.instance.shouldShow();
-        if (!shouldShow || !mounted) return;
-        final goStar = await showDialog<bool>(
-          context: context,
-          builder: (_) => const StarPromptDialog(),
-        );
-        if (goStar == true) {
-          await StarPromptService.instance.onStarClicked();
-          await launchUrl(Uri.parse(kGitHubRepo),
-              mode: LaunchMode.externalApplication);
-        } else {
-          await StarPromptService.instance.onDismissed();
-        }
-      } catch (_) {
-        // 任何异常吞掉，绝不阻塞启动。
-      }
-
-      // 3. 启动期静默检查更新
-      //    通道跟随用户设置：未开预览版开关仅查 stable，开了则含预览版。
-      //    失败一律吞掉，不阻塞启动；用户可随时去设置页手动检查。
-      if (!mounted) return;
-      await _silentCheckStableUpdate();
+      unawaited(_runStartupPrompts());
     });
+  }
+
+  /// 启动期一次性副作用，串行执行：crash 上报 → star 引导 → 静默检查更新。
+  /// 每个阶段独立容错，任何异常只吞掉不阻塞启动；
+  /// 跨 await 后使用 context 前必须重新校验 [mounted]。
+  Future<void> _runStartupPrompts() async {
+    // 1. 上次 native crash 报告
+    await NativeCrashReporter.checkAndReport(context);
+    if (!mounted) return;
+
+    // 2. GitHub star 引导
+    try {
+      await StarPromptService.instance.recordLaunch();
+      if (!mounted) return;
+      final shouldShow = await StarPromptService.instance.shouldShow();
+      if (!shouldShow || !mounted) return;
+      final goStar = await showDialog<bool>(
+        context: context,
+        builder: (_) => const StarPromptDialog(),
+      );
+      // showDialog 期间用户可能退出页面；后续副作用必须重新 mounted 校验
+      if (!mounted) return;
+      if (goStar == true) {
+        await StarPromptService.instance.onStarClicked();
+        if (!mounted) return;
+        await launchUrl(Uri.parse(kGitHubRepo),
+            mode: LaunchMode.externalApplication);
+      } else {
+        await StarPromptService.instance.onDismissed();
+      }
+    } catch (_) {
+      // 任何异常吞掉，绝不阻塞启动。
+    }
+
+    // 3. 启动期静默检查更新
+    //    通道跟随用户设置：未开预览版开关仅查 stable，开了则含预览版。
+    //    失败一律吞掉，不阻塞启动；用户可随时去设置页手动检查。
+    if (!mounted) return;
+    await _silentCheckStableUpdate();
   }
 
   /// 启动期静默检查更新：有新版本则弹窗，失败 / 已是最新均不打扰。

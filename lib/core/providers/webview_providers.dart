@@ -5,13 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/image_model.dart';
+import '../../models/remote_script.dart';
 import '../../models/site_script.dart';
 import '../../services/logger_service.dart';
 import '../../services/bookmark_service.dart';
 import '../../services/browser_settings_service.dart';
+import '../../services/remote/remote_script_service.dart';
 import 'database_providers.dart';
 import 'image_model_download_providers.dart';
 import 'image_model_providers.dart';
+import 'remote_script_providers.dart';
 
 /// 构造桌面/手机模式的 InAppWebViewSettings
 ///
@@ -107,8 +110,22 @@ class WebViewControllerNotifier extends StateNotifier<InAppWebViewController?> {
   WebViewControllerNotifier(this._ref) : super(null);
 
   /// 由 InAppWebView 的 onWebViewCreated 回调设置 Controller
+  ///
+  /// 替换旧实例时主动 dispose，避免 native WebView 资源累积泄漏
+  /// （反复进出 WebView 页面/页面重建时旧的 InAppWebViewController 不会自动释放）。
   void setController(InAppWebViewController controller) {
+    final old = state;
     state = controller;
+    if (old != null && !identical(old, controller)) {
+      // dispose 内部异步释放 native 资源，失败仅记日志不影响新 controller。
+      // 用 Future.sync 适配 dispose() 既可能返回 Future 也可能返回 void 的情况。
+      Future<void>.sync(() async => old.dispose())
+          .catchError((Object e) => LoggerService.instance.w(
+                '释放旧 WebView controller 失败: $e',
+                category: LogCategory.network,
+                tags: ['webview', 'dispose-error'],
+              ));
+    }
   }
 
   /// 重置 Controller（页面销毁时调用）
@@ -589,6 +606,123 @@ class SiteScriptListNotifier
 
   /// 刷新脚本列表
   void refresh() => _loadScripts();
+
+  // ------------------------------------------------------------------
+  // 云端脚本共享（v47 起）
+  // ------------------------------------------------------------------
+
+  /// 共享本地脚本到云端（提交后进入 pending_review，需管理员审核）。
+  ///
+  /// 成功后回写本地 shared/remote_id/version 并刷新列表；失败抛
+  /// [RemoteScriptException] 由 UI toast 错误。
+  Future<RemoteShareResult> shareScript(String id) async {
+    final script = await _getByIdOrThrow(id, 'shareScript');
+    if (script == null) {
+      throw RemoteScriptException('脚本不存在或已被删除');
+    }
+    final service = _ref.read(remoteScriptServiceProvider);
+    final result = await service.shareLocal(script);
+    await _loadScripts();
+    return result;
+  }
+
+  /// 取消共享（仅本地脚本、且已 shared 时有意义）。
+  Future<void> unshareScript(String id) async {
+    final script = await _getByIdOrThrow(id, 'unshareScript');
+    if (script == null) {
+      throw RemoteScriptException('脚本不存在或已被删除');
+    }
+    final service = _ref.read(remoteScriptServiceProvider);
+    await service.unshareRemote(script);
+    await _loadScripts();
+  }
+
+  /// 检查云端脚本更新；有新版本时直接应用并刷新列表。
+  ///
+  /// 返回 null = 已是最新；返回新版本号 = 已升级到该版本。
+  Future<int?> checkAndApplyUpdate(String id) async {
+    final script = await _getByIdOrThrow(id, 'checkAndApplyUpdate');
+    if (script == null || !script.isRemote) return null;
+    final service = _ref.read(remoteScriptServiceProvider);
+    final payload = await service.checkUpdate(script);
+    if (payload == null) return null;
+    final repository = _ref.read(siteScriptRepositoryProvider);
+    await repository.updateFromRemote(
+      script.id,
+      chapterListJs: payload.chapterListJs,
+      chapterContentJs: payload.chapterContentJs,
+      bookshelfJs: payload.bookshelfJs,
+      urlPattern: payload.urlPattern,
+      sampleUrl: payload.sampleUrl,
+      chapterListOcr: payload.chapterListOcr,
+      chapterContentOcr: payload.chapterContentOcr,
+      sha256: payload.meta.sha256,
+      remoteVersion: payload.meta.version,
+    );
+    await _loadScripts();
+    return payload.meta.version;
+  }
+
+  /// 设置脚本启停（enabled 列，与 verified 自动化语义解耦）。
+  Future<void> setScriptEnabled(String id, bool enabled) async {
+    try {
+      final repository = _ref.read(siteScriptRepositoryProvider);
+      await repository.setEnabled(id, enabled);
+      await _loadScripts();
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '设置脚本启停失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', 'set_enabled', 'error'],
+      );
+    }
+  }
+
+  /// 从云端下载指定域名的脚本（面板「从远程下载」入口）。
+  ///
+  /// 抛 [LocalScriptConflictException] 时由 UI 弹冲突对话框；其余网络错误
+  /// 抛 [RemoteScriptException]。
+  Future<({String id, bool isInsert})> downloadRemoteScript(
+    RemoteScriptMeta meta,
+  ) async {
+    final service = _ref.read(remoteScriptServiceProvider);
+    final result = await service.downloadAndPersist(meta);
+    await _loadScripts();
+    return result;
+  }
+
+  /// 「同 domain 已有本地脚本」冲突下的覆盖决策
+  Future<void> forceReplaceLocalWithRemote(
+    SiteScript existing,
+    RemoteScriptMeta meta,
+  ) async {
+    final service = _ref.read(remoteScriptServiceProvider);
+    await service.forceReplaceLocalWithRemote(existing, meta);
+    await _loadScripts();
+  }
+
+  /// 「另存为新脚本」决策
+  Future<void> saveRemoteAsNewScript(RemoteScriptMeta meta) async {
+    final service = _ref.read(remoteScriptServiceProvider);
+    await service.insertAsNewScript(meta);
+    await _loadScripts();
+  }
+
+  Future<SiteScript?> _getByIdOrThrow(String id, String op) async {
+    try {
+      final repository = _ref.read(siteScriptRepositoryProvider);
+      return await repository.getById(id);
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        '$op 读取脚本失败: id=$id - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['site_script', op, 'error'],
+      );
+      return null;
+    }
+  }
 }
 
 // ============================================================

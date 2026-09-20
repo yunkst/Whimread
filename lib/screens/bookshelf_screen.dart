@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,9 @@ class BookshelfScreen extends ConsumerStatefulWidget {
 }
 
 class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
+  /// 水平滑动累计位移（onHorizontalDragUpdate 累加，drag end 时判定后清零）
+  double _swipeDelta = 0;
+
   /// 弹出「刷新网站书架」域名选择 sheet
   ///
   /// 仅传入有 bookshelf_js 缓存脚本的域名（按钮可见性已保证非空，但保险起见
@@ -321,12 +325,14 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
                 title: const Text('设置封面'),
                 onTap: () {
                   Navigator.pop(sheetCtx);
-                  _setNovelCover(novel);
+                  // 事件回调内显式 unawaited：上传期间避免重复进入菜单触发并发写 coverMediaId
+                  unawaited(_setNovelCover(novel));
                 },
               ),
               if (novel.coverMediaId != null)
                 ListTile(
-                  leading: Icon(Icons.hide_image_outlined, color: colors.chatHintText),
+                  leading: Icon(Icons.hide_image_outlined,
+                      color: colors.chatHintText),
                   title: const Text('删除封面'),
                   onTap: () {
                     Navigator.pop(sheetCtx);
@@ -347,6 +353,34 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
         );
       },
     );
+  }
+
+  /// 左右滑动切换书架（累计位移 ≥64px 或释放速度 ≥350px/s 即触发，互补覆盖
+  /// 慢拖与快甩两类手势）
+  ///
+  /// 与翻页手势同向：向左滑（dx<0）进入下一个书架，向右滑回上一个；
+  /// 已在边界书架、Tab 列表未就绪或当前书架不在列表中（如站点藏书清空后
+  /// 持久化书架失效）时静默忽略。
+  void _handleHorizontalDragEnd(double velocity) {
+    final delta = _swipeDelta;
+    _swipeDelta = 0;
+    const minDistance = 64.0;
+    const minVelocity = 350.0;
+    final int offset;
+    if (delta < -minDistance || velocity < -minVelocity) {
+      offset = 1;
+    } else if (delta > minDistance || velocity > minVelocity) {
+      offset = -1;
+    } else {
+      return;
+    }
+    final shelves = ref.read(bookshelfShelvesProvider).valueOrNull;
+    if (shelves == null || shelves.isEmpty) return;
+    final index = shelves.indexOf(ref.read(currentBookshelfProvider));
+    if (index < 0) return;
+    final target = (index + offset).clamp(0, shelves.length - 1);
+    if (target == index) return;
+    ref.read(currentBookshelfProvider.notifier).setBookshelf(shelves[target]);
   }
 
   @override
@@ -419,98 +453,108 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen> {
         children: [
           // 书架分类切换（顶部 TabBar，单步直达）
           const BookshelfTabBar(),
-          // 书架内容
+          // 书架内容（左右滑动切换到相邻书架，与顶部 Tab 单步切换等价）
           Expanded(
-            child: bookshelfAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, stack) => Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: colors.error,
-                    ),
-                    const SizedBox(height: 16),
-                    Text('加载失败: $error'),
-                  ],
-                ),
-              ),
-              data: (bookshelf) {
-                if (bookshelf.isEmpty) {
-                  return const EmptyBookshelfView();
-                }
-
-                final totalCached = cacheStats?.values.fold<int>(
-                      0,
-                      (s, v) => s + v.cached,
-                    ) ??
-                    0;
-                final totalChapters = cacheStats?.values.fold<int>(
-                      0,
-                      (s, v) => s + v.total,
-                    ) ??
-                    0;
-
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    ref.invalidate(bookshelfNovelsProvider);
-                    ref.invalidate(onlineNovelsProvider);
-                    ref.invalidate(bookshelfCacheStatsProvider);
-                  },
-                  child: CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: _ShelfMetaBar(
-                          count: bookshelf.length,
-                          cached: totalCached,
-                          total: totalChapters,
-                        ),
+            child: GestureDetector(
+              // 只听水平拖拽：纵向滚动 / 下拉刷新由内层组件接管，互不抢占；
+              // opaque 让空态视图的空白间隙也能响应滑动（deferToChild 会漏）
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (details) =>
+                  _swipeDelta += details.delta.dx,
+              onHorizontalDragEnd: (details) =>
+                  _handleHorizontalDragEnd(details.primaryVelocity ?? 0),
+              onHorizontalDragCancel: () => _swipeDelta = 0,
+              child: bookshelfAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: colors.error,
                       ),
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                        sliver: SliverGrid(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 16,
-                            crossAxisSpacing: 16,
-                            childAspectRatio: 0.58,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final novel = bookshelf[index];
-                              final stats = cacheStats?[novel.url];
-                              final total = stats?.total ?? 0;
-                              final cached = stats?.cached ?? 0;
-                              return _NovelCard(
-                                novel: novel,
-                                totalChapters: total,
-                                cachedChapters: cached,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          ChapterListScreenRiverpod(
-                                        novel: novel,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                onContinue: () => _continueReading(novel),
-                                onMenu: () => _showNovelMenu(novel),
-                              );
-                            },
-                            childCount: bookshelf.length,
-                          ),
-                        ),
-                      ),
+                      const SizedBox(height: 16),
+                      Text('加载失败: $error'),
                     ],
                   ),
-                );
-              },
+                ),
+                data: (bookshelf) {
+                  if (bookshelf.isEmpty) {
+                    return const EmptyBookshelfView();
+                  }
+
+                  final totalCached = cacheStats?.values.fold<int>(
+                        0,
+                        (s, v) => s + v.cached,
+                      ) ??
+                      0;
+                  final totalChapters = cacheStats?.values.fold<int>(
+                        0,
+                        (s, v) => s + v.total,
+                      ) ??
+                      0;
+
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      ref.invalidate(bookshelfNovelsProvider);
+                      ref.invalidate(onlineNovelsProvider);
+                      ref.invalidate(bookshelfCacheStatsProvider);
+                    },
+                    child: CustomScrollView(
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: _ShelfMetaBar(
+                            count: bookshelf.length,
+                            cached: totalCached,
+                            total: totalChapters,
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                          sliver: SliverGrid(
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 16,
+                              crossAxisSpacing: 16,
+                              childAspectRatio: 0.58,
+                            ),
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final novel = bookshelf[index];
+                                final stats = cacheStats?[novel.url];
+                                final total = stats?.total ?? 0;
+                                final cached = stats?.cached ?? 0;
+                                return _NovelCard(
+                                  novel: novel,
+                                  totalChapters: total,
+                                  cachedChapters: cached,
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            ChapterListScreenRiverpod(
+                                          novel: novel,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  onContinue: () => _continueReading(novel),
+                                  onMenu: () => _showNovelMenu(novel),
+                                );
+                              },
+                              childCount: bookshelf.length,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         ],

@@ -1,3 +1,23 @@
+import '../services/crawler/browser_mode.dart';
+
+/// 脚本来源：本地自建 vs 云端下载（v47 起）
+///
+/// 落库字段为 [ScriptSource.storageValue]（'local' / 'remote'），枚举仅在
+/// 模型边界翻译，DB 列仍是 TEXT。
+enum ScriptSource {
+  local('local'),
+  remote('remote');
+
+  const ScriptSource(this.storageValue);
+
+  final String storageValue;
+
+  static ScriptSource fromStorage(String? value) {
+    if (value == 'remote') return ScriptSource.remote;
+    return ScriptSource.local;
+  }
+}
+
 /// 站点提取脚本数据模型
 ///
 /// 对应 site_scripts 表的字段。
@@ -50,6 +70,63 @@ class SiteScript {
   /// 桌面版或手机版）写的，在另一种模式上跑容易因选择器失效而失败。
   final int preferredMode;
 
+  /// [preferredMode] 的类型安全枚举视图（P1 起统一爬取子系统所有组件的
+  /// 模式表达形式；DB 列仍是 int，仅在模型边界翻译）。
+  ///
+  /// - [BrowserMode.unknown] = preferredMode=0（老脚本/未设置）
+  /// - [BrowserMode.desktop] / [BrowserMode.mobile] = 1/2
+  ///
+  /// 调用方应据此判断「是否指定了模式」用 [BrowserMode.isKnown]，
+  /// 不要直接判 `== unknown`。
+  BrowserMode get preferredBrowserMode =>
+      BrowserMode.fromStorage(preferredMode);
+
+  /// 脚本来源（v47 起）。
+  ///
+  /// 本地自建 vs 从云端脚本仓库下载。命中本地 `site_scripts` 表的脚本可
+  /// 能是上述两种之一：FAB 路径默认走 AI 本地创作（local），云端仓库命中
+  /// 后由用户确认下载（remote）。
+  final ScriptSource source;
+
+  /// 云端脚本主键（v47 起）。
+  ///
+  /// [source] = remote 时由后端在 share/download 时下发；local 时为 null。
+  /// 配合 [remoteVersion] 支持「检查更新」与同包版本对齐。
+  final String? remoteId;
+
+  /// 云端脚本版本号（v47 起）。
+  ///
+  /// 由后端在 share 时按 (author, domain) 单调自增；下载时写入客户端，
+  /// 后续 [checkUpdate] 调用以 (remoteId, remoteVersion) 询问后端是否有
+  /// 更高版本。
+  final int remoteVersion;
+
+  /// 脚本载荷指纹（v47 起）。
+  ///
+  /// 对 chapterListJs / chapterContentJs / bookshelfJs 序列化后的 SHA-256。
+  /// 用于：
+  /// 1. 客户端下载后做完整性校验；
+  /// 2. 后端 share 时去重（同 author+domain+sha256 复用旧版本，不刷 pending）。
+  final String? sha256;
+
+  /// 是否已共享到云端（v47 起，0/1）。
+  ///
+  /// 仅本地脚本有意义；remote 脚本自带云端主键，无需再标记 shared。
+  /// shared=1 时 [remoteId] / [remoteVersion] 一定有值。
+  final bool shared;
+
+  /// 最近一次与云端同步的毫秒时间戳（v47 起）。
+  ///
+  /// download / checkUpdate 成功后刷新，用于诊断「是否近期同步过」。
+  final int lastSyncedAt;
+
+  /// 用户显式启停开关（v47 起，0/1）。
+  ///
+  /// 与 [verified]（连续失败自动 unverified 的自动化语义）解耦：用户可
+  /// 手动禁用一条脚本而无需修改 verified 状态。CrawlRequestResolver 在
+  /// 命中本地脚本后会同时校验 enabled=1。
+  final bool enabled;
+
   const SiteScript({
     required this.id,
     required this.domain,
@@ -66,6 +143,13 @@ class SiteScript {
     this.bookshelfJs = '',
     this.displayName = '',
     this.preferredMode = 0,
+    this.source = ScriptSource.local,
+    this.remoteId,
+    this.remoteVersion = 0,
+    this.sha256,
+    this.shared = false,
+    this.lastSyncedAt = 0,
+    this.enabled = true,
   });
 
   /// 从数据库 Map 构造
@@ -86,6 +170,13 @@ class SiteScript {
       bookshelfJs: (map['bookshelf_js'] as String?) ?? '',
       displayName: (map['display_name'] as String?) ?? '',
       preferredMode: (map['preferred_mode'] as int?) ?? 0,
+      source: ScriptSource.fromStorage(map['source'] as String?),
+      remoteId: map['remote_id'] as String?,
+      remoteVersion: (map['remote_version'] as int?) ?? 0,
+      sha256: map['sha256'] as String?,
+      shared: (map['shared'] as int?) == 1,
+      lastSyncedAt: (map['last_synced_at'] as int?) ?? 0,
+      enabled: ((map['enabled'] as int?) ?? 1) == 1,
       // 注：旧 'ocr' 列 v39 起不再读取，保留在 DB 仅作历史兼容。
     );
   }
@@ -108,6 +199,13 @@ class SiteScript {
       'bookshelf_js': bookshelfJs,
       'display_name': displayName,
       'preferred_mode': preferredMode,
+      'source': source.storageValue,
+      'remote_id': remoteId,
+      'remote_version': remoteVersion,
+      'sha256': sha256,
+      'shared': shared ? 1 : 0,
+      'last_synced_at': lastSyncedAt,
+      'enabled': enabled ? 1 : 0,
     };
   }
 
@@ -122,6 +220,15 @@ class SiteScript {
 
   /// 是否已验证
   bool get isVerified => verified == 1;
+
+  /// 是否来自云端下载（v47）
+  bool get isRemote => source == ScriptSource.remote;
+
+  /// 是否已共享到云端（v47）
+  bool get isShared => shared;
+
+  /// 是否启用（v47）
+  bool get isEnabled => enabled;
 
   /// 创建时间（DateTime）
   DateTime get createdAtDateTime =>
@@ -144,6 +251,13 @@ class SiteScript {
     String? bookshelfJs,
     String? displayName,
     int? preferredMode,
+    ScriptSource? source,
+    String? remoteId,
+    int? remoteVersion,
+    String? sha256,
+    bool? shared,
+    int? lastSyncedAt,
+    bool? enabled,
   }) {
     return SiteScript(
       id: id ?? this.id,
@@ -161,6 +275,44 @@ class SiteScript {
       bookshelfJs: bookshelfJs ?? this.bookshelfJs,
       displayName: displayName ?? this.displayName,
       preferredMode: preferredMode ?? this.preferredMode,
+      source: source ?? this.source,
+      remoteId: remoteId ?? this.remoteId,
+      remoteVersion: remoteVersion ?? this.remoteVersion,
+      sha256: sha256 ?? this.sha256,
+      shared: shared ?? this.shared,
+      lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
+      enabled: enabled ?? this.enabled,
+    );
+  }
+
+  /// 显式清空 [remoteId]，用于本地脚本「取消共享」后的清理。
+  ///
+  /// 直接 `copyWith(remoteId: null)` 无法区分「未传」与「传 null」，因此
+  /// 提供专门的清理方法。
+  SiteScript copyWithClearedRemote() {
+    return SiteScript(
+      id: id,
+      domain: domain,
+      urlPattern: urlPattern,
+      chapterListJs: chapterListJs,
+      chapterContentJs: chapterContentJs,
+      sampleUrl: sampleUrl,
+      createdAt: createdAt,
+      lastUsedAt: lastUsedAt,
+      useCount: useCount,
+      verified: verified,
+      chapterListOcr: chapterListOcr,
+      chapterContentOcr: chapterContentOcr,
+      bookshelfJs: bookshelfJs,
+      displayName: displayName,
+      preferredMode: preferredMode,
+      source: source,
+      remoteId: null,
+      remoteVersion: 0,
+      sha256: sha256,
+      shared: false,
+      lastSyncedAt: lastSyncedAt,
+      enabled: enabled,
     );
   }
 }
