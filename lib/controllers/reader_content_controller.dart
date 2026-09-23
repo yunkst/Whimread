@@ -208,6 +208,46 @@ class ReaderContentController {
     }
   }
 
+  /// 加载章节原始内容（不写入全局内容状态）
+  ///
+  /// 供无限滚动拼接使用：缓存优先，未命中走 HeadlessWebView 抓取并写缓存。
+  /// 与 [loadChapter] 的区别是不设置 [ChapterContentStateNotifier] 的
+  /// 加载/内容/上下文状态——拼接进来的上/下章不是「当前章」，
+  /// 全局内容状态仍归属主章节。
+  Future<String> loadChapterRaw(Chapter chapter, Novel novel) async {
+    final cachedContent = await _chapterRepository.getCachedChapter(chapter.url);
+    if (cachedContent != null && cachedContent.trim().isNotEmpty) {
+      LoggerService.instance.d(
+        'ReaderContentController: 拼接章节命中缓存 - ${chapter.title} (${cachedContent.length}字符)',
+        category: LogCategory.ui,
+        tags: ['reader', 'concat'],
+      );
+      return cachedContent;
+    }
+
+    final content = await _fetchChapterContent(chapter.url, false);
+    final trimmedContent = content.trim();
+    if (trimmedContent.isEmpty) {
+      throw Exception('获取到的章节内容为空');
+    }
+    if (trimmedContent.length < 50) {
+      throw Exception('获取到的章节内容过短（${trimmedContent.length}字符）');
+    }
+
+    // 走 ChapterMutationNotifier 收口：写库 + bump signal（isCached 实时变 true）
+    await _ref.read(chapterMutationProvider.notifier).cacheChapter(
+          novel.url,
+          chapter,
+          content,
+        );
+    LoggerService.instance.i(
+      'ReaderContentController: 拼接章节已抓取并缓存 - ${chapter.title} (${content.length}字符)',
+      category: LogCategory.ui,
+      tags: ['reader', 'concat'],
+    );
+    return content;
+  }
+
   /// 更新阅读进度
   ///
   /// [novelUrl] 小说URL

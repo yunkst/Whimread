@@ -16,6 +16,9 @@ class AgentFloatingButton extends ConsumerStatefulWidget {
   /// （main.dart 包含书架/浏览器/设置）使用，其场景由 Tab 切换逻辑维护。
   final String? scenarioId;
 
+  /// 是否显示悬浮按钮（false 时不渲染，如阅读页沉浸模式）
+  final bool showFloatingButton;
+
   /// 自定义按钮内容（优先级高于默认 auto_awesome 图标）。
   ///
   /// 由调用方渲染特殊入口（如阅读页的「按标注重写」icon+数量徽标），
@@ -31,6 +34,7 @@ class AgentFloatingButton extends ConsumerStatefulWidget {
   const AgentFloatingButton({
     super.key,
     this.scenarioId,
+    this.showFloatingButton = true,
     this.overrideChild,
     this.overrideOnTap,
   });
@@ -49,6 +53,9 @@ class _AgentFloatingButtonState extends ConsumerState<AgentFloatingButton> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.showFloatingButton) {
+      return const SizedBox.shrink();
+    }
     final screenSize = MediaQuery.of(context).size;
     final appColors = context.appColors;
 
@@ -154,6 +161,9 @@ class AgentFloatingShell extends StatelessWidget {
   /// 透传给 [AgentFloatingButton] 的场景 ID（null = 沿用全局当前值）。
   final String? scenarioId;
 
+  /// 是否渲染悬浮按钮（false 用于阅读页沉浸模式等全屏场景）
+  final bool showFloatingButton;
+
   /// 透传给 [AgentFloatingButton] 的自定义内容（null = 默认图标）。
   final Widget? overrideChild;
 
@@ -164,6 +174,7 @@ class AgentFloatingShell extends StatelessWidget {
     super.key,
     required this.child,
     this.scenarioId,
+    this.showFloatingButton = true,
     this.overrideChild,
     this.overrideOnTap,
   });
@@ -173,11 +184,12 @@ class AgentFloatingShell extends StatelessWidget {
     return Stack(
       children: [
         child,
-        AgentFloatingButton(
-          scenarioId: scenarioId,
-          overrideChild: overrideChild,
-          overrideOnTap: overrideOnTap,
-        ),
+        if (showFloatingButton)
+          AgentFloatingButton(
+            scenarioId: scenarioId,
+            overrideChild: overrideChild,
+            overrideOnTap: overrideOnTap,
+          ),
       ],
     );
   }

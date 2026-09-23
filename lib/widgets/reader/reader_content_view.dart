@@ -1,37 +1,39 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../../models/paragraph_annotation.dart';
 import '../paragraph_widget.dart';
+import 'reader_chapter_segment.dart';
 
 /// ReaderContentView - 阅读器内容视图
 ///
 /// 职责：
-/// - 显示章节内容列表
+/// - 按序显示已拼接章节分段（无限滚动：上/下章内容由上层追加进 [segments]）
 /// - 支持触摸事件处理自动滚动
 /// - 处理滚动通知
-/// - 支持全文连续编辑模式
+/// - 支持全文连续编辑模式（仅展示当前章）
 ///
 /// 依赖：
 /// - ParagraphWidget (段落组件)
-/// - AutoScrollMixin (自动滚动功能)
+/// - ReaderChapterSegment / ReaderFlatLayout (分段与扁平布局换算)
 class ReaderContentView extends StatefulWidget {
-  final List<String> paragraphs;
+  /// 已拼接章节分段（按显示顺序；编辑模式仅应传入当前章一段）
+  final List<ReaderChapterSegment> segments;
+
+  /// 章节起点标记的 GlobalKey（key = 章节 URL），由阅读页持有，
+  /// 用于当前章检测与定位；视图按段把标记渲染为 0 高度条目
+  final Map<String, GlobalKey> blockStartKeys;
+
   final double fontSize;
   final double textBrightness;
   final bool isEditMode;
   final bool isAutoScrolling;
 
-  /// 当前章节已有的段落标注（key = 段落序号），用于显示标注标记
-  final Map<int, ParagraphAnnotation> annotations;
+  /// 长按段落回调（chapterUrl = 段落所属章节，index = 章内段落序号）
+  final void Function(String chapterUrl, int index, String paragraph)?
+      onParagraphLongPress;
 
-  /// 长按段落回调（index = 段落序号，paragraph = 段落原文）
-  final void Function(int index, String paragraph)? onParagraphLongPress;
-
-  /// 待揭示段落（index → 改写后的新文本）；段落进入视口时由其 ParagraphWidget 触发淡出+打字机动画
-  final Map<int, String> pendingReveals;
-
-  /// ParagraphWidget 揭示动画播完回调（父层据此撤销该段的旧文本占位与登记）
-  final void Function(int index, String revealedText)? onParagraphRevealComplete;
+  /// 揭示动画播完回调（父层据此撤销该段的旧文本占位与登记）
+  final void Function(String chapterUrl, int index, String revealedText)?
+      onParagraphRevealComplete;
 
   /// 内容变化回调
   /// - [index] 段落索引（-1 表示全文编辑，>=0 表示段落编辑）
@@ -44,14 +46,13 @@ class ReaderContentView extends StatefulWidget {
 
   const ReaderContentView({
     super.key,
-    required this.paragraphs,
+    required this.segments,
+    required this.blockStartKeys,
     required this.fontSize,
     this.textBrightness = 1.0,
     required this.isEditMode,
     required this.isAutoScrolling,
-    this.annotations = const {},
     this.onParagraphLongPress,
-    this.pendingReveals = const {},
     this.onParagraphRevealComplete,
     required this.onContentChanged,
     required this.scrollController,
@@ -68,11 +69,15 @@ class _ReaderContentViewState extends State<ReaderContentView> {
   late TextEditingController _fullTextController;
   Timer? _debounceTimer;
 
+  /// 编辑模式全文（当前章段落按空行连接）
+  List<String> _editParagraphs(ReaderContentView widget) =>
+      widget.segments.expand((s) => s.paragraphs).toList();
+
   @override
   void initState() {
     super.initState();
     _fullTextController = TextEditingController(
-      text: widget.paragraphs.join('\n\n'),
+      text: _editParagraphs(widget).join('\n\n'),
     );
   }
 
@@ -92,10 +97,12 @@ class _ReaderContentViewState extends State<ReaderContentView> {
       widget.onContentChanged(-1, _fullTextController.text);
     }
 
+    final oldParagraphs = _editParagraphs(oldWidget);
+    final newParagraphs = _editParagraphs(widget);
     if (!widget.isEditMode &&
-        (oldWidget.paragraphs.length != widget.paragraphs.length ||
-            !_listEquals(oldWidget.paragraphs, widget.paragraphs))) {
-      _fullTextController.text = widget.paragraphs.join('\n\n');
+        (oldParagraphs.length != newParagraphs.length ||
+            !_listEquals(oldParagraphs, newParagraphs))) {
+      _fullTextController.text = newParagraphs.join('\n\n');
     }
   }
 
@@ -159,6 +166,7 @@ class _ReaderContentViewState extends State<ReaderContentView> {
   }
 
   Widget _buildReadingMode(BuildContext context) {
+    final layout = ReaderFlatLayout(widget.segments);
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) => widget.onPointerDown(),
@@ -168,35 +176,53 @@ class _ReaderContentViewState extends State<ReaderContentView> {
         child: ListView.builder(
           controller: widget.scrollController,
           padding: const EdgeInsets.all(16.0),
-          itemCount: widget.paragraphs.length + 1,
+          itemCount: layout.itemCount,
           itemBuilder: (context, index) {
-            if (index == widget.paragraphs.length) {
+            // 尾部占位（末章底部留白）
+            if (index == layout.itemCount - 1) {
               return SizedBox(
                 height: 160,
                 child: Container(),
               );
             }
 
-            final paragraph = widget.paragraphs[index];
-            final reveal = widget.pendingReveals[index];
+            // 章节起点标记（0 高度，携带章节级 GlobalKey 供上层定位/检测）
+            final markerUrl = layout.markerChapterUrlAt(index);
+            if (markerUrl != null) {
+              final markerKey = widget.blockStartKeys[markerUrl];
+              return SizedBox.shrink(key: markerKey);
+            }
+
+            final paragraphInfo = layout.paragraphAt(index);
+            if (paragraphInfo == null) {
+              return const SizedBox.shrink();
+            }
+            final (chapterUrl, paragraphIndex, paragraph) = paragraphInfo;
+            final segment = widget.segments.firstWhere(
+              (s) => s.chapterUrl == chapterUrl,
+            );
+            final reveal = segment.pendingReveals[paragraphIndex];
 
             return ParagraphWidget(
+              // 稳定 key：顶部拼接插入条目时元素可跨索引匹配，
+              // 避免段落 State（揭示动画等）错挂到别的段落
+              key: ValueKey('p_${chapterUrl}_$paragraphIndex'),
               paragraph: paragraph,
-              index: index,
+              index: paragraphIndex,
               fontSize: widget.fontSize,
               textBrightness: widget.textBrightness,
-              isEditMode: widget.isEditMode,
-              hasAnnotation: widget.annotations.containsKey(index),
+              isEditMode: false,
+              hasAnnotation: segment.annotatedIndexes.contains(paragraphIndex),
               revealNewText: reveal,
               onRevealComplete:
                   widget.onParagraphRevealComplete == null
                       ? null
-                      : (i, text) => widget.onParagraphRevealComplete!(i, text),
+                      : (i, text) =>
+                          widget.onParagraphRevealComplete!(chapterUrl, i, text),
               onLongPress: widget.onParagraphLongPress == null
                   ? null
-                  : () => widget.onParagraphLongPress!(index, paragraph),
-              onContentChanged: (newContent) =>
-                  widget.onContentChanged(index, newContent),
+                  : () =>
+                      widget.onParagraphLongPress!(chapterUrl, paragraphIndex, paragraph),
             );
           },
         ),

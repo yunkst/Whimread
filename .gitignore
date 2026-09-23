@@ -87,3 +87,6 @@ __pycache__/
 
 # 动态资源发布产物（tool/publish_resources.dart 生成）
 tool/app_resources/dist/
+
+# 应用图标设计候选稿（评审中，暂不入库）
+assets/icon/

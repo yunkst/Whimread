@@ -133,6 +133,32 @@ mixin AutoScrollMixin<T extends StatefulWidget> on State<T> {
     }
   }
 
+  /// 暂停自动滚动且**不安排自动恢复**（滚动意图保留）。
+  ///
+  /// 供菜单/沉浸切换等交互场景使用：普通触摸走 [handleTouch]
+  /// （1 秒后自动恢复），而用户唤出菜单期间内容不应自己滚走。
+  /// 之后通过 [resumeAutoScrollIfIntended] 恢复。
+  void pauseAutoScrollUntilResumed() {
+    if (!_shouldAutoScroll) return;
+    _resumeTimer?.cancel();
+    if (!_autoScrollController.isPaused) {
+      _autoScrollController.pauseAutoScroll();
+    }
+    setState(() {}); // 触发 UI 更新以反映控制器状态变化
+  }
+
+  /// 在保留滚动意图（[_shouldAutoScroll]）的前提下恢复自动滚动。
+  ///
+  /// 覆盖两种中断：菜单/触摸暂停（控制器处于暂停态）、触底停止
+  /// （拼接新内容后 extent 增长，需重新启动）。已显式停止
+  /// （[stopAutoScroll] 清除意图）时不恢复。
+  void resumeAutoScrollIfIntended() {
+    if (!_shouldAutoScroll || _autoScrollController.isScrolling) {
+      return;
+    }
+    startAutoScroll();
+  }
+
   /// 处理滚动通知（保留以兼容现有代码，但已简化）
   ///
   /// 返回 false 表示不阻止通知继续传递

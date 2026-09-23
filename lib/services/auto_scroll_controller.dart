@@ -70,6 +70,7 @@ class HighPerformanceAutoScrollController {
 
     _pixelsPerSecond = pixelsPerSecond;
     _onScrollComplete = onScrollComplete;
+    _isPaused = false; // 显式启动需清除暂停态，否则暂停中的帧链不会推进
     _lastFrameTime = DateTime.now();
 
     LoggerService.instance.i('[startAutoScroll] 设置完成，速度=$pixelsPerSecond px/s', category: _category, tags: _tags);
