@@ -202,4 +202,51 @@ void main() {
       expect((fullDecoded['items'] as List).length, 100);
     });
   });
+
+  group('ToolResultFormatter.formatPlainText（纯文本特例）', () {
+    test('不超预算 → 原样返回,无 JSON 包装', () {
+      // 反馈 id=4 根因:read_chapter_content 的正文曾被 {"raw": ...} 包一层,
+      // LLM 看到 JSON 转义形态(\n、\")。纯文本路径必须原样送达。
+      final content = '第一行\n第二行 "引号" 第三行';
+      final f = ToolResultFormatter(maxChars: 50000);
+
+      final result = f.formatPlainText(content);
+
+      expect(result.llm, content); // 与原文逐字一致（真换行、真引号）
+      expect(result.full, content);
+      expect(result.llm.contains(r'\n'), isFalse);
+      expect(result.llm.contains(r'\"'), isFalse);
+      expect(result.llm.contains('{'), isFalse);
+    });
+
+    test('超预算 → 按字符截断并加 suffix,full 保留原文', () {
+      final f = ToolResultFormatter(maxChars: 1000);
+      final content = 'X' * 2000;
+
+      final result = f.formatPlainText(content);
+
+      expect(result.llm.length, lessThanOrEqualTo(1000));
+      expect(result.llm.endsWith('... [truncated]'), isTrue);
+      expect(result.llm.startsWith('X'), isTrue);
+      expect(result.full, content); // full 完整保留
+    });
+
+    test('截断点不落在 surrogate pair 中间', () {
+      final f = ToolResultFormatter(maxChars: 20);
+      final content = 'a😀' * 10; // 'a' + emoji(2 units) = 3 units/组,共 30 units
+      final result = f.formatPlainText(content);
+      expect(result.llm.length, lessThanOrEqualTo(20));
+      // 截断结果不应在 surrogate 中间断裂:
+      // 高代理(0xD800-0xDBFF)不能成对出现在尾部
+      final tail = result.llm.codeUnits;
+      expect(tail.isEmpty || (tail.last & 0xFC00) != 0xD800, isTrue);
+    });
+
+    test('空字符串 → 原样返回', () {
+      final f = ToolResultFormatter(maxChars: 50000);
+      final result = f.formatPlainText('');
+      expect(result.llm, '');
+      expect(result.full, '');
+    });
+  });
 }

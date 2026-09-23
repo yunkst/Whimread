@@ -40,10 +40,17 @@ void main() {
         overrides: [
           currentBookshelfProvider.overrideWith(_FakeCurrentBookshelf.new),
           bookshelfShelvesProvider.overrideWith((ref) async => shelves),
-          bookshelfNovelsProvider.overrideWith((ref) async => const <Novel>[]),
-          bookshelfCacheStatsProvider.overrideWith(
-            (ref) async => const <String, CacheStats>{},
-          ),
+          // 书架内容按书架分桶的 family provider（keepAlive，无 family 级
+          // overrideWith）—— 卡片式滑动切换时相邻书架卡片直接从这些
+          // provider 取数据，因此逐书架覆盖为空数据
+          for (final shelf in shelves)
+            shelfNovelsProvider(shelf).overrideWith(
+              (ref) async => const <Novel>[],
+            ),
+          for (final shelf in shelves)
+            shelfCacheStatsProvider(shelf).overrideWith(
+              (ref) async => const <String, CacheStats>{},
+            ),
         ],
         child: MaterialApp(
           theme: ThemeData(

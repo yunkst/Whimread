@@ -128,11 +128,18 @@ class BookshelfMutation extends _$BookshelfMutation {
   /// 同时 invalidate `onlineNovelsProvider`——站点 Tab 列表
   /// （`bookshelfShelvesProvider`）依赖它级联刷新。
   ///
+  /// 书架数据真身是按书架分桶的 `shelfNovelsProvider` / `shelfCacheStatsProvider`
+  /// （family · keepAlive，卡片式滑动切换依赖相邻书架暖数据），故一并 invalidate
+  /// 整个 family；`bookshelfNovelsProvider` 仅是委托层，保留 invalidate 以维持
+  /// 既有"写完书架必刷"的注释契约。
+  ///
   /// **失败不 invalidate**：若 [op] 抛异常，异常向上抛，`ref.invalidate`
   /// 不执行——避免 UI 显示"写了但没刷干净"的半真半假状态。
   Future<T> _wrap<T>(Future<T> Function() op) async {
     final result = await op();
     ref.invalidate(bookshelfNovelsProvider);
+    ref.invalidate(shelfNovelsProvider);
+    ref.invalidate(shelfCacheStatsProvider);
     ref.invalidate(onlineNovelsProvider);
     return result;
   }

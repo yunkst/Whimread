@@ -125,17 +125,17 @@ Future<List<Novel>> onlineNovels(Ref ref) async {
   return bookshelfRepository.getNovelsByBookshelf(BookshelfKind.online);
 }
 
-/// 书架小说列表
+/// 指定书架的小说列表（family · keepAlive）
 ///
-/// 根据当前书架异步加载小说列表（分类由 URL 派生；站点书架按 host 过滤）
-@riverpod
-Future<List<Novel>> bookshelfNovels(Ref ref) async {
-  // 获取当前书架
-  final shelf = ref.watch(currentBookshelfProvider);
-
+/// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+/// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+/// 下一张"卡片"已经渲染完成。
+///
+/// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+@Riverpod(keepAlive: true)
+Future<List<Novel>> shelfNovels(Ref ref, Bookshelf shelf) async {
   // Web环境特殊处理
   if (kIsWeb) {
-    // 在Web环境中，返回模拟测试数据
     return [
       Novel(
         title: '测试小说1',
@@ -154,10 +154,7 @@ Future<List<Novel>> bookshelfNovels(Ref ref) async {
     ];
   }
 
-  // 获取 Repository
   final bookshelfRepository = ref.watch(bookshelfRepositoryProvider);
-
-  // 从数据库加载小说列表
   try {
     final novels = shelf.isSiteShelf
         ? await bookshelfRepository.getNovelsBySourceDomain(shelf.domain!)
@@ -179,12 +176,13 @@ Future<List<Novel>> bookshelfNovels(Ref ref) async {
   }
 }
 
-/// 书架小说列表缓存统计
+/// 指定书架的缓存统计（family · keepAlive）
 ///
-/// 刷新时从数据库查询已缓存章节数和总章节数
-@riverpod
-Future<Map<String, CacheStats>> bookshelfCacheStats(Ref ref) async {
-  final novels = await ref.watch(bookshelfNovelsProvider.future);
+/// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+/// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+@Riverpod(keepAlive: true)
+Future<Map<String, CacheStats>> shelfCacheStats(Ref ref, Bookshelf shelf) async {
+  final novels = await ref.watch(shelfNovelsProvider(shelf).future);
   final chapterRepo = ref.watch(chapterRepositoryProvider);
 
   final stats = <String, CacheStats>{};
@@ -196,6 +194,26 @@ Future<Map<String, CacheStats>> bookshelfCacheStats(Ref ref) async {
     }
   }
   return stats;
+}
+
+/// 书架小说列表（当前书架的快捷视图 · 兼容层）
+///
+/// 委托到 [shelfNovelsProvider(currentBookshelf)]。保留此 provider 以维持
+/// 旧 API / 既有注释契约；写路径 invalidate 仅作触发信号，真正数据刷新
+/// 由 family 的 invalidate 完成（见 [BookshelfMutationNotifier._wrap]）。
+@riverpod
+Future<List<Novel>> bookshelfNovels(Ref ref) {
+  final shelf = ref.watch(currentBookshelfProvider);
+  return ref.watch(shelfNovelsProvider(shelf).future);
+}
+
+/// 书架小说列表缓存统计（当前书架的快捷视图 · 兼容层）
+///
+/// 委托到 [shelfCacheStatsProvider(currentBookshelf)]。
+@riverpod
+Future<Map<String, CacheStats>> bookshelfCacheStats(Ref ref) {
+  final shelf = ref.watch(currentBookshelfProvider);
+  return ref.watch(shelfCacheStatsProvider(shelf).future);
 }
 
 /// 缓存统计

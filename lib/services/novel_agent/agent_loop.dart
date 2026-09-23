@@ -31,6 +31,15 @@ enum AgentLoopCancelBehavior {
   immediate,
 }
 
+/// 返回纯文本的工具名集合（结果不参与 JSON 解析与包装）
+///
+/// 这些工具的执行结果本身就是正文（如章节原文），不能也不应该被 [jsonDecode]
+/// 当 JSON 解析后用 `{"raw": ...}` 包一层再给 LLM——那会让 LLM 看到 JSON 转义
+/// 形态的正文（真换行变 `\n`、真引号变 `\"`），在"逐字复制"约束下陷入转义
+/// 层数混乱，最终把字面 `\n` / `\"` 写入正文（反馈 id=4「json 混入原文」的
+/// 根因）。此类工具的 rawResult 直接作为 tool message.content 送达 LLM。
+const Set<String> _kPlainTextToolNames = {'read_chapter_content'};
+
 /// Agent 循环配置
 class AgentLoopConfig {
   final int maxRounds;
@@ -675,6 +684,47 @@ class AgentLoop {
 
     // 工具结果格式化：截断逻辑委托给 ToolResultFormatter。
     // llm = 合法 JSON（可能截断），给 LLM；full = 完整版，给 DB。
+    //
+    // 纯文本特例工具（[_kPlainTextToolNames]）：rawResult 本身就是正文，
+    // 跳过 jsonDecode + JSON 包装，按字符截断后原样送达 LLM。
+    if (_kPlainTextToolNames.contains(call.name)) {
+      final plain = _toolResultFormatter.formatPlainText(rawResult);
+      final resultStr = plain.llm;
+      final fullResultStr = plain.full;
+
+      if (resultStr.length < fullResultStr.length) {
+        LoggerService.instance.d(
+          '工具结果截断: ${call.name} originalLen=${fullResultStr.length} → ${resultStr.length}',
+          category: LogCategory.ai,
+          tags: ['agent', 'tool', call.name, 'truncated'],
+        );
+      }
+
+      emit(ToolCallEndEvent(
+        call.name,
+        call.id,
+        resultStr,
+        fullResult: fullResultStr,
+        success: true,
+      ));
+      LoggerService.instance.i(
+          '工具完成: ${call.name} (success=true, resultLen=${resultStr.length}, fullLen=${fullResultStr.length}, scenario=${_scenario.id})',
+          category: LogCategory.ai,
+          tags: [
+            'agent',
+            'tool',
+            call.name,
+            'plain_text',
+            'success',
+            _scenario.id
+          ]);
+      return ChatMessage(
+        role: 'tool',
+        content: resultStr,
+        toolCallId: call.id,
+      );
+    }
+
     Map<String, dynamic> result;
     try {
       result = jsonDecode(rawResult) as Map<String, dynamic>;

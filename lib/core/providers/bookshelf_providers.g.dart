@@ -97,11 +97,375 @@ final onlineNovelsProvider = AutoDisposeFutureProvider<List<Novel>>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef OnlineNovelsRef = AutoDisposeFutureProviderRef<List<Novel>>;
-String _$bookshelfNovelsHash() => r'acf75189da61f53278348c502128995403c39310';
+String _$shelfNovelsHash() => r'5bcc58515daa1c73fa8b40d95bcec2534c55804c';
 
-/// 书架小说列表
+/// Copied from Dart SDK
+class _SystemHash {
+  _SystemHash._();
+
+  static int combine(int hash, int value) {
+    // ignore: parameter_assignments
+    hash = 0x1fffffff & (hash + value);
+    // ignore: parameter_assignments
+    hash = 0x1fffffff & (hash + ((0x0007ffff & hash) << 10));
+    return hash ^ (hash >> 6);
+  }
+
+  static int finish(int hash) {
+    // ignore: parameter_assignments
+    hash = 0x1fffffff & (hash + ((0x03ffffff & hash) << 3));
+    // ignore: parameter_assignments
+    hash = hash ^ (hash >> 11);
+    return 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
+  }
+}
+
+/// 指定书架的小说列表（family · keepAlive）
 ///
-/// 根据当前书架异步加载小说列表（分类由 URL 派生；站点书架按 host 过滤）
+/// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+/// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+/// 下一张"卡片"已经渲染完成。
+///
+/// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+///
+/// Copied from [shelfNovels].
+@ProviderFor(shelfNovels)
+const shelfNovelsProvider = ShelfNovelsFamily();
+
+/// 指定书架的小说列表（family · keepAlive）
+///
+/// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+/// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+/// 下一张"卡片"已经渲染完成。
+///
+/// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+///
+/// Copied from [shelfNovels].
+class ShelfNovelsFamily extends Family<AsyncValue<List<Novel>>> {
+  /// 指定书架的小说列表（family · keepAlive）
+  ///
+  /// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+  /// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+  /// 下一张"卡片"已经渲染完成。
+  ///
+  /// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+  ///
+  /// Copied from [shelfNovels].
+  const ShelfNovelsFamily();
+
+  /// 指定书架的小说列表（family · keepAlive）
+  ///
+  /// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+  /// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+  /// 下一张"卡片"已经渲染完成。
+  ///
+  /// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+  ///
+  /// Copied from [shelfNovels].
+  ShelfNovelsProvider call(
+    Bookshelf shelf,
+  ) {
+    return ShelfNovelsProvider(
+      shelf,
+    );
+  }
+
+  @override
+  ShelfNovelsProvider getProviderOverride(
+    covariant ShelfNovelsProvider provider,
+  ) {
+    return call(
+      provider.shelf,
+    );
+  }
+
+  static const Iterable<ProviderOrFamily>? _dependencies = null;
+
+  @override
+  Iterable<ProviderOrFamily>? get dependencies => _dependencies;
+
+  static const Iterable<ProviderOrFamily>? _allTransitiveDependencies = null;
+
+  @override
+  Iterable<ProviderOrFamily>? get allTransitiveDependencies =>
+      _allTransitiveDependencies;
+
+  @override
+  String? get name => r'shelfNovelsProvider';
+}
+
+/// 指定书架的小说列表（family · keepAlive）
+///
+/// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+/// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+/// 下一张"卡片"已经渲染完成。
+///
+/// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+///
+/// Copied from [shelfNovels].
+class ShelfNovelsProvider extends FutureProvider<List<Novel>> {
+  /// 指定书架的小说列表（family · keepAlive）
+  ///
+  /// 卡片式滑动切换需要相邻书架的数据即时可用，故按 [Bookshelf] 分桶缓存并
+  /// keepAlive（避免离开书架页后再回来被 autoDispose 清掉），保证跟手滑动时
+  /// 下一张"卡片"已经渲染完成。
+  ///
+  /// 写路径经 [BookshelfMutationNotifier] invalidate 整个 family 刷新。
+  ///
+  /// Copied from [shelfNovels].
+  ShelfNovelsProvider(
+    Bookshelf shelf,
+  ) : this._internal(
+          (ref) => shelfNovels(
+            ref as ShelfNovelsRef,
+            shelf,
+          ),
+          from: shelfNovelsProvider,
+          name: r'shelfNovelsProvider',
+          debugGetCreateSourceHash:
+              const bool.fromEnvironment('dart.vm.product')
+                  ? null
+                  : _$shelfNovelsHash,
+          dependencies: ShelfNovelsFamily._dependencies,
+          allTransitiveDependencies:
+              ShelfNovelsFamily._allTransitiveDependencies,
+          shelf: shelf,
+        );
+
+  ShelfNovelsProvider._internal(
+    super._createNotifier, {
+    required super.name,
+    required super.dependencies,
+    required super.allTransitiveDependencies,
+    required super.debugGetCreateSourceHash,
+    required super.from,
+    required this.shelf,
+  }) : super.internal();
+
+  final Bookshelf shelf;
+
+  @override
+  Override overrideWith(
+    FutureOr<List<Novel>> Function(ShelfNovelsRef provider) create,
+  ) {
+    return ProviderOverride(
+      origin: this,
+      override: ShelfNovelsProvider._internal(
+        (ref) => create(ref as ShelfNovelsRef),
+        from: from,
+        name: null,
+        dependencies: null,
+        allTransitiveDependencies: null,
+        debugGetCreateSourceHash: null,
+        shelf: shelf,
+      ),
+    );
+  }
+
+  @override
+  FutureProviderElement<List<Novel>> createElement() {
+    return _ShelfNovelsProviderElement(this);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ShelfNovelsProvider && other.shelf == shelf;
+  }
+
+  @override
+  int get hashCode {
+    var hash = _SystemHash.combine(0, runtimeType.hashCode);
+    hash = _SystemHash.combine(hash, shelf.hashCode);
+
+    return _SystemHash.finish(hash);
+  }
+}
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+mixin ShelfNovelsRef on FutureProviderRef<List<Novel>> {
+  /// The parameter `shelf` of this provider.
+  Bookshelf get shelf;
+}
+
+class _ShelfNovelsProviderElement extends FutureProviderElement<List<Novel>>
+    with ShelfNovelsRef {
+  _ShelfNovelsProviderElement(super.provider);
+
+  @override
+  Bookshelf get shelf => (origin as ShelfNovelsProvider).shelf;
+}
+
+String _$shelfCacheStatsHash() => r'e1aa5a7dd78c76b34fff4a2ab34d86cfbdb009aa';
+
+/// 指定书架的缓存统计（family · keepAlive）
+///
+/// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+/// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+///
+/// Copied from [shelfCacheStats].
+@ProviderFor(shelfCacheStats)
+const shelfCacheStatsProvider = ShelfCacheStatsFamily();
+
+/// 指定书架的缓存统计（family · keepAlive）
+///
+/// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+/// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+///
+/// Copied from [shelfCacheStats].
+class ShelfCacheStatsFamily
+    extends Family<AsyncValue<Map<String, CacheStats>>> {
+  /// 指定书架的缓存统计（family · keepAlive）
+  ///
+  /// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+  /// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+  ///
+  /// Copied from [shelfCacheStats].
+  const ShelfCacheStatsFamily();
+
+  /// 指定书架的缓存统计（family · keepAlive）
+  ///
+  /// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+  /// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+  ///
+  /// Copied from [shelfCacheStats].
+  ShelfCacheStatsProvider call(
+    Bookshelf shelf,
+  ) {
+    return ShelfCacheStatsProvider(
+      shelf,
+    );
+  }
+
+  @override
+  ShelfCacheStatsProvider getProviderOverride(
+    covariant ShelfCacheStatsProvider provider,
+  ) {
+    return call(
+      provider.shelf,
+    );
+  }
+
+  static const Iterable<ProviderOrFamily>? _dependencies = null;
+
+  @override
+  Iterable<ProviderOrFamily>? get dependencies => _dependencies;
+
+  static const Iterable<ProviderOrFamily>? _allTransitiveDependencies = null;
+
+  @override
+  Iterable<ProviderOrFamily>? get allTransitiveDependencies =>
+      _allTransitiveDependencies;
+
+  @override
+  String? get name => r'shelfCacheStatsProvider';
+}
+
+/// 指定书架的缓存统计（family · keepAlive）
+///
+/// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+/// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+///
+/// Copied from [shelfCacheStats].
+class ShelfCacheStatsProvider extends FutureProvider<Map<String, CacheStats>> {
+  /// 指定书架的缓存统计（family · keepAlive）
+  ///
+  /// 缓存统计依赖同书架的小说列表；同 [shelfNovelsProvider] 一起 keepAlive，
+  /// 保证滑动切换时元信息条 / 章节进度条数据不抖。
+  ///
+  /// Copied from [shelfCacheStats].
+  ShelfCacheStatsProvider(
+    Bookshelf shelf,
+  ) : this._internal(
+          (ref) => shelfCacheStats(
+            ref as ShelfCacheStatsRef,
+            shelf,
+          ),
+          from: shelfCacheStatsProvider,
+          name: r'shelfCacheStatsProvider',
+          debugGetCreateSourceHash:
+              const bool.fromEnvironment('dart.vm.product')
+                  ? null
+                  : _$shelfCacheStatsHash,
+          dependencies: ShelfCacheStatsFamily._dependencies,
+          allTransitiveDependencies:
+              ShelfCacheStatsFamily._allTransitiveDependencies,
+          shelf: shelf,
+        );
+
+  ShelfCacheStatsProvider._internal(
+    super._createNotifier, {
+    required super.name,
+    required super.dependencies,
+    required super.allTransitiveDependencies,
+    required super.debugGetCreateSourceHash,
+    required super.from,
+    required this.shelf,
+  }) : super.internal();
+
+  final Bookshelf shelf;
+
+  @override
+  Override overrideWith(
+    FutureOr<Map<String, CacheStats>> Function(ShelfCacheStatsRef provider)
+        create,
+  ) {
+    return ProviderOverride(
+      origin: this,
+      override: ShelfCacheStatsProvider._internal(
+        (ref) => create(ref as ShelfCacheStatsRef),
+        from: from,
+        name: null,
+        dependencies: null,
+        allTransitiveDependencies: null,
+        debugGetCreateSourceHash: null,
+        shelf: shelf,
+      ),
+    );
+  }
+
+  @override
+  FutureProviderElement<Map<String, CacheStats>> createElement() {
+    return _ShelfCacheStatsProviderElement(this);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ShelfCacheStatsProvider && other.shelf == shelf;
+  }
+
+  @override
+  int get hashCode {
+    var hash = _SystemHash.combine(0, runtimeType.hashCode);
+    hash = _SystemHash.combine(hash, shelf.hashCode);
+
+    return _SystemHash.finish(hash);
+  }
+}
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+mixin ShelfCacheStatsRef on FutureProviderRef<Map<String, CacheStats>> {
+  /// The parameter `shelf` of this provider.
+  Bookshelf get shelf;
+}
+
+class _ShelfCacheStatsProviderElement
+    extends FutureProviderElement<Map<String, CacheStats>>
+    with ShelfCacheStatsRef {
+  _ShelfCacheStatsProviderElement(super.provider);
+
+  @override
+  Bookshelf get shelf => (origin as ShelfCacheStatsProvider).shelf;
+}
+
+String _$bookshelfNovelsHash() => r'a409b032650c087d6e5ebca4d9c3b45a83aba7f0';
+
+/// 书架小说列表（当前书架的快捷视图 · 兼容层）
+///
+/// 委托到 [shelfNovelsProvider(currentBookshelf)]。保留此 provider 以维持
+/// 旧 API / 既有注释契约；写路径 invalidate 仅作触发信号，真正数据刷新
+/// 由 family 的 invalidate 完成（见 [BookshelfMutationNotifier._wrap]）。
 ///
 /// Copied from [bookshelfNovels].
 @ProviderFor(bookshelfNovels)
@@ -119,11 +483,11 @@ final bookshelfNovelsProvider = AutoDisposeFutureProvider<List<Novel>>.internal(
 // ignore: unused_element
 typedef BookshelfNovelsRef = AutoDisposeFutureProviderRef<List<Novel>>;
 String _$bookshelfCacheStatsHash() =>
-    r'1cea465bf551de9d4de4e2863c2e85556ce25400';
+    r'70f473de725a38cca5d28728c333ac2cd1c80650';
 
-/// 书架小说列表缓存统计
+/// 书架小说列表缓存统计（当前书架的快捷视图 · 兼容层）
 ///
-/// 刷新时从数据库查询已缓存章节数和总章节数
+/// 委托到 [shelfCacheStatsProvider(currentBookshelf)]。
 ///
 /// Copied from [bookshelfCacheStats].
 @ProviderFor(bookshelfCacheStats)

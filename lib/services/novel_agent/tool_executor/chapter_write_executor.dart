@@ -166,12 +166,36 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     final parser = ToolArgParser(args);
     final (position, posErr) = parser.requireInt('position');
     if (posErr != null) return posErr;
-    final (oldString, oldErr) = parser.requireString('oldString');
+    final (rawOldString, oldErr) = parser.requireString('oldString');
     if (oldErr != null) return oldErr;
-    final (newString, newErr) = parser.requireString('newString');
+    final (rawNewString, newErr) = parser.requireString('newString');
     if (newErr != null) return newErr;
     final (replaceAll, allErr) = parser.optionalBool('replaceAll');
     if (allErr != null) return allErr;
+
+    // 把 LLM 入参里的 JSON 转义序列还原为真字符（防御纵深）。
+    //
+    // 反馈 id=4「json 混入原文」根因链路:read_chapter_content 返回的正文
+    // 被 JSON 包装成 `{"raw": "..."}` 后,LLM 看到的换行是 `\n`、引号是 `\"`。
+    // 系统提示词要求"oldString 与 read 返回内容逐字一致",LLM 复制时常把
+    // 字面 `\n`/`\"` 序列透传到 newString 里。outline_replacer 的
+    // escapeNormalizedReplacer 只对 oldString 做归一化救匹配,不动 newString,
+    // 因此字面转义序列照样落进正文。
+    //
+    // 这里在工具入口对 oldString / newString 统一调用
+    // [unescapeJsonEscapeSequences],保证落库的就是真字符。
+    final oldString = unescapeJsonEscapeSequences(rawOldString);
+    final newString = unescapeJsonEscapeSequences(rawNewString);
+    if (oldString != rawOldString || newString != rawNewString) {
+      LoggerService.instance.w(
+        '工具入参清洗: ${'update_chapter_content'} '
+        'oldString=${rawOldString.length}→${oldString.length} '
+        'newString=${rawNewString.length}→${newString.length} '
+        'position=$position',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'update_chapter_content', 'escape_unwrapped'],
+      );
+    }
 
     if (oldString == newString) {
       return jsonEncode({

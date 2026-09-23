@@ -65,6 +65,32 @@ class ToolResultFormatter {
     return ToolResultFormat(llm: llm, full: full);
   }
 
+  /// 格式化纯文本工具结果（不经 JSON 包装）
+  ///
+  /// 适用工具：返回值本身就是正文（如 read_chapter_content），不能也不应该
+  /// 用 `{"raw": ...}` 包一层再给 LLM——那会让 LLM 看到 JSON 转义形态的正文
+  /// （真换行变 `\n`、真引号变 `\"`），在"逐字复制"约束下陷入转义层数混乱，
+  /// 最终把字面 `\n` / `\"` 写入正文（见反馈报告：id=4 「json 混入原文」）。
+  ///
+  /// 直接把原文按字符数截断后送达 LLM，LLM 解析请求后看到的与库里逐字一致。
+  ///
+  /// 返回的 `llm` 是给 LLM 的截断版，`full` 是原始完整文本（供 DB 持久化）。
+  ToolResultFormat formatPlainText(String raw) {
+    if (raw.length <= maxChars) {
+      return ToolResultFormat(llm: raw, full: raw);
+    }
+    // 截断点必须不落在 UTF-16 代理对中间（保护 surrogate pair）
+    var cut = maxChars - _truncatedSuffix.length;
+    if (cut <= 0) {
+      return ToolResultFormat(llm: _truncatedSuffix, full: raw);
+    }
+    if ((raw.codeUnitAt(cut - 1) & 0xFC00) == 0xD800) {
+      cut--;
+    }
+    final truncated = '${raw.substring(0, cut)}$_truncatedSuffix';
+    return ToolResultFormat(llm: truncated, full: raw);
+  }
+
   /// 截断 + 拼回 __meta
   String _truncate(Map<String, dynamic> body, Map<String, dynamic>? meta) {
     final encoded = jsonEncode(body);

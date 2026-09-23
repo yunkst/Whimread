@@ -17,6 +17,48 @@ import 'dart:math' as math;
 /// Replacer：在 content 中找出与 find 对应的「真实命中串」候选（可能多个）。
 typedef Replacer = Iterable<String> Function(String content, String find);
 
+/// 把 JSON 转义序列还原为真字符：`\n` → 换行, `\t` → tab, `\r` → 回车,
+/// `\"` → 引号, `\'` → 单引号, `` \` `` → 反引号, `\\` → 反斜杠, `\$` → 美元符号。
+/// 反斜杠后跟其它字符（含字面换行/制表符等）保持原文不变。
+///
+/// 用法:章节写入工具（update_chapter_content / create_chapter 等）拿到 LLM
+/// 传来的 newString / oldString 后调一次,把字面 `\n` / `\"` 等还原成真字符,
+/// 避免被污染的转义序列落进正文存储（反馈 id=4 「json 混入原文」）。
+///
+/// 与 [escapeNormalizedReplacer] 内部的归一化规则完全一致——之前那份规则
+/// 只对 oldString 做归一化来救"匹配",但不动 newString,污染照样进正文。
+/// 这里抽出顶层函数后,newString/oldString 在入口统一清洗,让匹配与写入走
+/// 同一套规则。
+String unescapeJsonEscapeSequences(String str) {
+  return str.replaceAllMapped(
+    RegExp(r'\\(.)'),
+    (m) {
+      final c = m.group(1);
+      switch (c) {
+        case 'n':
+          return '\n';
+        case 't':
+          return '\t';
+        case 'r':
+          return '\r';
+        case "'":
+          return "'";
+        case '"':
+          return '"';
+        case '`':
+          return '`';
+        case '\\':
+          return '\\';
+        case r'$':
+          return r'$';
+        default:
+          // 反斜杠后跟其它字符(含字面换行等)→ 保持原文
+          return m.group(0)!;
+      }
+    },
+  );
+}
+
 // 相似度阈值（移植自 opencode edit.ts:150-151）
 const double _singleCandidateSimilarityThreshold = 0.0;
 const double _multipleCandidatesSimilarityThreshold = 0.3;
@@ -252,37 +294,7 @@ Replacer indentationFlexibleReplacer = (content, find) sync* {
 ///
 /// 把 \n \t \" 等转义序列还原后比较，命中时 yield 原文中的对应片段。
 Replacer escapeNormalizedReplacer = (content, find) sync* {
-  String unescape(String str) {
-    return str.replaceAllMapped(
-      RegExp(r'\\(.)'),
-      (m) {
-        final c = m.group(1);
-        switch (c) {
-          case 'n':
-            return '\n';
-          case 't':
-            return '\t';
-          case 'r':
-            return '\r';
-          case "'":
-            return "'";
-          case '"':
-            return '"';
-          case '`':
-            return '`';
-          case '\\':
-            return '\\';
-          case r'$':
-            return r'$';
-          default:
-            // 反斜杠后跟其它字符(含字面换行等)→ 保持原文
-            return m.group(0)!;
-        }
-      },
-    );
-  }
-
-  final unescapedFind = unescape(find);
+  final unescapedFind = unescapeJsonEscapeSequences(find);
 
   // 直接用还原后的 find 去原文里找
   if (content.contains(unescapedFind)) {
@@ -294,7 +306,7 @@ Replacer escapeNormalizedReplacer = (content, find) sync* {
   final findLines = unescapedFind.split('\n');
   for (var i = 0; i <= lines.length - findLines.length; i++) {
     final block = lines.sublist(i, i + findLines.length).join('\n');
-    if (unescape(block) == unescapedFind) {
+    if (unescapeJsonEscapeSequences(block) == unescapedFind) {
       yield block;
     }
   }
