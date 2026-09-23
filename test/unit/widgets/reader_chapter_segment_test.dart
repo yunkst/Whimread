@@ -18,7 +18,11 @@ void main() {
 
   group('ReaderFlatLayout', () {
     ReaderChapterSegment segment(String url, List<String> paragraphs) =>
-        ReaderChapterSegment(chapterUrl: url, paragraphs: paragraphs);
+        ReaderChapterSegment(
+          chapterUrl: url,
+          chapterTitle: '标题$url',
+          paragraphs: paragraphs,
+        );
 
     test('空分段：只有尾部占位一项', () {
       final layout = ReaderFlatLayout([]);

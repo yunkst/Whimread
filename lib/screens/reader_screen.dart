@@ -167,6 +167,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 采样累计。顶部回收用它补偿滚动位置；字体变化/正文刷新即失效。
   final Map<String, double> _knownBlockHeights = {};
 
+  /// 各章节起点的内容偏移（key = 章节 URL）：可测标记直接采样，
+  /// 不可测时由相邻块高推导（首块恒为顶部 padding）。
+  /// 当前章检测基于它——不依赖标记是否还在布局里（ListView 缓存区
+  /// 只有几百像素，整章之外的上/下章标记早已销毁）。
+  final Map<String, double> _blockStartOffsets = {};
+
   /// 章节块保留窗口：当前章前后各保留多少章，超出即回收正文内存
   static const int _keepBlocksPerSide = 3;
 
@@ -437,6 +443,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _blocks = [];
       _blockStartKeys.clear();
       _knownBlockHeights.clear();
+      _blockStartOffsets.clear();
       _concatDirection = _ConcatDirection.none;
       _pendingPrependBlock = null;
       _prevConcatFailed = false;
@@ -1150,10 +1157,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // 监听设置状态变化（仅用于触发 rebuild；字段值通过 getter 实时读取）
     ref.watch(readerSettingsStateNotifierProvider);
 
-    // 字体大小变化 → 块高缓存失效（顶部回收的补偿高度需重新采样）
+    // 字体大小变化 → 全部内容重新排版，块高与起点偏移缓存整体失效
     final fontSize = _fontSize;
     if (_lastSeenFontSize != null && _lastSeenFontSize != fontSize) {
       _knownBlockHeights.clear();
+      _blockStartOffsets.clear();
     }
     _lastSeenFontSize = fontSize;
 
@@ -1345,6 +1353,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 与正文列表同构：分隔线也计入插入高度
+                    ReaderChapterDivider(
+                      title: _pendingPrependBlock!.chapter.title,
+                    ),
                     for (var i = 0;
                         i < _pendingPrependBlock!.paragraphs.length;
                         i++)
@@ -1444,23 +1456,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
-  /// 基于章节起点标记的视口位置检测当前章：
-  /// 当前章 = 「视口顶 + 锚点」之上最近的章节起点所在块。
-  /// 标记只在条目被构建（进入缓存区）后可测，未构建的章节只可能出现在
-  /// 视口下方，不影响「锚点之上最近」的判定。
+  /// 当前章检测（基于章节起点的内容偏移）：
+  /// 当前章 = 「视口顶 + 锚点」之上起点最近的章节块。
   ///
-  /// 顺带采样块高：相邻两章起点同时可测时，记录前一章的实测高度
-  /// （顶部回收的滚动补偿依赖它）。用户滚过每个章节边界时边界两侧
-  /// 标记都会短暂同存，块高即被逐段采样到位。
+  /// 起点偏移来源分三层，保证视口外的章节也能参与判定：
+  /// 1. 采样——分隔线标记进入缓存区时直接实测；
+  /// 2. 推导——首块恒为顶部 padding，其余由相邻块高前向/后向推导；
+  /// 3. 兜底——都未知（如刚改字体后未重滚）的章节不参判，保持当前章不变。
   void _detectCurrentChapterByViewport() {
     if (_blocks.length <= 1) return;
-    Chapter? target;
-    var best = double.negativeInfinity;
+
+    // 采样：可测标记 → 实测起点偏移；相邻两个可测标记 → 实测块高
     int? lastMeasuredIndex;
     var lastMeasuredOffset = 0.0;
     for (var i = 0; i < _blocks.length; i++) {
-      final block = _blocks[i];
-      final markerContext = _blockStartKeys[block.chapter.url]?.currentContext;
+      final markerContext =
+          _blockStartKeys[_blocks[i].chapter.url]?.currentContext;
       if (markerContext == null) continue;
       final renderBox = markerContext.findRenderObject();
       if (renderBox is! RenderBox ||
@@ -1474,6 +1485,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       final visualY = renderBox.localToGlobal(Offset.zero).dy - viewportTop;
       final contentOffset = _scrollController.offset + visualY;
 
+      _blockStartOffsets[_blocks[i].chapter.url] = contentOffset;
       final lm = lastMeasuredIndex;
       if (lm != null && lm == i - 1) {
         final h = contentOffset - lastMeasuredOffset;
@@ -1483,14 +1495,47 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       }
       lastMeasuredIndex = i;
       lastMeasuredOffset = contentOffset;
+    }
 
-      if (visualY <= _chapterAnchorPx && visualY > best) {
-        best = visualY;
+    _deriveBlockStartOffsets();
+
+    // 判定：起点 ≤ 「滚动位置 + 锚点」的最近章节
+    Chapter? target;
+    var best = double.negativeInfinity;
+    final anchor = _scrollController.offset + _chapterAnchorPx;
+    for (final block in _blocks) {
+      final start = _blockStartOffsets[block.chapter.url];
+      if (start == null) continue;
+      if (start <= anchor && start > best) {
+        best = start;
         target = block.chapter;
       }
     }
     if (target != null && target.url != _currentChapter.url) {
       _setCurrentChapter(target);
+    }
+  }
+
+  /// 用已知块高推导未采样章节的起点偏移
+  void _deriveBlockStartOffsets() {
+    if (_blocks.isEmpty) return;
+    // 首块起点 = 内容原点 + 顶部 padding
+    _blockStartOffsets[_blocks.first.chapter.url] ??= _contentTopPadding;
+    // 前向：起点(i) = 起点(i-1) + 高度(i-1)
+    for (var i = 1; i < _blocks.length; i++) {
+      final prevStart = _blockStartOffsets[_blocks[i - 1].chapter.url];
+      final h = _knownBlockHeights[_blocks[i - 1].chapter.url];
+      if (prevStart != null && h != null) {
+        _blockStartOffsets.putIfAbsent(_blocks[i].chapter.url, () => prevStart + h);
+      }
+    }
+    // 后向：起点(i-1) = 起点(i) - 高度(i-1)
+    for (var i = _blocks.length - 1; i >= 1; i--) {
+      final nextStart = _blockStartOffsets[_blocks[i].chapter.url];
+      final h = _knownBlockHeights[_blocks[i - 1].chapter.url];
+      if (nextStart != null && h != null) {
+        _blockStartOffsets[_blocks[i - 1].chapter.url] ??= nextStart - h;
+      }
     }
   }
 
@@ -1560,6 +1605,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       for (final b in _blocks.sublist(tailFrom)) {
         _blockStartKeys.remove(b.chapter.url);
         _knownBlockHeights.remove(b.chapter.url);
+        _blockStartOffsets.remove(b.chapter.url);
       }
       LoggerService.instance.d(
         '回收尾部章节块: ${_blocks.sublist(tailFrom).map((b) => b.chapter.title).join("、")}',
@@ -1593,6 +1639,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         for (final b in _blocks.sublist(0, headTo)) {
           _blockStartKeys.remove(b.chapter.url);
           _knownBlockHeights.remove(b.chapter.url);
+          _blockStartOffsets.remove(b.chapter.url);
         }
         LoggerService.instance.d(
           '回收顶部章节块: ${_blocks.sublist(0, headTo).map((b) => b.chapter.title).join("、")} '
@@ -1602,7 +1649,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         );
         _blocks = _blocks.sublist(headTo);
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || !_scrollController.hasClients) return;
+          if (!mounted) return;
+          // 剩余块整体上移被回收区域的高度，起点偏移同步平移
+          // （新首块的采样起点恰为补偿量，平移后回到顶部 padding）
+          _blockStartOffsets.updateAll((_, off) => off - removedHeight);
+          if (!_scrollController.hasClients) return;
           _scrollController.jumpTo(_scrollController.offset - removedHeight);
         });
       }
@@ -1711,9 +1762,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         _prevConcatFailed = false;
         _lastConcatAt = DateTime.now();
       });
-      // 布局完成后补偿滚动位置（插入高度 = 视野下移量）
+      // 布局完成后补偿滚动位置（插入高度 = 视野下移量）；
+      // 已采样的起点偏移同步整体平移，新首块起点回到顶部 padding
+      final prependedUrl = block.chapter.url;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
+        if (!mounted) return;
+        _blockStartOffsets.updateAll((_, off) => off + height);
+        _blockStartOffsets[prependedUrl] = _contentTopPadding;
+        if (!_scrollController.hasClients) return;
         _scrollController.jumpTo(_scrollController.offset + height);
       });
       // 拼接后窗口外章节块可回收
@@ -1792,6 +1848,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _blocks[index] =
           _ChapterBlock(chapter: chapter, rawContent: contentState.content);
       _knownBlockHeights.remove(chapter.url);
+      // 该章之后的块整体位移未知，废弃其起点采样，滚动经过时重新采样
+      for (var i = index + 1; i < _blocks.length; i++) {
+        _blockStartOffsets.remove(_blocks[i].chapter.url);
+      }
     }
   }
 
@@ -1832,6 +1892,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
     return ReaderChapterSegment(
       chapterUrl: block.chapter.url,
+      chapterTitle: block.chapter.title,
       paragraphs: paragraphs,
       annotatedIndexes: _annotationsByChapter[block.chapter.url]?.keys.toSet() ??
           const <int>{},

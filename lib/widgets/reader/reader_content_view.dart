@@ -186,11 +186,17 @@ class _ReaderContentViewState extends State<ReaderContentView> {
               );
             }
 
-            // 章节起点标记（0 高度，携带章节级 GlobalKey 供上层定位/检测）
+            // 章节分隔线（每章起点，携带章节级 GlobalKey 供上层采样/检测/定位）
             final markerUrl = layout.markerChapterUrlAt(index);
             if (markerUrl != null) {
               final markerKey = widget.blockStartKeys[markerUrl];
-              return SizedBox.shrink(key: markerKey);
+              final markerSegment = widget.segments.firstWhere(
+                (s) => s.chapterUrl == markerUrl,
+              );
+              return ReaderChapterDivider(
+                key: markerKey,
+                title: markerSegment.chapterTitle,
+              );
             }
 
             final paragraphInfo = layout.paragraphAt(index);
