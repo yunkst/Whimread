@@ -32,6 +32,7 @@ import 'services/managed_models/managed_model_service.dart';
 import 'services/native_crash_reporter.dart' show kGitHubRepo, NativeCrashReporter;
 import 'services/novel_agent/agent_scenario.dart';
 import 'services/star_prompt_service.dart';
+import 'services/startup_prompts_runner.dart';
 import 'widgets/agent_chat/agent_floating_button.dart';
 import 'widgets/app_update_dialog.dart';
 import 'widgets/star_prompt_dialog.dart';
@@ -505,42 +506,42 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   }
 
   /// 启动期一次性副作用，串行执行：crash 上报 → star 引导 → 静默检查更新。
-  /// 每个阶段独立容错，任何异常只吞掉不阻塞启动；
-  /// 跨 await 后使用 context 前必须重新校验 [mounted]。
+  ///
+  /// 编排交给 [StartupPromptsRunner]：star 引导不满足门槛时的提前返回只
+  /// 跳过该阶段自身，不再短路启动期更新检查；整体只受 mounted 门控。
   Future<void> _runStartupPrompts() async {
-    // 1. 上次 native crash 报告
-    await NativeCrashReporter.checkAndReport(context);
-    if (!mounted) return;
+    final runner = StartupPromptsRunner(
+      canContinue: () => mounted,
+      crashReportStage: () => NativeCrashReporter.checkAndReport(context),
+      starPromptStage: _maybeRunStarPrompt,
+      updateCheckStage: _silentCheckStableUpdate,
+    );
+    await runner.run();
+  }
 
-    // 2. GitHub star 引导
-    try {
-      await StarPromptService.instance.recordLaunch();
+  /// GitHub star 引导阶段:满足全部门槛时弹窗。
+  ///
+  /// 不满足门槛或中途退出页面时直接返回,只结束本阶段;弹窗后的
+  /// mounted 校验由 [StartupPromptsRunner] 继续按阶段门控。
+  Future<void> _maybeRunStarPrompt() async {
+    await StarPromptService.instance.recordLaunch();
+    if (!mounted) return;
+    final shouldShow = await StarPromptService.instance.shouldShow();
+    if (!shouldShow || !mounted) return;
+    final goStar = await showDialog<bool>(
+      context: context,
+      builder: (_) => const StarPromptDialog(),
+    );
+    // showDialog 期间用户可能退出页面；后续副作用必须重新 mounted 校验
+    if (!mounted) return;
+    if (goStar == true) {
+      await StarPromptService.instance.onStarClicked();
       if (!mounted) return;
-      final shouldShow = await StarPromptService.instance.shouldShow();
-      if (!shouldShow || !mounted) return;
-      final goStar = await showDialog<bool>(
-        context: context,
-        builder: (_) => const StarPromptDialog(),
-      );
-      // showDialog 期间用户可能退出页面；后续副作用必须重新 mounted 校验
-      if (!mounted) return;
-      if (goStar == true) {
-        await StarPromptService.instance.onStarClicked();
-        if (!mounted) return;
-        await launchUrl(Uri.parse(kGitHubRepo),
-            mode: LaunchMode.externalApplication);
-      } else {
-        await StarPromptService.instance.onDismissed();
-      }
-    } catch (_) {
-      // 任何异常吞掉，绝不阻塞启动。
+      await launchUrl(Uri.parse(kGitHubRepo),
+          mode: LaunchMode.externalApplication);
+    } else {
+      await StarPromptService.instance.onDismissed();
     }
-
-    // 3. 启动期静默检查更新
-    //    通道跟随用户设置：未开预览版开关仅查 stable，开了则含预览版。
-    //    失败一律吞掉，不阻塞启动；用户可随时去设置页手动检查。
-    if (!mounted) return;
-    await _silentCheckStableUpdate();
   }
 
   /// 启动期静默检查更新：有新版本则弹窗，失败 / 已是最新均不打扰。
