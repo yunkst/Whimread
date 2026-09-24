@@ -132,6 +132,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   // ========== 沉浸模式（点击正文切换 UI 显隐） ==========
   bool _isChromeVisible = true;
 
+  /// 工具栏/底栏覆盖层淡入淡出时长
+  static const Duration _chromeFadeDuration = Duration(milliseconds: 150);
+
   // ========== 无限滚动拼接（滚到顶/底自动拼接前/后章节） ==========
   /// 已拼接进阅读视图的章节块（按显示顺序）
   List<_ChapterBlock> _blocks = [];
@@ -1193,23 +1196,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       overrideChild: hasAnnotations ? _buildRewriteFabChild() : null,
       overrideOnTap: hasAnnotations ? _startAnnotationRewrite : null,
       child: Scaffold(
-        // 直接返回 Scaffold，不使用 ChangeNotifierProvider 包装
-        // 沉浸模式：隐藏顶栏，正文全屏展示
-        appBar: _isChromeVisible
-            ? ReaderAppBar(
-                novel: widget.novel,
-                currentChapter: _currentChapter,
-                chapters: widget.chapters,
-                isEditMode: isEditMode,
-                onToggleEditMode: () =>
-                    ref.read(readerEditModeProvider.notifier).toggle(),
-                onSaveAndExitEditMode: () async {
-                  await _saveEditedContent();
-                  ref.read(readerEditModeProvider.notifier).toggle();
-                },
-                onMenuAction: _handleMenuAction,
-              )
-            : null,
+        // 顶栏不用 Scaffold.appBar 而以悬浮覆盖层呈现（见 _buildBody）：
+        // Scaffold.appBar 显隐会推挤 body 导致正文抖动，覆盖层不动正文布局
         body: _buildBody(context, isEditMode, segments, contentState),
         floatingActionButton:
             (contentState.content.isEmpty || !_isChromeVisible)
@@ -1223,31 +1211,77 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  /// 构建阅读器主体内容
+  /// 顶部工具栏覆盖层总高（状态栏 + 工具栏），banner 等提示在
+  /// 工具栏可见时需避让到其下方
+  double get _toolbarOverlayHeight =>
+      MediaQuery.paddingOf(context).top + kToolbarHeight;
+
+  /// 构建阅读器主体内容。
+  ///
+  /// 正文（含加载/错误态）永远全屏铺满；工具栏/底栏为悬浮覆盖层，
+  /// 显隐只做淡入淡出——正文布局不随沉浸切换移动（修复抖动）。
   Widget _buildBody(
     BuildContext context,
     bool isEditMode,
     List<ReaderChapterSegment> segments,
     ChapterContentState contentState,
   ) {
+    Widget content;
     if (contentState.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (contentState.errorMessage.isNotEmpty) {
-      return ReaderErrorView(
+      content = const Center(child: CircularProgressIndicator());
+    } else if (contentState.errorMessage.isNotEmpty) {
+      content = ReaderErrorView(
         errorMessage: contentState.errorMessage,
         onRetry: () => _loadChapterContent(resetScrollPosition: false),
       );
-    }
-
-    // 检查内容是否为空（修复空白页面问题）
-    if (contentState.content.trim().isEmpty) {
-      return ReaderErrorView(
+    } else if (contentState.content.trim().isEmpty) {
+      // 检查内容是否为空（修复空白页面问题）
+      content = ReaderErrorView(
         errorMessage: '章节内容为空，请尝试刷新或联系开发者',
         onRetry: () => _loadChapterContent(
           resetScrollPosition: false,
           forceRefresh: true,
+        ),
+      );
+    } else {
+      // 主要内容区域（点击正文切换沉浸模式；段落级延迟揭示见 ReaderContentView）
+      content = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _toggleChrome,
+        child: ReaderContentView(
+          segments: segments,
+          blockStartKeys: _blockStartKeys,
+          fontSize: _fontSize,
+          textBrightness: _textBrightness,
+          isEditMode: isEditMode,
+          isAutoScrolling: isAutoScrolling,
+          onParagraphLongPress: _showAnnotationEditor,
+          onParagraphRevealComplete: _onParagraphRevealComplete,
+          onContentChanged: (index, newContent) {
+            // 仅支持全文编辑模式（index=-1）
+            assert(index == -1, '只支持全文编辑模式，段落编辑模式已废弃');
+            // 使用 addPostFrameCallback 避免在构建阶段调用 setState
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() {
+                _contentController.setContent(newContent);
+              });
+            });
+          },
+          scrollController: _scrollController,
+          onPointerDown: () {
+            // 手指接触屏幕，暂停自动滚动
+            if (isAutoScrolling) {
+              handleTouch();
+            }
+          },
+          onPointerUp: () {
+            // handleTouch() 已经设置了恢复定时器，所以这里不需要额外处理
+          },
+          onScrollNotification: (notification) {
+            // 保留以兼容现有代码（不再处理用户滚动）
+            return handleScrollNotification(notification);
+          },
         ),
       );
     }
@@ -1257,52 +1291,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final hasNext =
         currentIndex != -1 && currentIndex < widget.chapters.length - 1;
 
+    // 工具栏可见时，顶部提示避让到工具栏下方
+    final topTipOffset =
+        _isChromeVisible ? _toolbarOverlayHeight + 8 : 8.0;
+    // 底部提示避让到底栏（底栏含安全区）上方
+    final bottomTipOffset = _isChromeVisible
+        ? MediaQuery.paddingOf(context).bottom + 88
+        : 88.0;
+
     return Stack(
       children: [
-        // 主要内容区域（点击正文切换沉浸模式；段落级延迟揭示见 ReaderContentView）
-        GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: _toggleChrome,
-          child: ReaderContentView(
-            segments: segments,
-            blockStartKeys: _blockStartKeys,
-            fontSize: _fontSize,
-            textBrightness: _textBrightness,
-            isEditMode: isEditMode,
-            isAutoScrolling: isAutoScrolling,
-            onParagraphLongPress: _showAnnotationEditor,
-            onParagraphRevealComplete: _onParagraphRevealComplete,
-            onContentChanged: (index, newContent) {
-              // 仅支持全文编辑模式（index=-1）
-              assert(index == -1, '只支持全文编辑模式，段落编辑模式已废弃');
-              // 使用 addPostFrameCallback 避免在构建阶段调用 setState
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted) return;
-                setState(() {
-                  _contentController.setContent(newContent);
-                });
-              });
-            },
-            scrollController: _scrollController,
-            onPointerDown: () {
-              // 手指接触屏幕，暂停自动滚动
-              if (isAutoScrolling) {
-                handleTouch();
-              }
-            },
-            onPointerUp: () {
-              // handleTouch() 已经设置了恢复定时器，所以这里不需要额外处理
-            },
-            onScrollNotification: (notification) {
-              // 保留以兼容现有代码（不再处理用户滚动）
-              return handleScrollNotification(notification);
-            },
-          ),
-        ),
+        content,
         // 顶部「已按标注重写」banner（重写成功后短暂展示，可一键还原）
         if (_showRewriteBanner)
           Positioned(
-            top: 8,
+            top: topTipOffset,
             left: 16,
             right: 16,
             child: _buildRewriteBanner(context),
@@ -1310,7 +1313,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         // 拼接失败重试入口（上一章：顶部；下一章：底栏上方）
         if (_prevConcatFailed)
           Positioned(
-            top: 8,
+            top: topTipOffset,
             left: 16,
             right: 16,
             child: Center(
@@ -1322,14 +1325,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           ),
         if (_concatDirection == _ConcatDirection.next)
           Positioned(
-            bottom: 88,
+            bottom: bottomTipOffset,
             left: 0,
             right: 0,
             child: Center(child: _buildConcatStatusChip('正在加载下一章…')),
           ),
         if (_nextConcatFailed)
           Positioned(
-            bottom: 88,
+            bottom: bottomTipOffset,
             left: 16,
             right: 16,
             child: Center(
@@ -1376,21 +1379,54 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               ),
             ),
           ),
-        // 固定在底部的章节切换按钮（沉浸模式下隐藏）
-        if (_isChromeVisible)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ReaderBottomBar(
-              currentIndex: currentIndex,
-              totalChapters: widget.chapters.length,
-              hasPrevious: hasPrevious,
-              hasNext: hasNext,
-              onPreviousChapter: _goToPreviousChapter,
-              onNextChapter: _goToNextChapter,
+        // 底部章节切换栏（悬浮覆盖层，随沉浸显隐淡入淡出，不推动正文）
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: IgnorePointer(
+            ignoring: !_isChromeVisible,
+            child: AnimatedOpacity(
+              opacity: _isChromeVisible ? 1.0 : 0.0,
+              duration: _chromeFadeDuration,
+              child: ReaderBottomBar(
+                currentIndex: currentIndex,
+                totalChapters: widget.chapters.length,
+                hasPrevious: hasPrevious,
+                hasNext: hasNext,
+                onPreviousChapter: _goToPreviousChapter,
+                onNextChapter: _goToNextChapter,
+              ),
             ),
           ),
+        ),
+        // 顶部工具栏（悬浮覆盖层：正文铺到状态栏后面，工具栏覆盖其上，
+        // 显隐不再推挤正文；加载/错误态同样覆盖，保证始终有返回入口）
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            ignoring: !_isChromeVisible,
+            child: AnimatedOpacity(
+              opacity: _isChromeVisible ? 1.0 : 0.0,
+              duration: _chromeFadeDuration,
+              child: ReaderAppBar(
+                novel: widget.novel,
+                currentChapter: _currentChapter,
+                chapters: widget.chapters,
+                isEditMode: isEditMode,
+                onToggleEditMode: () =>
+                    ref.read(readerEditModeProvider.notifier).toggle(),
+                onSaveAndExitEditMode: () async {
+                  await _saveEditedContent();
+                  ref.read(readerEditModeProvider.notifier).toggle();
+                },
+                onMenuAction: _handleMenuAction,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
