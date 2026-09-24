@@ -321,12 +321,30 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       });
     }
 
+    // 取前一章正文（最多保留末尾 5000 字）作为衔接参考，避免重写后与前文细节不一致
+    // （本章为第 1 章时无前一章；前一章未缓存则跳过）
+    String? previousChapterContext;
+    if (position >= 2) {
+      final prevChapter = chapters[position - 2]; // 前一章（列表 0-based）
+      final prevContent = await chapterRepo.getCachedChapter(prevChapter.url);
+      if (prevContent != null && prevContent.trim().isNotEmpty) {
+        final trimmed = prevContent.trim();
+        const maxPrevChars = 5000;
+        final body = trimmed.length > maxPrevChars
+            ? '（前一章正文过长，仅保留与本章直接衔接的末尾 $maxPrevChars 字）\n'
+                '${trimmed.substring(trimmed.length - maxPrevChars)}'
+            : trimmed;
+        previousChapterContext = '《${prevChapter.title}》\n\n$body';
+      }
+    }
+
     // 组合提示词并调用 LLM 重写
     final rewriteResult = await _rewriteChapter(
       novelUrl: novelUrl,
       chapterTitle: chapter.title,
       originalContent: originalContent,
       rewriteInstruction: rewriteInstruction,
+      previousChapterContext: previousChapterContext,
       characterNames: charNames,
       tagNames: tags,
       scenarioId: ctx?.scenarioId ?? ScenarioIds.writing,
@@ -552,13 +570,14 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
 
   /// 调用 LLM 重写章节
   ///
-  /// 组合「原文 + 修改要求 + 人物卡 + 技巧 prompt」为提示词，
-  /// 流式调用 LLM，返回新正文或错误。
+  /// 组合「原文 + 修改要求 + 前一章正文（可选，最多末尾 5000 字）+ 人物卡 +
+  /// 技巧 prompt」为提示词，流式调用 LLM，返回新正文或错误。
   Future<_RewriteResult> _rewriteChapter({
     required String novelUrl,
     required String chapterTitle,
     required String originalContent,
     required String rewriteInstruction,
+    String? previousChapterContext,
     required List<String> characterNames,
     required List<String> tagNames,
     String scenarioId = ScenarioIds.writing,
@@ -577,6 +596,19 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       ..writeln('## 修改要求')
       ..writeln(rewriteInstruction)
       ..writeln();
+    // 前一章正文：用成对硬边界符号包裹，明确为只读参考，
+    // 重写须与前文细节一致（人物、情节、场景、伏笔），勿与上文矛盾
+    if (previousChapterContext != null && previousChapterContext.isNotEmpty) {
+      prompt
+        ..writeln('## 前一章内容（仅供衔接参考：重写内容须与前文的人物、情节、'
+            '场景、伏笔等细节保持一致，勿与上文矛盾，不要重复上文情节，'
+            '也不要在前文中寻找续写起点）')
+        ..writeln()
+        ..writeln('━━━━━━━━━ 上一章正文开始 ━━━━━━━━━')
+        ..writeln(previousChapterContext)
+        ..writeln('━━━━━━━━━ 上一章正文结束 ━━━━━━━━━')
+        ..writeln();
+    }
     if (contextParts.isNotEmpty) {
       prompt.writeln(contextParts.join('\n'));
       prompt.writeln();

@@ -881,6 +881,51 @@ void main() {
       expect(chapters.first.content, '旧内容');
     });
 
+    test('position=2 重写 — 前一章超长正文自动截断，不中断走到 LLM 阶段', () async {
+      final novelId = await insertNovel();
+      // 前一章正文 6000+ 字（触发末尾 5000 字截断）
+      final longPrevContent =
+          List.generate(300, (i) => '第$i段：前一章的情节铺垫与细节。').join('\n\n');
+      await insertChapter(
+        chapterUrl: 'https://example.com/ch1',
+        title: '第一章',
+        chapterIndex: 0,
+        content: longPrevContent,
+      );
+      await insertChapter(
+        chapterUrl: 'https://example.com/ch2',
+        title: '第二章',
+        chapterIndex: 1,
+        content: '第二章旧内容',
+      );
+      final ctx = _ctx(novelId);
+
+      // 测试环境未配置 LLM：position=1（无前一章，跳过新逻辑）与 position=2
+      // （走前一章读取/截断 + 提示词组装）的失败应发生在同一阶段，错误信息一致，
+      // 借此证明新增的前一章上下文逻辑本身没有抛异常中断流程
+      final resultPos1 = await executor.execute(
+        'rewrite_chapter',
+        {'position': 1, 'rewriteInstruction': '增强悬疑氛围'},
+        scenarioContext: ctx,
+      );
+      final resultPos2 = await executor.execute(
+        'rewrite_chapter',
+        {'position': 2, 'rewriteInstruction': '增强悬疑氛围'},
+        scenarioContext: ctx,
+      );
+      final jsonPos1 = jsonDecode(resultPos1) as Map<String, dynamic>;
+      final jsonPos2 = jsonDecode(resultPos2) as Map<String, dynamic>;
+
+      expect(jsonPos1['success'], isNull);
+      expect(jsonPos2['success'], isNull);
+      expect(jsonPos2['message'], jsonPos1['message']);
+
+      // 两章原文均未被修改
+      final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
+      expect(chapters[0].content, longPrevContent);
+      expect(chapters[1].content, '第二章旧内容');
+    });
+
     test('position 不存在 → chapter_position_out_of_range + suggested_tool', () async {
       final novelId = await insertNovel();
       final ctx = _ctx(novelId);
