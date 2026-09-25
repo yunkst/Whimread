@@ -66,6 +66,10 @@ class AppUpdateService {
   /// - [includePrerelease]：是否包含 prerelease（preview 通道）。
   ///   默认 false（stable 通道），GitHub API 会跳过 prerelease 版本。
   ///
+  /// - [forceCheck]：true 时即使远端版本不比当前新也返回
+  ///   [AppUpdateAvailable]（设置页手动「检查更新」据此区分「已是最新」
+  ///   与「无 release」）；启动期静默检查传 false，只在确有新版本时返回。
+  ///
   /// 与 [checkForUpdate] 的区别：后者把所有失败都归为 null（误报「无新版本」），
   /// 本方法把失败单独返回，调用方可据此提示用户「检查失败，请重试」。
   Future<AppUpdateResult> checkForUpdateDetailed({
@@ -73,19 +77,6 @@ class AppUpdateService {
     bool includePrerelease = false,
   }) async {
     try {
-      // 频率控制
-      if (!await _githubService.shouldCheck(forceCheck: forceCheck)) {
-        LoggerService.instance.i(
-          '启动期更新检查跳过: 1 小时内已检查过',
-          category: LogCategory.general,
-          tags: ['update', 'throttled'],
-        );
-        return const AppUpdateUpToDate();
-      }
-
-      // 记录检查时间
-      await _githubService.recordCheckTime();
-
       // 后端优先，失败回退 GitHub；两源都失败时若后端错误在先，
       // 归类为 CheckFailed（避免把网络故障误报成「已是最新」）
       final appVersion = await _resolveLatestVersion(

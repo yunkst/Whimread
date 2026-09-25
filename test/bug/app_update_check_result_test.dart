@@ -31,12 +31,6 @@ class _FakeGithubReleaseService implements GithubReleaseService {
 
   // —— 以下接口测试不关心，空实现即可 ——
   @override
-  Future<bool> shouldCheck({bool forceCheck = false}) async => true;
-
-  @override
-  Future<void> recordCheckTime() async {}
-
-  @override
   Future<Map<String, String>?> fetchSha256Sums(GithubRelease release) async =>
       null;
 

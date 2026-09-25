@@ -37,12 +37,6 @@ class _FakeGithubService implements GithubReleaseService {
       sha256Sums;
 
   @override
-  Future<bool> shouldCheck({bool forceCheck = false}) async => true;
-
-  @override
-  Future<void> recordCheckTime() async {}
-
-  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

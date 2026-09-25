@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/github_release.dart';
 import 'logger_service.dart';
-import 'preferences_service.dart';
 
 /// GitHub Releases API 服务
 ///
@@ -15,8 +14,6 @@ class GithubReleaseService {
   static const String _apiBase = 'https://api.github.com';
   static const String _repoOwner = 'yunkst';
   static const String _repoName = 'Whimread';
-
-  static const String _lastCheckKey = 'app_update_last_check';
 
   final Dio _dio;
 
@@ -132,28 +129,6 @@ class GithubReleaseService {
       );
       return null;
     }
-  }
-
-  /// 检查是否应执行更新检查（频率控制）
-  ///
-  /// 非强制检查时，距离上次检查不足 1 小时则跳过
-  Future<bool> shouldCheck({bool forceCheck = false}) async {
-    if (forceCheck) return true;
-
-    final lastCheck = await PreferencesService.instance.getInt(_lastCheckKey);
-    final now = DateTime.now().millisecondsSinceEpoch;
-
-    if ((now - lastCheck) < 3600000) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /// 记录检查时间
-  Future<void> recordCheckTime() async {
-    await PreferencesService.instance
-        .setInt(_lastCheckKey, DateTime.now().millisecondsSinceEpoch);
   }
 
   /// 下载 release 附带的 SHA256SUMS.txt，解析为 文件名→哈希 映射。
