@@ -73,6 +73,14 @@ class _LocalDreamModelDialogState extends State<LocalDreamModelDialog> {
     _selectedModelId = (m?.remoteModelId.isNotEmpty ?? false)
         ? m!.remoteModelId
         : null;
+
+    // 新增模式：自动探测本机是否运行 Local Dream 宿主模式，探测到则
+    // 免填地址直接载入模型目录；编辑模式地址已存在，不做探测
+    if (m == null || m.remoteHost.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _detectLocalDevice();
+      });
+    }
   }
 
   @override
@@ -96,8 +104,26 @@ class _LocalDreamModelDialogState extends State<LocalDreamModelDialog> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// 探测本机（127.0.0.1）是否运行 Local Dream。
+  ///
+  /// 探测到则自动填地址并拉取模型目录；未探测到（未安装 / 宿主模式未开）
+  /// 静默回退，保持手动输入局域网设备地址的路径。探测用短超时，端口
+  /// 未开时本机立刻拒绝连接，最坏情况也只等 2 秒。
+  Future<void> _detectLocalDevice() async {
+    const localHost = '127.0.0.1';
+    final detected = await LocalDreamClient.isLocalDreamDevice(
+      localHost,
+      timeout: const Duration(seconds: 2),
+    );
+    if (!detected || !mounted) return;
+    setState(() => _hostController.text = localHost);
+    await _fetchModels(successHint: '已检测到本机 Local Dream');
+  }
+
   /// 拉取设备模型目录（兼做连通性测试）
-  Future<void> _fetchModels() async {
+  ///
+  /// [successHint] 非空时（本机自动检测路径）替换默认成功提示。
+  Future<void> _fetchModels({String? successHint}) async {
     final host = LocalDreamClient.normalizeHost(_hostController.text);
     if (host.isEmpty) {
       _showSnack('请先输入设备地址（手机 IP）');
@@ -117,7 +143,13 @@ class _LocalDreamModelDialogState extends State<LocalDreamModelDialog> {
       if (list.isEmpty) {
         _showSnack('已连上设备，但还没有已安装的模型，请先在 Local Dream 中下载');
       } else {
-        _showSnack('已获取 ${list.length} 个设备模型，请选择一个');
+        _showSnack(successHint != null
+            ? '$successHint，已载入 ${list.length} 个模型'
+            : '已获取 ${list.length} 个设备模型，请选择一个');
+        // 只装了一个模型时直接自动选中并填充全部参数，用户点保存即可
+        if (list.length == 1 && _selectedModelId == null) {
+          _onCatalogModelSelected(list.first.id);
+        }
       }
     } on LocalDreamException catch (e) {
       _showSnack(e.message);
@@ -251,7 +283,7 @@ class _LocalDreamModelDialogState extends State<LocalDreamModelDialog> {
                     decoration: const InputDecoration(
                       labelText: '设备地址（手机 IP）',
                       hintText: '如 192.168.31.76',
-                      helperText: '手机与该设备需在同一网络，宿主模式已开启且屏幕未锁定',
+                      helperText: '打开时自动检测本机 Local Dream；连接其他设备时填其 IP，宿主模式需开启且屏幕未锁定',
                       border: OutlineInputBorder(),
                     ),
                   ),
