@@ -1,4 +1,5 @@
 import '../../../models/novel.dart';
+import '../../../models/reading_anchor.dart';
 
 /// 小说数据仓库接口
 ///
@@ -34,6 +35,20 @@ abstract class INovelRepository {
   /// [chapterIndex] 章节索引
   /// 返回受影响的行数
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex);
+
+  /// 获取章内阅读位置锚点
+  ///
+  /// [novelUrl] 小说的URL
+  /// 无锚点（从未读过/旧版本数据/格式损坏）时返回 null。
+  Future<ReadingAnchor?> getLastReadAnchor(String novelUrl);
+
+  /// 更新章内阅读位置锚点（高频写入，仅更新 lastReadAnchor 列）
+  ///
+  /// 注意：本方法刻意**不走** BookshelfMutationNotifier 收口——锚点
+  /// 不展示在任何 UI 上（书架列表不读它），无需 invalidate 触发刷新，
+  /// 而高频滚动节流写入若每次 invalidate 反复重建底层路由的监听者。
+  /// 若未来有 UI 展示锚点，应改为经 Notifier 并补 invalidate。
+  Future<int> updateLastReadAnchor(String novelUrl, ReadingAnchor anchor);
 
   /// 更新小说背景设定
   ///

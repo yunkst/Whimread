@@ -50,8 +50,13 @@ class AgentSystemPrompt {
         '（用户提到"古风""写实""赛博朋克""人物特写"等风格/题材关键词时，'
         '优先匹配 tags 含这些关键词的模型），把它的 name 作为 create_images 的 '
         'modelName。不要凭空编造模型名；列表为空时引导用户到'
-        '「设置 → 生图模型管理」导入模型。');
-    buffer.writeln('7. 修改操作完成后向用户汇报。');
+        '「设置 → 生图模型管理」导入模型或添加 Local Dream 设备模型。');
+    buffer.writeln('7. 为角色生成形象图：先从 list_characters 的返回里取该角色的 '
+        'facePrompts/bodyPrompts，把它们写进 create_images 的 prompt '
+        '（保证同角色形象一致），并始终传 character 参数——生成的图片会'
+        '自动进入该角色图集。需要换头像时，从返回结果里挑一张，'
+        '把它的 mediaId 经 update_character 的 avatarMediaId 设置。');
+    buffer.writeln('8. 修改操作完成后向用户汇报。');
     buffer.writeln();
 
     // 注入经验记忆（编号 [N] 形式，供 patch_memory 工具用编号定位）

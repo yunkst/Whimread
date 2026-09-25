@@ -39,6 +39,8 @@ class ImageModelRepository extends BaseRepository
       'source_page_url': model.sourcePageUrl,
       'page_snapshot': model.pageSnapshot,
       'error_message': model.errorMessage,
+      'remote_host': model.remoteHost,
+      'remote_model_id': model.remoteModelId,
       if (isInsert) 'created_at': now,
     };
   }

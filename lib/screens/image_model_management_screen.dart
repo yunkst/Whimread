@@ -23,6 +23,7 @@ import '../../utils/toast_utils.dart';
 import '../../widgets/common/common_widgets.dart';
 import '../../widgets/empty_states/empty_state_view.dart';
 import 'image_model/dialogs/image_model_edit_dialog.dart';
+import 'image_model/dialogs/local_dream_model_dialog.dart';
 
 class ImageModelManagementScreen extends ConsumerWidget {
   const ImageModelManagementScreen({super.key});
@@ -59,9 +60,14 @@ class ImageModelManagementScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            onPressed: () => _addRemoteModel(context, ref),
+            icon: const Icon(Icons.phonelink_setup_outlined),
+            tooltip: '添加 Local Dream 设备模型',
+          ),
+          IconButton(
             onPressed: () => _addModel(context, ref),
             icon: const Icon(Icons.add),
-            tooltip: '导入模型',
+            tooltip: '导入本地模型文件',
           ),
         ],
       ),
@@ -103,6 +109,45 @@ class ImageModelManagementScreen extends ConsumerWidget {
 
   static Set<String> _nameSet(List<ImageModel> all, ImageModel exclude) =>
       {for (final m in all) if (m.id != exclude.id) m.name};
+
+  /// 添加 Local Dream 设备模型：填设备地址 → 拉取设备模型列表选择 → 落库
+  Future<void> _addRemoteModel(BuildContext context, WidgetRef ref) async {
+    final repo = ref.read(imageModelRepositoryProvider);
+    final models = await repo.getAll();
+    if (!context.mounted) return;
+
+    final model = await showDialog<ImageModel>(
+      context: context,
+      builder: (_) => LocalDreamModelDialog(
+        existingNames: {for (final m in models) m.name},
+      ),
+    );
+    if (model == null) return; // 用户取消
+
+    final sortOrder = await repo.getNextSortOrder();
+    await _saveNewModel(context, ref, model.copyWith(sortOrder: sortOrder));
+  }
+
+  /// 落库 + 刷新 + 提示（本地导入与设备添加共用）
+  Future<void> _saveNewModel(
+      BuildContext context, WidgetRef ref, ImageModel model) async {
+    final repo = ref.read(imageModelRepositoryProvider);
+    try {
+      await repo.save(model);
+      ref.invalidate(imageModelLifecycleProvider);
+      if (context.mounted) {
+        ToastUtils.showSuccess('已添加模型「${model.name}」', context: context);
+      }
+    } on ImageModelNameConflictException {
+      if (context.mounted) {
+        ToastUtils.showError('模型名称「${model.name}」已存在', context: context);
+      }
+    } catch (e) {
+      LoggerService.instance.e('保存生图模型失败: $e',
+          category: LogCategory.database, tags: ['image_model', 'save']);
+      if (context.mounted) ToastUtils.showError('保存失败：$e', context: context);
+    }
+  }
 
   Future<void> _addModel(BuildContext context, WidgetRef ref) async {
     // 导入流程：选文件 → 复制 →
@@ -179,20 +224,8 @@ class ImageModelManagementScreen extends ConsumerWidget {
       return;
     }
 
-    try {
-      final sortOrder = await repo.getNextSortOrder();
-      await repo.save(model.copyWith(sortOrder: sortOrder));
-      ref.invalidate(imageModelLifecycleProvider);
-      if (context.mounted) ToastUtils.showSuccess('已添加模型「${model.name}」', context: context);
-    } on ImageModelNameConflictException {
-      if (context.mounted) {
-        ToastUtils.showError('模型名称「${model.name}」已存在', context: context);
-      }
-    } catch (e) {
-      LoggerService.instance.e('保存生图模型失败: $e',
-          category: LogCategory.database, tags: ['image_model', 'save']);
-      if (context.mounted) ToastUtils.showError('保存失败：$e', context: context);
-    }
+    final sortOrder = await repo.getNextSortOrder();
+    await _saveNewModel(context, ref, model.copyWith(sortOrder: sortOrder));
   }
 
   static String _stripGguf(String fileName) {
@@ -308,7 +341,9 @@ class _ModelCard extends ConsumerWidget {
             const SizedBox(height: 8),
             if (isReady)
               Text(
-                '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
+                model.backendType == ImageModelBackendType.localDream
+                    ? 'Local Dream 设备 · ${model.remoteHost} · ${model.remoteModelId}'
+                    : '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
@@ -458,12 +493,20 @@ class _ModelCard extends ConsumerWidget {
       // ===== ready 模型的常规动作 =====
       case 'edit':
         if (!context.mounted) return;
+        // 远程设备模型走设备对话框（无本地文件字段）
+        final isRemote =
+            model.backendType == ImageModelBackendType.localDream;
         final updated = await showDialog<ImageModel>(
           context: context,
-          builder: (_) => ImageModelEditDialog(
-            model: model,
-            existingNames: existingNames,
-          ),
+          builder: (_) => isRemote
+              ? LocalDreamModelDialog(
+                  model: model,
+                  existingNames: existingNames,
+                )
+              : ImageModelEditDialog(
+                  model: model,
+                  existingNames: existingNames,
+                ),
         );
         if (updated == null) return;
         try {

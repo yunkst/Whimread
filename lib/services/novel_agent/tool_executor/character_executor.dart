@@ -41,6 +41,10 @@ class CharacterExecutor with ToolExecutorHelpers {
           'backgroundStory': c.backgroundStory,
           'aliases': c.aliases,
           'avatarMediaId': c.avatarMediaId,
+          // create_images 不自动拼接这两段，LLM 生成角色形象图时应
+          // 自行把它们写进 prompt（保证同角色形象一致）
+          'facePrompts': c.facePrompts,
+          'bodyPrompts': c.bodyPrompts,
         }).toList();
 
     final novelContext = buildCurrentNovelContext(ctx);

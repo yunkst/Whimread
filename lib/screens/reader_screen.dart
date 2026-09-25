@@ -29,6 +29,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
+import '../models/reading_anchor.dart';
 import '../models/search_result.dart';
 import '../services/api_service_wrapper.dart';
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
@@ -43,6 +44,7 @@ import '../widgets/reader/reader_bottom_bar.dart'; // ReaderBottomBar组件
 import '../widgets/reader/reader_content_view.dart'; // ReaderContentView组件
 import '../widgets/reader/reader_error_view.dart'; // ReaderErrorView组件
 import '../utils/toast_utils.dart';
+import '../utils/reading_anchor_math.dart';
 import '../controllers/reader_content_controller.dart';
 import '../services/logger_service.dart';
 import '../utils/error_helper.dart';
@@ -185,6 +187,25 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 字体变化检测（变更即清空块高缓存）
   double? _lastSeenFontSize;
 
+  // ========== 章内阅读位置锚点（重开同一章恢复到上次位置） ==========
+  /// 最近一次采样到的锚点（滚动时持续更新，退出阅读页时兜底落库）
+  ReadingAnchor? _lastReadingAnchor;
+
+  /// 上次锚点落库时间（节流，避免高频滚动反复写库）
+  DateTime _lastAnchorWriteAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 锚点落库最小间隔
+  static const Duration _anchorWriteInterval = Duration(seconds: 5);
+
+  /// 首次内容加载完成后是否尝试恢复锚点（切章/刷新/搜索跳转不恢复）
+  bool _anchorRestorePending = true;
+
+  /// 恢复跳转进行中：跳转自身触发的滚动不采样、不落库
+  bool _isRestoringAnchor = false;
+
+  /// 恢复跳转的最大「估算→跳转」迭代轮数（目标段落进入缓存区即精确校正）
+  static const int _anchorRestoreMaxAttempts = 4;
+
   // ========== 按标注重写（annotation_rewrite 场景会话驱动）==========
   /// 改写 agent 正在运行（本地态；用于控制 FAB 显示转圈 + 防重复点击）。
   /// 实际跑动状态由 [ScenarioSession.isRunning] 提供，过程可在 agent 对话窗口查看。
@@ -277,6 +298,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (mounted) {
       ref.read(readingContextProvider.notifier).state = const ReadingContext();
     }
+    // 章内阅读位置兜底落库（节流窗口内的最后位置不丢；deactivate 阶段
+    // ref 仍有效，写库异步完成即可，幂等写入无副作用）
+    final anchor = _lastReadingAnchor;
+    if (anchor != null) {
+      unawaited(_writeReadingAnchor(anchor));
+    }
     super.deactivate();
   }
 
@@ -364,10 +391,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   // 处理滚动位置的通用方法
   void _handleScrollPosition(bool resetScrollPosition) {
-    // 如果有搜索结果，跳转到匹配位置
+    // 如果有搜索结果，跳转到匹配位置（优先级最高，不做锚点恢复）
     if (widget.searchResult != null &&
         widget.searchResult!.chapterUrl == _currentChapter.url) {
+      _anchorRestorePending = false;
       _scrollToSearchMatch();
+      return;
+    }
+    // 首次进入阅读页：尝试恢复上次章内阅读位置
+    if (_anchorRestorePending) {
+      _anchorRestorePending = false;
+      unawaited(_restoreReadingAnchor());
     } else if (resetScrollPosition) {
       // 没有搜索结果且需要重置滚动位置时，滚动到顶部
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -443,6 +477,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // 重置章节块与拼接状态：导航是"单章视图"重建，拼接内容全部丢弃
     setState(() {
       _currentChapter = targetChapter;
+      // 显式切章到章首，不做章内位置恢复
+      _anchorRestorePending = false;
       _blocks = [];
       _blockStartKeys.clear();
       _knownBlockHeights.clear();
@@ -1473,6 +1509,259 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (ref.read(readerEditModeProvider)) return;
     _detectCurrentChapterByViewport();
     _maybeTriggerConcat();
+    _trackReadingAnchor();
+  }
+
+  // ========== 章内阅读位置锚点（采样保存 + 重开恢复） ==========
+
+  /// 滚动时持续采样锚点并节流落库。
+  ///
+  /// 采样走渲染树（SliverList 子节点遍历），布局不可采样时自然跳过；
+  /// 恢复跳转期间不采样不落库，避免把中间估算位置写进库。
+  void _trackReadingAnchor() {
+    if (_isRestoringAnchor) return;
+    final anchor = _captureReadingAnchor();
+    if (anchor == null) return;
+    if (!ReadingAnchorMath.anchorChangedSignificantly(
+        _lastReadingAnchor, anchor)) {
+      return;
+    }
+    _lastReadingAnchor = anchor;
+    final now = DateTime.now();
+    if (now.difference(_lastAnchorWriteAt) < _anchorWriteInterval) return;
+    _lastAnchorWriteAt = now;
+    unawaited(_writeReadingAnchor(anchor));
+  }
+
+  /// 立即落库指定锚点（滚动节流写入与退出兜底共用）
+  Future<void> _writeReadingAnchor(ReadingAnchor anchor) async {
+    try {
+      await ref
+          .read(novelRepositoryProvider)
+          .updateLastReadAnchor(widget.novel.url, anchor);
+    } catch (e, stackTrace) {
+      LoggerService.instance.w(
+        '章内阅读位置锚点写入失败: $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.ui,
+        tags: ['reader', 'anchor', 'write-failed'],
+      );
+    }
+  }
+
+  /// 采样当前章内阅读锚点（视口顶所在段落）；渲染树不可采样时返回 null。
+  ReadingAnchor? _captureReadingAnchor() {
+    if (_blocks.isEmpty) return null;
+    if (!_scrollController.hasClients) return null;
+    if (ref.read(readerEditModeProvider)) return null;
+    final items = _sampleListItems();
+    if (items.isEmpty) return null;
+    final topItem =
+        ReadingAnchorMath.topVisibleItem(items, _scrollController.offset);
+    if (topItem == null) return null;
+    return ReadingAnchorMath.anchorFromTopItem(
+      topItem: topItem,
+      scrollOffset: _scrollController.offset,
+      paragraphInfoAt: _paragraphInfoAtFlatIndex,
+      chapterUrlOfFlat: _chapterUrlAtFlatIndex,
+    );
+  }
+
+  // ----- 渲染树采样 -----
+
+  /// 正文 ListView 的 RenderViewport（从章节起点标记向上找），拿不到返回 null
+  RenderViewport? _contentViewport() {
+    for (final key in _blockStartKeys.values) {
+      final box = key.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) continue;
+      final viewport = RenderAbstractViewport.maybeOf(box);
+      if (viewport is RenderViewport) return viewport;
+    }
+    return null;
+  }
+
+  /// 采样正文 ListView 全部已布局条目（按扁平索引升序）。
+  ///
+  /// 走 SliverList 渲染子节点遍历，不依赖段落组件挂 GlobalKey——
+  /// 顶部拼接的 Offstage 测高树与正文同构，挂 GlobalKey 会重复注册崩溃。
+  List<ReaderListItemSample> _sampleListItems() {
+    final viewport = _contentViewport();
+    if (viewport == null || !_scrollController.hasClients) return const [];
+    final samples = <ReaderListItemSample>[];
+    for (var sliver = viewport.firstChild;
+        sliver != null;
+        sliver = viewport.childAfter(sliver)) {
+      // ListView 结构 = SliverPadding(padding) → SliverList
+      final RenderSliverMultiBoxAdaptor? adaptor;
+      if (sliver is RenderSliverMultiBoxAdaptor) {
+        adaptor = sliver;
+      } else if (sliver is RenderSliverPadding &&
+          sliver.child is RenderSliverMultiBoxAdaptor) {
+        adaptor = sliver.child as RenderSliverMultiBoxAdaptor;
+      } else {
+        adaptor = null;
+      }
+      if (adaptor == null) continue;
+      for (var child = adaptor.firstChild;
+          child != null;
+          child = adaptor.childAfter(child)) {
+        final index = child.parentData is SliverMultiBoxAdaptorParentData
+            ? (child.parentData as SliverMultiBoxAdaptorParentData).index
+            : null;
+        final offset = _contentOffsetOf(child);
+        if (index == null || offset == null) continue;
+        samples.add(ReaderListItemSample(
+          index: index,
+          contentOffset: offset,
+          height: child.size.height,
+        ));
+      }
+      break;
+    }
+    samples.sort((a, b) => a.index.compareTo(b.index));
+    return samples;
+  }
+
+  /// 已布局条目顶在滚动内容坐标系里的偏移（与当前章检测同款换算）
+  double? _contentOffsetOf(RenderBox box) {
+    if (!box.attached || !box.hasSize) return null;
+    final viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport == null || !viewport.attached) return null;
+    final viewportBox = viewport as RenderBox;
+    if (!viewportBox.hasSize) return null;
+    if (!_scrollController.hasClients) return null;
+    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+    final visualY = box.localToGlobal(Offset.zero).dy - viewportTop;
+    return _scrollController.offset + visualY;
+  }
+
+  // ----- 扁平条目 ↔ 章内段落换算 -----
+  // 与 ReaderContentView 的条目序列一致：每章 = 分隔线 + 段落，末位尾部占位
+
+  /// 扁平条目序号 →（章节 URL, 章内段落序号）；分隔线/尾部占位返回 null
+  (String, int)? _paragraphInfoAtFlatIndex(int flatIndex) {
+    var cursor = 0;
+    for (final block in _blocks) {
+      final inSegment = flatIndex - cursor - 1; // 跳过分隔线
+      if (inSegment >= 0 && inSegment < block.paragraphs.length) {
+        return (block.chapter.url, inSegment);
+      }
+      cursor += 1 + block.paragraphs.length;
+    }
+    return null;
+  }
+
+  /// 扁平条目序号 → 所属章节 URL（分隔线归属其后章节；尾部占位返回 null）
+  String? _chapterUrlAtFlatIndex(int flatIndex) {
+    var cursor = 0;
+    for (final block in _blocks) {
+      if (flatIndex <= cursor + block.paragraphs.length) {
+        return block.chapter.url;
+      }
+      cursor += 1 + block.paragraphs.length;
+    }
+    return null;
+  }
+
+  /// 锚点目标条目的扁平索引（段落越界 clamp 到末段；章不在块列表返回 null）
+  int? _targetFlatIndex(ReadingAnchor anchor) {
+    var cursor = 0;
+    for (final block in _blocks) {
+      if (block.chapter.url == anchor.chapterUrl) {
+        if (block.paragraphs.isEmpty) return cursor;
+        final paraIdx = anchor.paragraphIndex
+            .clamp(0, block.paragraphs.length - 1)
+            .toInt();
+        return cursor + 1 + paraIdx;
+      }
+      cursor += 1 + block.paragraphs.length;
+    }
+    return null;
+  }
+
+  /// 恢复上次章内阅读位置（仅首次进入阅读页时经 [_handleScrollPosition] 触发）。
+  ///
+  /// 目标段落通常在 ListView 缓存区外（未布局），无法直接测偏移：
+  /// 用已布局条目线性外推估算偏移 → 跳转 → 目标进入缓存区后按实测
+  /// 偏移精确校正，最多迭代 [_anchorRestoreMaxAttempts] 轮。
+  Future<void> _restoreReadingAnchor() async {
+    try {
+      final anchor = await ref
+          .read(novelRepositoryProvider)
+          .getLastReadAnchor(widget.novel.url);
+      if (!mounted || anchor == null) return;
+      // 锚点不属于当前打开的章节（如从章节列表点了别的章）→ 不恢复
+      if (anchor.chapterUrl != _currentChapter.url) return;
+      if (ref.read(readerEditModeProvider)) return;
+      if (widget.searchResult != null &&
+          widget.searchResult!.chapterUrl == _currentChapter.url) {
+        return;
+      }
+      _isRestoringAnchor = true;
+      final restored = await _jumpToAnchor(anchor);
+      if (restored && mounted) {
+        ToastUtils.showInfo('已回到上次阅读位置', context: context);
+        LoggerService.instance.i(
+          '恢复章内阅读位置: p=${anchor.paragraphIndex} r=${anchor.paragraphRatio}',
+          category: LogCategory.ui,
+          tags: ['reader', 'anchor', 'restore'],
+        );
+      }
+    } catch (e, stackTrace) {
+      LoggerService.instance.w(
+        '恢复章内阅读位置失败: $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.ui,
+        tags: ['reader', 'anchor', 'restore-failed'],
+      );
+    } finally {
+      _isRestoringAnchor = false;
+    }
+  }
+
+  /// 按锚点迭代定位并跳转；收敛（目标条目实测到位）返回 true。
+  Future<bool> _jumpToAnchor(ReadingAnchor anchor) async {
+    // 等内容首帧布局完成（loadChapter 完成时 ListView 可能还没构建）
+    await WidgetsBinding.instance.endOfFrame;
+    final targetFlat = _targetFlatIndex(anchor);
+    if (targetFlat == null || !_scrollController.hasClients) return false;
+
+    for (var attempt = 0; attempt < _anchorRestoreMaxAttempts; attempt++) {
+      final items = _sampleListItems();
+      final exact = ReadingAnchorMath.locateItem(items, targetFlat);
+      if (exact != null) {
+        // 目标已布局：按实测偏移精确校正（含段内比例）
+        final maxOffset = _scrollController.position.maxScrollExtent;
+        final precise =
+            (exact.contentOffset + anchor.paragraphRatio * exact.height)
+                .clamp(0.0, maxOffset)
+                .toDouble();
+        if ((_scrollController.offset - precise).abs() >= 0.5) {
+          _scrollController.jumpTo(precise);
+          await WidgetsBinding.instance.endOfFrame;
+          if (!mounted || !_scrollController.hasClients) return false;
+        }
+        return true;
+      }
+      // 未布局：外推估算并跳转，让目标进入 ListView 缓存区
+      final estimate = ReadingAnchorMath.estimateJumpOffset(
+        items: items,
+        targetIndex: targetFlat,
+        intraRatio: anchor.paragraphRatio,
+      );
+      if (estimate == null) return false;
+      final maxOffset = _scrollController.position.maxScrollExtent;
+      _scrollController
+          .jumpTo(estimate.clamp(0.0, maxOffset).toDouble());
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_scrollController.hasClients) return false;
+    }
+    LoggerService.instance.w(
+      '章内阅读位置恢复未收敛: targetFlat=$targetFlat',
+      category: LogCategory.ui,
+      tags: ['reader', 'anchor', 'restore-unconverged'],
+    );
+    return false;
   }
 
   /// 视口贴近顶部 → 拼接上一章；贴近底部 → 拼接下一章

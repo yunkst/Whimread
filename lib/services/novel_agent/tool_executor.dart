@@ -140,11 +140,11 @@ class ToolExecutor with ToolExecutorHelpers {
           return await _promptTag.savePromptTag(args);
         case 'delete_prompt_tag':
           return await _promptTag.deletePromptTag(args);
-        // ===== 文生图（客户端本地引擎）=====
+        // ===== 文生图（local_sd 端侧 / local_dream 远程设备）=====
         case 'list_text2img_models':
           return await _media.listText2ImgModels(args);
         case 'create_images':
-          return await _media.createImages(args);
+          return await _media.createImages(args, scenarioContext: scenarioContext);
         default:
           LoggerService.instance.w('未知工具: $toolName',
               category: LogCategory.ai, tags: ['agent', 'tool', toolName, 'unknown']);

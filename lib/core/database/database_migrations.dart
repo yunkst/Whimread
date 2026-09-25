@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 47;
+  static const int currentVersion = 50;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -998,6 +998,49 @@ class DatabaseMigrations {
         await _createIndexIfNotExists(
             db, 'idx_site_scripts_source', 'site_scripts', 'source');
         _log('迁移 v46 → v47: site_scripts 加来源/共享/启用列（脚本共享）');
+        break;
+
+      // ========== 版本 48：Local Dream 远程设备生图 ==========
+      // image_models 加远程设备列（backend_type='local_dream' 用）：
+      // - remote_host: 设备地址（如 192.168.31.76，不含 scheme 与端口；
+      //   控制端口 8808 / 生成端口 8081 为 Local Dream 协议常量）
+      // - remote_model_id: 设备上的模型 id（对应 /models 返回的 id，
+      //   如 illustrious_v16），/select 与 /generate 均以它为准
+      case 48:
+        await _addColumnIfNotExists(db, 'image_models', 'remote_host',
+            "TEXT NOT NULL DEFAULT ''");
+        await _addColumnIfNotExists(db, 'image_models', 'remote_model_id',
+            "TEXT NOT NULL DEFAULT ''");
+        _log('迁移 v47 → v48: image_models 加远程设备列（Local Dream 生图）');
+        break;
+
+      // ========== 版本 49：章内阅读位置锚点 ==========
+      // bookshelf 加 lastReadAnchor（JSON TEXT），存「章节 URL + 章内段落
+      // 序号 + 段内比例」，重开同一章时恢复到上次阅读位置。
+      // 像素偏移会随字号/窗口尺寸/拼接内容漂移，故存语义锚点。
+      case 49:
+        await _addColumnIfNotExists(db, 'bookshelf', 'lastReadAnchor', 'TEXT');
+        _log('迁移 v48 → v49: bookshelf 加 lastReadAnchor 列（章内阅读位置）');
+        break;
+
+      // ========== 版本 50：角色图集 ==========
+      // characters 只有单张 avatarMediaId（v34），图集需要一对多关联表：
+      // - characterId: 所属角色；角色删除时由 repository 层联动清理本表
+      // - mediaId: media_items 的句柄（本地生成/上传共享，不级联删媒体文件）
+      // - sort: 展示顺序，插入时取 max+1
+      case 50:
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS character_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            characterId INTEGER NOT NULL,
+            mediaId TEXT NOT NULL,
+            sort INTEGER NOT NULL DEFAULT 0,
+            createdAt INTEGER NOT NULL
+          )
+        ''');
+        await _createIndexIfNotExists(
+            db, 'idx_character_images_character', 'character_images', 'characterId');
+        _log('迁移 v49 → v50: 新建 character_images 表（角色图集）');
         break;
     }
   }

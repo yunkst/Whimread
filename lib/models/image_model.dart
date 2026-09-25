@@ -1,6 +1,8 @@
 /// 生图模型
 ///
-/// 用户导入的本地 SD 模型及其元数据。
+/// 用户可用的生图模型及其元数据：
+/// - local_sd：导入的本地 SD 模型文件
+/// - local_dream：Local Dream 远程设备上的模型（局域网手机宿主模式）
 /// - [name] 全局唯一，agent 作为 create_images 的 modelName key
 /// - [description] / [tags] 是模型的"特点"，agent 据此为用户需求挑选模型
 /// - [backendType] 决定 create_images 路由到哪个 ImageGenerationBackend
@@ -20,15 +22,27 @@ import 'dart:convert';
 /// 提示用户重新导入），实现平滑迁移。
 enum ImageModelBackendType {
   /// 本地 sd.cpp 引擎（dart:ffi，端侧 CPU 推理）
-  localSd;
+  localSd,
+
+  /// Local Dream 设备（安卓宿主模式 HTTP API，局域网内手机 NPU/CPU 推理）
+  localDream;
 
   /// 数据库 backend_type 列名
-  String get dbName => 'local_sd';
+  String get dbName {
+    switch (this) {
+      case ImageModelBackendType.localSd:
+        return 'local_sd';
+      case ImageModelBackendType.localDream:
+        return 'local_dream';
+    }
+  }
 
   static ImageModelBackendType parse(String? name) {
     switch (name) {
       case 'local_sd':
         return ImageModelBackendType.localSd;
+      case 'local_dream':
+        return ImageModelBackendType.localDream;
       default:
         // 兼容旧值（如已下线的 'comfyui'）：回退到本地引擎
         return ImageModelBackendType.localSd;
@@ -155,6 +169,15 @@ class ImageModel {
   /// 失败原因摘要（status=failed 时展示）
   final String errorMessage;
 
+  // ===== 远程设备（local_dream，v48）=====
+
+  /// Local Dream 设备地址（如 192.168.31.76，不含 scheme 与端口；
+  /// 控制端口 8808 / 生成端口 8081 为协议常量，按 host 推导）
+  final String remoteHost;
+
+  /// 设备上的模型 id（如 illustrious_v16，对应 /models 返回的 id）
+  final String remoteModelId;
+
   const ImageModel({
     this.id,
     required this.name,
@@ -180,6 +203,8 @@ class ImageModel {
     this.sourcePageUrl = '',
     this.pageSnapshot = '',
     this.errorMessage = '',
+    this.remoteHost = '',
+    this.remoteModelId = '',
   });
 
   factory ImageModel.fromMap(Map<String, dynamic> map) {
@@ -223,6 +248,8 @@ class ImageModel {
       sourcePageUrl: (map['source_page_url'] as String?) ?? '',
       pageSnapshot: (map['page_snapshot'] as String?) ?? '',
       errorMessage: (map['error_message'] as String?) ?? '',
+      remoteHost: (map['remote_host'] as String?) ?? '',
+      remoteModelId: (map['remote_model_id'] as String?) ?? '',
     );
   }
 
@@ -251,6 +278,8 @@ class ImageModel {
     String? sourcePageUrl,
     String? pageSnapshot,
     String? errorMessage,
+    String? remoteHost,
+    String? remoteModelId,
   }) =>
       ImageModel(
         id: id ?? this.id,
@@ -277,6 +306,8 @@ class ImageModel {
         sourcePageUrl: sourcePageUrl ?? this.sourcePageUrl,
         pageSnapshot: pageSnapshot ?? this.pageSnapshot,
         errorMessage: errorMessage ?? this.errorMessage,
+        remoteHost: remoteHost ?? this.remoteHost,
+        remoteModelId: remoteModelId ?? this.remoteModelId,
       );
 
   @override

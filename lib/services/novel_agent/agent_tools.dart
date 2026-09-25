@@ -847,11 +847,12 @@ class AgentTools {
     'function': {
       'name': 'create_images',
       'description':
-          '根据提示词生成图片（客户端本地引擎推理，端侧 sd.cpp 执行）。\n'
-          '生图耗时长（CPU 推理 512×512 约数十秒/张），请耐心等待；'
+          '根据提示词生成图片（local_sd 端侧引擎，或 local_dream 远程设备）。\n'
+          '生图耗时长（数十秒/张），请耐心等待；'
           '聊天窗口会出现图片画廊展示结果。\n'
           '使用场景：\n'
           '- 用户想看某角色/场景的视觉化呈现\n'
+          '- 为角色生成形象图（传 character 参数，自动入角色图集）\n'
           '- 为章节配插图\n'
           '- 探索人物外貌的具象化\n'
           'modelName 必须是 list_text2img_models 返回的某个模型 name（按用户'
@@ -866,7 +867,9 @@ class AgentTools {
             'description':
                 '图片生成提示词（自然语言描述画面，建议含主体、服饰、场景、光影等）。'
                 '英文技巧名效果通常更好，可中英混合。'
-                '先调用 list_text2img_models 拿到 promptSkill 可获取针对性的写法建议。',
+                '先调用 list_text2img_models 拿到 promptSkill 可获取针对性的写法建议。'
+                '为角色生成时，把该角色的固定外貌特征（list_characters 返回的 '
+                'facePrompts/bodyPrompts）写进 prompt，保证同角色形象一致。',
           },
           'count': {
             'type': 'integer',
@@ -877,6 +880,14 @@ class AgentTools {
             'description':
                 '模型名称（来自 list_text2img_models 的 name）。'
                 '不传则使用默认模型（image_models.is_default=1 那条）。',
+          },
+          'character': {
+            'type': 'string',
+            'description':
+                '角色名（当前小说中已存在的角色）。传入后生成的图片自动加入该角色'
+                '图集。角色不存在会报 character_not_found，请按 list_characters '
+                '返回的 name 传入。为角色生成形象图时应始终传此参数'
+                '（角色的面部/身材提示词不会自动附加，需自行写进 prompt）。',
           },
         },
         'required': ['prompt'],

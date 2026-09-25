@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import '../models/character.dart';
+import '../models/character_gallery_image.dart';
 import 'base_repository.dart';
 import '../services/logger_service.dart';
 import '../core/interfaces/repositories/i_character_repository.dart';
@@ -131,6 +132,12 @@ class CharacterRepository extends BaseRepository
   Future<int> deleteCharacter(int id) async {
     try {
       final db = await database;
+      // 先清图集关联行，再删角色主行（图集表无外键，靠 repository 联动）
+      await db.delete(
+        'character_images',
+        where: 'characterId = ?',
+        whereArgs: [id],
+      );
       final affected = await db.delete(
         'characters',
         where: 'id = ?',
@@ -350,6 +357,12 @@ class CharacterRepository extends BaseRepository
   Future<int> deleteAllCharacters(String novelUrl) async {
     try {
       final db = await database;
+      // 先按子查询清掉该小说全部角色的图集关联行（须在删角色前执行）
+      await db.execute(
+        'DELETE FROM character_images WHERE characterId IN '
+        '(SELECT id FROM characters WHERE novelUrl = ?)',
+        [novelUrl],
+      );
       final affected = await db.delete(
         'characters',
         where: 'novelUrl = ?',
@@ -543,6 +556,88 @@ class CharacterRepository extends BaseRepository
       '更新角色头像媒体: id=$characterId mediaId=$mediaId (affected=$affected)',
       category: LogCategory.character,
       tags: ['character', 'avatar', 'update'],
+    );
+    return affected;
+  }
+
+  // ========== 角色图集（character_images，v50） ==========
+
+  /// 追加一张图集图片（sort 取当前最大值 +1，新图排在末尾）
+  ///
+  /// [characterId] 角色ID
+  /// [mediaId] 媒体资源ID（须已通过 MediaProxy 登记存在）
+  /// 返回新增条目（含 id / sort）
+  @override
+  Future<CharacterGalleryImage> addCharacterImage(
+      int characterId, String mediaId) async {
+    final db = await database;
+    final maxRow = await db.rawQuery(
+        'SELECT MAX(sort) as maxSort FROM character_images '
+        'WHERE characterId = ?',
+        [characterId]);
+    final nextSort = (maxRow.first['maxSort'] as int? ?? -1) + 1;
+    final entry = CharacterGalleryImage(
+      characterId: characterId,
+      mediaId: mediaId,
+      sort: nextSort,
+      createdAt: DateTime.now(),
+    );
+    final id = await db.insert('character_images', entry.toMap());
+    LoggerService.instance.d(
+      '角色图集追加: characterId=$characterId mediaId=$mediaId sort=$nextSort',
+      category: LogCategory.character,
+      tags: ['character', 'gallery', 'add'],
+    );
+    return entry.copyWith(id: id);
+  }
+
+  /// 查询角色图集（按 sort, id 升序）
+  ///
+  /// [characterId] 角色ID
+  @override
+  Future<List<CharacterGalleryImage>> getCharacterImages(
+      int characterId) async {
+    final db = await database;
+    final maps = await db.query(
+      'character_images',
+      where: 'characterId = ?',
+      whereArgs: [characterId],
+      orderBy: 'sort ASC, id ASC',
+    );
+    return maps.map(CharacterGalleryImage.fromMap).toList();
+  }
+
+  /// 从图集移除一条（仅删关联行，不删 media_items 里的媒体文件——
+  /// 同一 mediaId 可能仍被头像/聊天消息引用）
+  ///
+  /// [imageId] character_images 行主键
+  /// 返回受影响的行数
+  @override
+  Future<int> removeCharacterImage(int imageId) async {
+    final db = await database;
+    final affected = await db.delete(
+      'character_images',
+      where: 'id = ?',
+      whereArgs: [imageId],
+    );
+    LoggerService.instance.d(
+      '角色图集移除: imageId=$imageId (affected=$affected)',
+      category: LogCategory.character,
+      tags: ['character', 'gallery', 'remove'],
+    );
+    return affected;
+  }
+
+  /// 清理角色图集的所有关联行（角色删除时联动调用）
+  ///
+  /// [characterId] 角色ID
+  @override
+  Future<int> clearCharacterImages(int characterId) async {
+    final db = await database;
+    final affected = await db.delete(
+      'character_images',
+      where: 'characterId = ?',
+      whereArgs: [characterId],
     );
     return affected;
   }

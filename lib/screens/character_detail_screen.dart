@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,8 +9,12 @@ import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 import '../core/theme/gender_palette.dart';
 import '../models/character.dart';
+import '../models/character_gallery_image.dart';
 import '../models/novel.dart';
+import '../services/image_picker_service.dart';
 import '../services/logger_service.dart';
+import '../services/media/media_proxy.dart';
+import '../services/media/media_types.dart';
 import '../utils/error_helper.dart';
 import '../utils/toast_utils.dart';
 import '../widgets/character/avatar_media.dart';
@@ -20,6 +26,7 @@ import 'character_edit_screen.dart';
 ///
 /// 展示单个角色的全部字段（分区卡片），支持 AppBar 编辑 / 删除。
 /// 编辑返回后会重新读取最新角色数据；删除成功后返回列表。
+/// 图集区块 watch [characterGalleryProvider]，Agent 生成入集后实时刷新。
 class CharacterDetailScreen extends ConsumerStatefulWidget {
   final Character character;
   final Novel novel;
@@ -85,6 +92,8 @@ class _CharacterDetailScreenState
                 _character.backgroundStory),
             const SizedBox(height: 12),
             _buildAiPromptsCard(),
+            const SizedBox(height: 12),
+            if (_character.id != null) _buildGalleryCard(),
             const SizedBox(height: 24),
           ],
         ),
@@ -362,6 +371,222 @@ class _CharacterDetailScreenState
         ),
       ],
     );
+  }
+
+  // ─── 图集 ───────────────────────────────────────────────────
+
+  /// 图集区块：横向缩略图流 + 添加/设为头像/移除。
+  /// watch characterGalleryProvider —— Agent 生成入集（invalidate）后实时刷新。
+  Widget _buildGalleryCard() {
+    final galleryAsync = ref.watch(characterGalleryProvider(_character.id!));
+    final images = galleryAsync.valueOrNull ?? const [];
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.photo_library_outlined,
+                    size: 18, color: context.appColors.agentAccent),
+                const SizedBox(width: 6),
+                Text(
+                  images.isEmpty ? '图集' : '图集（${images.length}）',
+                  style: AppTypography.novelTitle.copyWith(
+                    fontSize: 15,
+                    color: context.appColors.ink,
+                  ),
+                ),
+                const Spacer(),
+                if (galleryAsync.isLoading)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.add_photo_alternate_outlined,
+                        size: 20),
+                    tooltip: '从相册添加',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _onAddGalleryImage,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (images.isEmpty)
+              Text(
+                '暂无图片。点右上角从相册添加，'
+                '或对 Agent 说"给${_character.name}画几张图"'
+                '（生成后自动入集）。',
+                style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                      fontSize: 13,
+                      height: 1.6,
+                      color: context.appColors.inkSoft,
+                    ),
+              )
+            else
+              SizedBox(
+                height: 104,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: images.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final image = images[i];
+                    return GestureDetector(
+                      onTap: () => _showFullScreenAvatar(image.mediaId),
+                      onLongPress: () => _showGalleryItemActions(image),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: 104,
+                          child: MediaView(
+                            mediaId: image.mediaId,
+                            boxFit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            if (images.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                '点按全屏查看，长按设为头像或移除',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.appColors.inkSoft,
+                    ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 相册选图 → 裁剪 → MediaProxy 登记 → 入图集（对齐书架封面上传模式）
+  Future<void> _onAddGalleryImage() async {
+    final characterId = _character.id;
+    if (characterId == null) return;
+    Uint8List? bytes;
+    try {
+      bytes = await ImagePickerService().pickAndCrop();
+    } on ImageTooLargeException catch (e) {
+      if (mounted) ToastUtils.showError('$e', context: context);
+      return;
+    } catch (e, stackTrace) {
+      if (!mounted) return;
+      ErrorHelper.showErrorWithLog(
+        context,
+        '选择图片失败',
+        error: e,
+        stackTrace: stackTrace,
+        category: LogCategory.character,
+        tags: ['character', 'gallery', 'pick_failed'],
+      );
+      return;
+    }
+    if (bytes == null) return; // 用户取消
+    if (!mounted) return;
+
+    try {
+      final mediaId =
+          await ref.read(mediaProxyProvider).upload(bytes, MediaKind.image);
+      await ref
+          .read(characterRepositoryProvider)
+          .addCharacterImage(characterId, mediaId);
+      ref.invalidate(characterGalleryProvider(characterId));
+      if (mounted) ToastUtils.showSuccess('已加入图集', context: context);
+    } catch (e, stackTrace) {
+      if (!mounted) return;
+      ErrorHelper.showErrorWithLog(
+        context,
+        '添加图集图片失败',
+        error: e,
+        stackTrace: stackTrace,
+        category: LogCategory.character,
+        tags: ['character', 'gallery', 'add_failed'],
+      );
+    }
+  }
+
+  /// 长按图集条目：设为头像 / 从图集移除
+  Future<void> _showGalleryItemActions(CharacterGalleryImage image) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.face_outlined),
+              title: const Text('设为头像'),
+              onTap: () => Navigator.pop(sheetContext, 'avatar'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline,
+                  color: Theme.of(sheetContext).colorScheme.error),
+              title: Text('从图集移除',
+                  style: TextStyle(
+                      color: Theme.of(sheetContext).colorScheme.error)),
+              onTap: () => Navigator.pop(sheetContext, 'remove'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    final characterId = _character.id;
+    if (characterId == null) return;
+
+    try {
+      final repo = ref.read(characterRepositoryProvider);
+      switch (action) {
+        case 'avatar':
+          await repo.updateCharacterAvatarMediaId(characterId, image.mediaId);
+          if (mounted) {
+            setState(() => _character = _character.copyWith(
+                  avatarMediaId: image.mediaId,
+                ));
+          }
+          if (mounted) ToastUtils.showSuccess('已设为头像', context: context);
+        case 'remove':
+          final confirmed = await ConfirmDialog.show(
+            context,
+            title: '从图集移除',
+            message: '仅从图集移除这张图，不会删除媒体文件'
+                '（它可能仍被头像或聊天消息引用）。',
+            confirmText: '移除',
+          );
+          if (confirmed != true) return;
+          if (image.id == null) return;
+          await repo.removeCharacterImage(image.id!);
+          ref.invalidate(characterGalleryProvider(characterId));
+          if (mounted) ToastUtils.showSuccess('已移除', context: context);
+      }
+    } catch (e, stackTrace) {
+      if (!mounted) return;
+      ErrorHelper.showErrorWithLog(
+        context,
+        '图集操作失败',
+        error: e,
+        stackTrace: stackTrace,
+        category: LogCategory.character,
+        tags: ['character', 'gallery', 'action_failed'],
+      );
+    }
   }
 
   // ─── 辅助 ───────────────────────────────────────────────────

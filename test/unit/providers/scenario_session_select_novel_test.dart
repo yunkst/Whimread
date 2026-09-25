@@ -24,6 +24,7 @@ import 'package:novel_app/core/providers/current_novel_provider.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/novel.dart';
+import 'package:novel_app/models/reading_anchor.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 
 /// INovelRepository 最小 fake：只实现 selectNovel → selectCurrentNovel 链路
@@ -49,6 +50,14 @@ class _FakeNovelRepository implements INovelRepository {
 
   @override
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ReadingAnchor?> getLastReadAnchor(String novelUrl) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> updateLastReadAnchor(String novelUrl, ReadingAnchor anchor) =>
       throw UnimplementedError();
 
   @override

@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import '../models/novel.dart';
+import '../models/reading_anchor.dart';
 import '../services/logger_service.dart';
 import '../core/interfaces/repositories/i_novel_repository.dart';
 import '../utils/novel_url_normalizer.dart';
@@ -262,10 +263,60 @@ class NovelRepository extends BaseRepository
     }
   }
 
+  /// 获取章内阅读位置锚点
+  @override
+  Future<ReadingAnchor?> getLastReadAnchor(String novelUrl) async {
+    try {
+      final db = await database;
+      final maps = await db.query(
+        'bookshelf',
+        columns: ['lastReadAnchor'],
+        where: 'url = ?',
+        whereArgs: [novelUrl],
+        limit: 1,
+      );
+      if (maps.isEmpty) return null;
+      return ReadingAnchor.decode(maps.first['lastReadAnchor'] as String?);
+    } catch (e, stackTrace) {
+      LoggerService.instance.w(
+        '读取章内阅读位置锚点失败: novelUrl=$novelUrl - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['novel', 'read_anchor', 'failed'],
+      );
+      return null;
+    }
+  }
+
+  /// 更新章内阅读位置锚点（仅更新 lastReadAnchor 列，不触碰 lastReadTime）
+  ///
+  /// 高频写入（滚动节流），失败只记日志不上抛——锚点丢失只影响
+  /// 恢复精度，不应打断阅读流程。刻意不走 BookshelfMutationNotifier
+  /// 收口，理由见 [INovelRepository.updateLastReadAnchor] 注释。
+  @override
+  Future<int> updateLastReadAnchor(String novelUrl, ReadingAnchor anchor) async {
+    try {
+      final db = await database;
+      return await db.update(
+        'bookshelf',
+        {'lastReadAnchor': anchor.encode()},
+        where: 'url = ?',
+        whereArgs: [novelUrl],
+      );
+    } catch (e, stackTrace) {
+      LoggerService.instance.w(
+        '更新章内阅读位置锚点失败: novelUrl=$novelUrl - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.database,
+        tags: ['novel', 'read_anchor', 'failed'],
+      );
+      return 0;
+    }
+  }
+
   /// 更新小说书名
   @override
-  Future<int> updateTitle(String novelUrl, String newTitle) async {
-    if (isWebPlatform) {
+  Future<int> updateTitle(String novelUrl, String newTitle) async {    if (isWebPlatform) {
       return 0;
     }
 

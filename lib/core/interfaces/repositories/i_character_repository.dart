@@ -1,4 +1,5 @@
 import '../../../models/character.dart';
+import '../../../models/character_gallery_image.dart';
 
 /// 角色数据仓库接口
 ///
@@ -140,4 +141,31 @@ abstract class ICharacterRepository {
   /// [mediaId] 媒体资源ID（图像或视频），传 null 清空头像
   /// 返回受影响的行数
   Future<int> updateCharacterAvatarMediaId(int characterId, String? mediaId);
+
+  // ========== 角色图集（character_images，v50） ==========
+
+  /// 追加一张图集图片（sort 取当前最大值 +1）
+  ///
+  /// [characterId] 角色ID
+  /// [mediaId] 媒体资源ID（须已通过 MediaProxy 登记存在）
+  /// 返回新增条目（含 id / sort）
+  Future<CharacterGalleryImage> addCharacterImage(
+      int characterId, String mediaId);
+
+  /// 查询角色图集（按 sort, id 升序）
+  ///
+  /// [characterId] 角色ID
+  Future<List<CharacterGalleryImage>> getCharacterImages(int characterId);
+
+  /// 从图集移除一条（仅删关联行，不删媒体文件）
+  ///
+  /// [imageId] character_images 行主键
+  /// 返回受影响的行数
+  Future<int> removeCharacterImage(int imageId);
+
+  /// 清理角色图集的所有关联行（角色删除时联动调用）
+  ///
+  /// [characterId] 角色ID
+  /// 返回受影响的行数
+  Future<int> clearCharacterImages(int characterId);
 }

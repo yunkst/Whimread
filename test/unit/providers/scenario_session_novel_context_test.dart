@@ -25,6 +25,7 @@ import 'package:novel_app/core/providers/current_novel_provider.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/models/chat_session.dart';
 import 'package:novel_app/models/novel.dart';
+import 'package:novel_app/models/reading_anchor.dart';
 import 'package:novel_app/repositories/chat_session_repository.dart';
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
@@ -68,6 +69,14 @@ class _FakeNovelRepository implements INovelRepository {
 
   @override
   Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ReadingAnchor?> getLastReadAnchor(String novelUrl) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> updateLastReadAnchor(String novelUrl, ReadingAnchor anchor) =>
       throw UnimplementedError();
 
   @override
