@@ -195,8 +195,11 @@ class LocalDreamClient {
   final int controlPort;
   final int generationPort;
 
-  /// 单次 TCP 连接超时
-  static const Duration connectTimeout = Duration(seconds: 10);
+  /// 默认单次 TCP 连接超时
+  static const Duration defaultConnectTimeout = Duration(seconds: 10);
+
+  /// 单次 TCP 连接超时；本机探测等场景可通过构造参数注入更短的超时
+  final Duration connectTimeout;
 
   /// SSE 帧间空闲超时（采样一步可能 10s+，整图 1 分钟+，放宽到 2 分钟）
   static const Duration idleTimeout = Duration(seconds: 120);
@@ -213,6 +216,7 @@ class LocalDreamClient {
     required this.host,
     this.controlPort = LocalDreamPorts.control,
     this.generationPort = LocalDreamPorts.generation,
+    this.connectTimeout = defaultConnectTimeout,
   });
 
   /// 规范化用户输入的设备地址：去 scheme/路径/端口/空白。
@@ -227,6 +231,29 @@ class LocalDreamClient {
     final colon = host.indexOf(':');
     if (colon >= 0) host = host.substring(0, colon);
     return host.trim();
+  }
+
+  /// 探测 [host] 是否为 Local Dream 设备（/info 返回 app == 'localdream'）。
+  ///
+  /// 用于添加对话框的「本机自动检测」：任何通信失败（端口未开、超时、
+  /// 非 Local Dream 服务占用）都视为 false，调用方静默回退手动输入。
+  static Future<bool> isLocalDreamDevice(
+    String host, {
+    Duration? timeout,
+    int controlPort = LocalDreamPorts.control,
+  }) async {
+    final client = LocalDreamClient(
+      host: host,
+      controlPort: controlPort,
+      connectTimeout: timeout ?? defaultConnectTimeout,
+    );
+    try {
+      return (await client.info()).app == 'localdream';
+    } on LocalDreamException {
+      return false;
+    } finally {
+      client.close();
+    }
   }
 
   HttpClient _http() {
@@ -257,9 +284,14 @@ class LocalDreamClient {
 
   Future<Map<String, dynamic>> _postJson(Uri uri, Map<String, dynamic> json) {
     return _requestJson(() async {
+      // 显式设 contentLength 走 Content-Length 而非 chunked：Dart 不设长度
+      // 时默认 chunked 传输，Local Dream 设备端解析不了 chunked body，
+      // 会拿不到 model_id 而回 404 "model not found"（2026-09-25 反馈 #6）
+      final body = utf8.encode(jsonEncode(json));
       final request = await _http().postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.write(jsonEncode(json));
+      request.contentLength = body.length;
+      request.add(body);
       return request.close();
     }, uri);
   }
@@ -377,11 +409,14 @@ class LocalDreamClient {
       LocalDreamGenerateRequest request) async* {
     HttpClientResponse response;
     try {
+      // contentLength 同 _postJson：避免 chunked，设备端解析不了
+      final body = utf8.encode(jsonEncode(request.toJson()));
       final httpRequest = await _http()
           .postUrl(_generationUri('/generate'))
           .timeout(connectTimeout);
       httpRequest.headers.contentType = ContentType.json;
-      httpRequest.write(jsonEncode(request.toJson()));
+      httpRequest.contentLength = body.length;
+      httpRequest.add(body);
       response = await httpRequest.close().timeout(connectTimeout);
     } on TimeoutException {
       throw LocalDreamException('连接设备 $host 超时，请确认在同一网络、'

@@ -50,10 +50,15 @@ void main() {
     final selectBodies = <Map<String, dynamic>>[];
     final generateBodies = <Map<String, dynamic>>[];
 
+    /// /select 请求的传输元数据（transfer-encoding / content-length），
+    /// 用于固化「禁止 chunked」契约
+    final requestMetadata = <Map<String, String?>>[];
+
     setUp(() async {
       statusQueue.clear();
       selectBodies.clear();
       generateBodies.clear();
+      requestMetadata.clear();
 
       controlServer = await HttpServer.bind('127.0.0.1', 0);
       controlServer.listen((request) async {
@@ -92,6 +97,20 @@ void main() {
             ],
           });
         } else if (path == '/select') {
+          requestMetadata.add({
+            'transferEncoding': request.headers.value('transfer-encoding'),
+            'contentLength': request.headers.value('content-length'),
+          });
+          // 模拟真机行为（反馈 #6 根因）：设备端解析不了 chunked body，
+          // 拿不到 model_id 时回 404 "model not found"。客户端必须显式
+          // 设置 contentLength 走 Content-Length，禁止 chunked 传输。
+          final transferEncoding = request.headers.value('transfer-encoding');
+          if (transferEncoding != null &&
+              transferEncoding.toLowerCase() == 'chunked') {
+            await _writeJson(request, {'error': 'model not found'},
+                status: 404);
+            return;
+          }
           final body = await utf8.decoder.bind(request).join();
           selectBodies
               .add(jsonDecode(body) as Map<String, dynamic>);
@@ -158,6 +177,12 @@ void main() {
       expect(selectBodies, hasLength(1));
       expect(selectBodies.single['model_id'], 'illustrious_v16');
       expect(selectBodies.single['width'], 1024);
+      // 反馈 #6 契约：POST 必须带 Content-Length，禁止 chunked
+      // （设备端解析不了 chunked body，会回 404 "model not found"）
+      expect(requestMetadata, isNotEmpty);
+      expect(requestMetadata.last['transferEncoding'], isNull);
+      expect(int.parse(requestMetadata.last['contentLength']!),
+          greaterThan(0));
     });
 
     test('select：已在跑目标模型时跳过重复激活', () async {
@@ -256,6 +281,63 @@ void main() {
             prompt: 'cat', width: 8, height: 8, steps: 2, cfg: 7)).drain(),
         throwsA(isA<LocalDreamException>().having(
             (e) => e.message, 'message', isNotEmpty)),
+      );
+    });
+  });
+
+  group('isLocalDreamDevice 本机探测', () {
+    test('/info 返回 localdream 时判定为 true', () async {
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      server.listen((request) async {
+        await _writeJson(request, {
+          'app': 'localdream',
+          'protocol': 1,
+          'version': '2.8.1',
+          'device': 'V2454DA',
+        });
+      });
+      addTearDown(server.close);
+
+      expect(
+        await LocalDreamClient.isLocalDreamDevice(
+          '127.0.0.1',
+          timeout: const Duration(seconds: 2),
+          controlPort: server.port,
+        ),
+        isTrue,
+      );
+    });
+
+    test('端口无人监听（连接拒绝）判定为 false 而非抛异常', () async {
+      // 绑定后立刻释放，拿到一个大概率空闲的端口号
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      final deadPort = server.port;
+      await server.close();
+
+      expect(
+        await LocalDreamClient.isLocalDreamDevice(
+          '127.0.0.1',
+          timeout: const Duration(seconds: 2),
+          controlPort: deadPort,
+        ),
+        isFalse,
+      );
+    });
+
+    test('占用端口的服务不是 localdream 时判定为 false', () async {
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      server.listen((request) async {
+        await _writeJson(request, {'app': 'other_app'});
+      });
+      addTearDown(server.close);
+
+      expect(
+        await LocalDreamClient.isLocalDreamDevice(
+          '127.0.0.1',
+          timeout: const Duration(seconds: 2),
+          controlPort: server.port,
+        ),
+        isFalse,
       );
     });
   });
