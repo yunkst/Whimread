@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'screens/bookshelf_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/webview_browser_screen.dart';
@@ -29,13 +28,11 @@ import 'services/logger_service.dart';
 import 'services/llm_logger/llm_logger.dart';
 import 'services/log_reporter_service.dart';
 import 'services/managed_models/managed_model_service.dart';
-import 'services/native_crash_reporter.dart' show kGitHubRepo, NativeCrashReporter;
+import 'services/native_crash_reporter.dart' show NativeCrashReporter;
 import 'services/novel_agent/agent_scenario.dart';
-import 'services/star_prompt_service.dart';
 import 'services/startup_prompts_runner.dart';
 import 'widgets/agent_chat/agent_floating_button.dart';
 import 'widgets/app_update_dialog.dart';
-import 'widgets/star_prompt_dialog.dart';
 import 'widgets/startup_splash.dart';
 
 /// 已记录的全局异常签名 hash（前 200 字符）集合，用于去重。
@@ -505,43 +502,17 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     });
   }
 
-  /// 启动期一次性副作用，串行执行：crash 上报 → star 引导 → 静默检查更新。
+  /// 启动期一次性副作用，串行执行：crash 上报 → 静默检查更新。
   ///
-  /// 编排交给 [StartupPromptsRunner]：star 引导不满足门槛时的提前返回只
-  /// 跳过该阶段自身，不再短路启动期更新检查；整体只受 mounted 门控。
+  /// 编排交给 [StartupPromptsRunner]：每个阶段「不适用或抛异常」只跳过
+  /// 自身，不短路后续阶段；整体只受 mounted 门控。
   Future<void> _runStartupPrompts() async {
     final runner = StartupPromptsRunner(
       canContinue: () => mounted,
       crashReportStage: () => NativeCrashReporter.checkAndReport(context),
-      starPromptStage: _maybeRunStarPrompt,
       updateCheckStage: _silentCheckStableUpdate,
     );
     await runner.run();
-  }
-
-  /// GitHub star 引导阶段:满足全部门槛时弹窗。
-  ///
-  /// 不满足门槛或中途退出页面时直接返回,只结束本阶段;弹窗后的
-  /// mounted 校验由 [StartupPromptsRunner] 继续按阶段门控。
-  Future<void> _maybeRunStarPrompt() async {
-    await StarPromptService.instance.recordLaunch();
-    if (!mounted) return;
-    final shouldShow = await StarPromptService.instance.shouldShow();
-    if (!shouldShow || !mounted) return;
-    final goStar = await showDialog<bool>(
-      context: context,
-      builder: (_) => const StarPromptDialog(),
-    );
-    // showDialog 期间用户可能退出页面；后续副作用必须重新 mounted 校验
-    if (!mounted) return;
-    if (goStar == true) {
-      await StarPromptService.instance.onStarClicked();
-      if (!mounted) return;
-      await launchUrl(Uri.parse(kGitHubRepo),
-          mode: LaunchMode.externalApplication);
-    } else {
-      await StarPromptService.instance.onDismissed();
-    }
   }
 
   /// 启动期静默检查更新：有新版本则弹窗，失败 / 已是最新均不打扰。
@@ -558,7 +529,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         tags: ['update', 'startup-check'],
       );
       final result = await updateService.checkForUpdateDetailed(
-        forceCheck: false, // 走 1 小时节流
+        forceCheck: false, // 仅确有新版本时返回 Available
         includePrerelease: previewChannel,
       );
       if (!mounted) return;

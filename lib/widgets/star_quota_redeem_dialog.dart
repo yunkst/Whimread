@@ -1,6 +1,6 @@
 /// GitHub Star 兑换免费额度对话框。
 ///
-/// 与 [StarPromptDialog]（纯引导点赞）不同，本对话框是「兑换」动作入口：
+/// 本对话框是「兑换」动作入口：
 /// 1. 文案说明：Star 项目可补一次免费额度
 /// 2. 用户输入 GitHub 用户名
 /// 3. 主按钮「提交验证」→ [DeviceAuthService.redeemStarQuota]
