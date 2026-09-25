@@ -25,6 +25,15 @@ import 'logger_service.dart';
 class HighPerformanceAutoScrollController {
   static const LogCategory _category = LogCategory.ui;
   static const List<String> _tags = ['auto-scroll'];
+
+  /// 单帧最大推进时长（秒）。
+  ///
+  /// 帧回调链被长时间中断后（典型：App 退到后台再回来——引擎停帧期间
+  /// 回调不执行，恢复后的第一帧墙钟时间差包含整个后台时长），若不设上
+  /// 限会把这段时长一次性补滚，位置直接被顶到章节底部。钳制后恢复时
+  /// 从原位置附近继续滚动。
+  static const double _maxDeltaSeconds = 0.25;
+
   /// 关联的滚动控制器
   final ScrollController scrollController;
 
@@ -43,10 +52,15 @@ class HighPerformanceAutoScrollController {
   /// 暂停标志
   bool _isPaused = false;
 
+  /// 时间源；默认系统墙钟，测试可注入固定时钟以确定性推进。
+  final DateTime Function() _clock;
+
   /// 构造函数
   HighPerformanceAutoScrollController({
     required this.scrollController,
-  }) : _pixelsPerSecond = 0;
+    DateTime Function()? clock,
+  })  : _pixelsPerSecond = 0,
+        _clock = clock ?? DateTime.now;
 
   /// 是否正在滚动
   bool get isScrolling => _pixelsPerSecond > 0 && !_isPaused;
@@ -71,7 +85,7 @@ class HighPerformanceAutoScrollController {
     _pixelsPerSecond = pixelsPerSecond;
     _onScrollComplete = onScrollComplete;
     _isPaused = false; // 显式启动需清除暂停态，否则暂停中的帧链不会推进
-    _lastFrameTime = DateTime.now();
+    _lastFrameTime = _clock();
 
     LoggerService.instance.i('[startAutoScroll] 设置完成，速度=$pixelsPerSecond px/s', category: _category, tags: _tags);
     _requestFrame();
@@ -86,7 +100,7 @@ class HighPerformanceAutoScrollController {
   /// 恢复自动滚动
   void resumeAutoScroll() {
     _isPaused = false;
-    _lastFrameTime = DateTime.now(); // 重置时间戳避免跳跃
+    _lastFrameTime = _clock(); // 重置时间戳避免跳跃
     _requestFrame();
     LoggerService.instance.i('[resumeAutoScroll] 自动滚动已恢复', category: _category, tags: _tags);
   }
@@ -132,15 +146,18 @@ class HighPerformanceAutoScrollController {
       return;
     }
 
-    final now = DateTime.now();
+    final now = _clock();
     if (_lastFrameTime == null) {
       _lastFrameTime = now;
       _requestFrame();
       return;
     }
 
-    // 计算时间差（秒）
-    final deltaTime = now.difference(_lastFrameTime!).inMicroseconds / 1000000;
+    // 计算时间差（秒），钳制到 [0, _maxDeltaSeconds]：
+    // 下限防御系统时钟回拨，上限防止长中断后一次性补滚（见 _maxDeltaSeconds）
+    final deltaTime = (now.difference(_lastFrameTime!).inMicroseconds / 1000000)
+        .clamp(0.0, _maxDeltaSeconds)
+        .toDouble();
     _lastFrameTime = now;
 
     // 检查滚动控制器状态
@@ -164,8 +181,11 @@ class HighPerformanceAutoScrollController {
     if (newPosition >= maxPosition) {
       LoggerService.instance.i('[_onFrame] 已滚动到底部，停止滚动', category: _category, tags: _tags);
       scrollController.jumpTo(newPosition);
+      // 先取出回调再停止:stopAutoScroll 会清空 _onScrollComplete,
+      // 直接链式调用会让「触底回调」永远不触发(手动停止才应丢弃回调)
+      final callback = _onScrollComplete;
       stopAutoScroll();
-      _onScrollComplete?.call();
+      callback?.call();
       return;
     }
 
