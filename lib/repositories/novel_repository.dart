@@ -316,7 +316,8 @@ class NovelRepository extends BaseRepository
 
   /// 更新小说书名
   @override
-  Future<int> updateTitle(String novelUrl, String newTitle) async {    if (isWebPlatform) {
+  Future<int> updateTitle(String novelUrl, String newTitle) async {
+    if (isWebPlatform) {
       return 0;
     }
 
@@ -406,39 +407,6 @@ class NovelRepository extends BaseRepository
       return maps.first['lastReadChapter'] as int? ?? 0;
     }
     return 0;
-  }
-
-  /// 根据 title 查找小说
-  @override
-  Future<Novel?> getNovelByTitle(String title) async {
-    if (isWebPlatform) {
-      return null;
-    }
-
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'bookshelf',
-      where: 'title = ?',
-      whereArgs: [title],
-      limit: 1,
-    );
-
-    if (maps.isEmpty) {
-      return null;
-    }
-
-    return Novel(
-      id: maps[0]['id'] as int?,
-      title: maps[0]['title'],
-      author: maps[0]['author'],
-      url: maps[0]['url'],
-      isInBookshelf: true,
-      coverUrl: maps[0]['coverUrl'] as String?,
-      coverMediaId: maps[0]['coverMediaId'] as String?,
-      description: maps[0]['description'] as String?,
-      backgroundSetting: maps[0]['backgroundSetting'] as String?,
-      lastReadChapterIndex: maps[0]['lastReadChapter'] as int?,
-    );
   }
 
   /// 根据 URL 查找小说（用于 Agent 重写结果跳转阅读器）

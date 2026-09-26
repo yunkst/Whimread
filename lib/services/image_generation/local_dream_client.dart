@@ -15,6 +15,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show min;
 import 'dart:typed_data';
 
 import '../logger_service.dart';
@@ -38,6 +39,17 @@ class LocalDreamGenerateRequest {
   final double cfg;
   final int? seed;
 
+  /// 调度器（dpm/euler/euler_a/lcm/dpm_sde…，引擎默认 dpm）
+  final String? scheduler;
+
+  /// 画面比例预设（"1:1"/"3:4"/"4:3"/"16:9"…，仅 SDXL/Anima 生效）。
+  /// 引擎在固定 1024 画布上按比例合成重绘后裁切；SD1.5 恒为原生 512。
+  final String? aspectRatio;
+
+  /// 逐步预览（开启后 progress 事件带 previewFormat 格式的中间图）
+  final bool showDiffusionProcess;
+  final String? previewFormat;
+
   const LocalDreamGenerateRequest({
     required this.prompt,
     this.negativePrompt = '',
@@ -46,6 +58,10 @@ class LocalDreamGenerateRequest {
     required this.steps,
     required this.cfg,
     this.seed,
+    this.scheduler,
+    this.aspectRatio,
+    this.showDiffusionProcess = false,
+    this.previewFormat,
   });
 
   Map<String, dynamic> toJson() => {
@@ -56,8 +72,16 @@ class LocalDreamGenerateRequest {
         'steps': steps,
         'cfg': cfg,
         if (seed != null) 'seed': seed,
+        if (scheduler != null && scheduler!.isNotEmpty) 'scheduler': scheduler,
+        if (aspectRatio != null && aspectRatio!.isNotEmpty)
+          'aspect_ratio': aspectRatio,
         // 与 MediaStore 的 image 扩展名（png）对齐，结果 bytes 免二次编码
         'output_format': 'png',
+        if (showDiffusionProcess) ...{
+          'show_diffusion_process': true,
+          // 预览图走 jpeg（体积小，逐帧传输）
+          'preview_format': previewFormat ?? 'jpeg',
+        },
       };
 }
 
@@ -145,12 +169,21 @@ sealed class LocalDreamGenerateEvent {
   const LocalDreamGenerateEvent();
 }
 
-/// 采样步进（step 从 1 计）
+/// 采样步进（step 从 1 计；开启逐步预览时携带中间图 base64）
 class LocalDreamProgressEvent extends LocalDreamGenerateEvent {
   final int step;
   final int totalSteps;
 
-  const LocalDreamProgressEvent({required this.step, required this.totalSteps});
+  /// 中间预览图 bytes（showDiffusionProcess 时存在）
+  final Uint8List? previewBytes;
+  final String? previewFormat;
+
+  const LocalDreamProgressEvent({
+    required this.step,
+    required this.totalSteps,
+    this.previewBytes,
+    this.previewFormat,
+  });
 }
 
 /// 生成完成（图片 bytes 已按 format 解码）
@@ -296,6 +329,22 @@ class LocalDreamClient {
     }, uri);
   }
 
+  /// 把底层连接异常统一映射为可读的 [LocalDreamException]。
+  /// [hint] 用于 SocketException 的场景化提示（控制端口与生成端口不同）。
+  LocalDreamException _connectionError(Object e, {required String hint}) {
+    if (e is TimeoutException) {
+      return LocalDreamException('连接设备 $host 超时，请确认在同一网络、'
+          '宿主模式已开启且手机屏幕未锁定');
+    }
+    if (e is SocketException) {
+      return LocalDreamException('无法连接设备 $host（${e.message}），$hint');
+    }
+    if (e is HttpException) {
+      return LocalDreamException('连接设备 $host 失败（${e.message}）');
+    }
+    return LocalDreamException('连接设备 $host 失败：$e');
+  }
+
   Future<Map<String, dynamic>> _requestJson(
     Future<HttpClientResponse> Function() open,
     Uri uri,
@@ -303,14 +352,9 @@ class LocalDreamClient {
     HttpClientResponse response;
     try {
       response = await open().timeout(connectTimeout);
-    } on TimeoutException {
-      throw LocalDreamException('连接设备 $host 超时，请确认在同一网络、'
-          '宿主模式已开启且手机屏幕未锁定');
-    } on SocketException catch (e) {
-      throw LocalDreamException('无法连接设备 $host（${e.message}），'
-          '请确认在同一网络、宿主模式已开启且手机屏幕未锁定');
-    } on HttpException catch (e) {
-      throw LocalDreamException('连接设备 $host 失败（${e.message}）');
+    } catch (e) {
+      throw _connectionError(e,
+          hint: '请确认在同一网络、宿主模式已开启且手机屏幕未锁定');
     }
     if (response.statusCode != 200) {
       await response.drain<void>();
@@ -328,6 +372,49 @@ class LocalDreamClient {
   Future<LocalDreamInfo> info() async {
     final json = await _getJson(_controlUri('/info'));
     return LocalDreamInfo.fromJson(json);
+  }
+
+  /// 生成端口健康检查（GET /health 返回 200 即就绪；
+  /// 嵌入式引擎 manager 启动后轮询此方法等待模型加载完成）
+  Future<bool> health() async {
+    try {
+      final request = await _http()
+          .getUrl(_generationUri('/health'))
+          .timeout(connectTimeout);
+      final response = await request.close().timeout(connectTimeout);
+      await response.drain<void>();
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 提交生成并消费整个 SSE 流，返回 complete 事件。
+  ///
+  /// progress 钳制后透传给 [onProgress]（真实设备会出现重复帧与
+  /// step > total 的帧，归一化保证上层 step/total 恒在 0..1）；
+  /// error 事件转为异常抛出。两个后端（远程设备/嵌入式）共用。
+  Future<LocalDreamCompleteEvent> generateAndWait(
+    LocalDreamGenerateRequest request, {
+    void Function(int step, int total)? onProgress,
+  }) async {
+    LocalDreamCompleteEvent? complete;
+    await for (final event in generate(request)) {
+      switch (event) {
+        case LocalDreamProgressEvent(:final step, :final totalSteps):
+          if (totalSteps > 0) {
+            onProgress?.call(min(step, totalSteps), totalSteps);
+          }
+        case LocalDreamCompleteEvent():
+          complete = event;
+        case LocalDreamErrorEvent(:final message):
+          throw LocalDreamException('设备生成失败：$message');
+      }
+    }
+    if (complete == null) {
+      throw const LocalDreamException('设备连接中断，未返回完整图片');
+    }
+    return complete;
   }
 
   /// 后端状态
@@ -418,12 +505,9 @@ class LocalDreamClient {
       httpRequest.contentLength = body.length;
       httpRequest.add(body);
       response = await httpRequest.close().timeout(connectTimeout);
-    } on TimeoutException {
-      throw LocalDreamException('连接设备 $host 超时，请确认在同一网络、'
-          '宿主模式已开启且手机屏幕未锁定');
-    } on SocketException catch (e) {
-      throw LocalDreamException('无法连接设备 $host（${e.message}），'
-          '请确认设备模型已在手机端启动（宿主模式）且屏幕未锁定');
+    } catch (e) {
+      throw _connectionError(e,
+          hint: '请确认设备模型已在手机端启动（宿主模式）且屏幕未锁定');
     }
 
     if (response.statusCode != 200) {
@@ -515,9 +599,13 @@ class _SseParser {
     }
     switch (_eventName) {
       case 'progress':
+        final preview = json['image'] as String?;
         return LocalDreamProgressEvent(
           step: (json['step'] as num?)?.toInt() ?? 0,
           totalSteps: (json['total_steps'] as num?)?.toInt() ?? 0,
+          previewBytes:
+              (preview != null && preview.isNotEmpty) ? base64Decode(preview) : null,
+          previewFormat: json['format'] as String?,
         );
       case 'complete':
         final image = json['image'] as String?;

@@ -489,25 +489,7 @@ class _BookmarkTile extends StatelessWidget {
         color: colorScheme.error,
         child: Icon(Icons.delete_outline, color: colorScheme.onError),
       ),
-      confirmDismiss: (_) async {
-        return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('删除收藏'),
-            content: Text('确定删除「${bookmark.title}」吗？'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('删除'),
-              ),
-            ],
-          ),
-        );
-      },
+      confirmDismiss: (_) => _confirmDeleteBookmark(context, bookmark),
       onDismissed: (_) => onDelete(),
       child: ListTile(
         dense: true,
@@ -537,28 +519,35 @@ class _BookmarkTile extends StatelessWidget {
               color: colorScheme.onSurface.withValues(alpha: 0.4)),
           tooltip: '删除',
           onPressed: () async {
-            final confirmed = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('删除收藏'),
-                content: Text('确定删除「${bookmark.title}」吗？'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text('取消'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: const Text('删除'),
-                  ),
-                ],
-              ),
-            );
+            final confirmed = await _confirmDeleteBookmark(context, bookmark);
             if (confirmed == true) onDelete();
           },
         ),
         onTap: onTap,
         onLongPress: () => _showBookmarkMenu(context),
+      ),
+    );
+  }
+
+  /// 弹出「删除收藏」确认对话框。
+  /// 返回 true = 用户确认删除；false / null = 用户取消或直接关闭对话框。
+  Future<bool?> _confirmDeleteBookmark(
+      BuildContext context, Bookmark bookmark) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除收藏'),
+        content: Text('确定删除「${bookmark.title}」吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
       ),
     );
   }
@@ -620,23 +609,8 @@ class _BookmarkTile extends StatelessWidget {
                 title: const Text('删除'),
                 onTap: () async {
                   Navigator.pop(sheetCtx);
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('删除收藏'),
-                      content: Text('确定删除「${bookmark.title}」吗？'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('取消'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('删除'),
-                        ),
-                      ],
-                    ),
-                  );
+                  final confirmed =
+                      await _confirmDeleteBookmark(context, bookmark);
                   if (confirmed == true) onDelete();
                 },
               ),

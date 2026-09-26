@@ -10,8 +10,6 @@
 /// 1. 新场景懒创建时只 hydrate 自己场景的最近会话（回归主 bug）
 /// 2. 切回原场景，之前的上下文原样保留（内存 session 不被清掉）
 /// 3. 一个场景写入"当前会话 id"不影响其他场景的值
-/// 4. AgentChatNotifier.switchScenario（Tab 自动切换的兼容层入口）
-///    切换后 state 携带目标场景自己的上下文
 ///
 /// 运行:
 ///   flutter test test/unit/core/providers/scenario_context_isolation_test.dart
@@ -20,11 +18,8 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/database/database_connection.dart';
-import 'package:novel_app/core/providers/agent_chat_providers.dart';
-import 'package:novel_app/core/providers/agent_scenario_provider.dart';
 import 'package:novel_app/core/providers/chat_session_providers.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
-import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/chat_message_record.dart';
 import 'package:novel_app/models/chat_session.dart';
@@ -150,56 +145,5 @@ void main() {
           reason: 'scoped 隔离是修复的根基：writing 的会话 id 不可见于 webview_extract');
     });
 
-    test('switchScenario（Tab 自动切换入口）后兼容层 state 携带目标场景自己的上下文',
-        () async {
-      final writingId =
-          await seedSession(ScenarioIds.writing, '写作场景的历史上下文');
-      final webviewId =
-          await seedSession(ScenarioIds.webviewExtract, '浏览器场景的历史上下文');
-      container
-          .read(currentChatSessionIdProvider(ScenarioIds.writing).notifier)
-          .state = writingId;
-
-      // 创建兼容层（初始场景 writing），并让 writing session hydrate 完成
-      final chatNotifier = container.read(agentChatProvider.notifier);
-      final sessions = container.read(scenarioSessionsProvider.notifier);
-      final writingSession = sessions.get(ScenarioIds.writing);
-      await _pumpUntil(() => writingSession.agentMessages.isNotEmpty);
-
-      // 模拟 main.dart Tab 切换触发的自动切换
-      chatNotifier.switchScenario(ScenarioIds.webviewExtract, '网页提取');
-      await _pumpUntil(() =>
-          container.read(agentChatProvider).scenarioId ==
-              ScenarioIds.webviewExtract &&
-          container.read(agentChatProvider).messages.isNotEmpty);
-
-      final state = container.read(agentChatProvider);
-      expect(state.scenarioId, ScenarioIds.webviewExtract);
-      final webviewSession =
-          sessions.getIfExists(ScenarioIds.webviewExtract)!;
-      expect(webviewSession.sessionId, webviewId);
-      // 兼容层 state 与 webview session 同源：消息条数一致且不含写作上下文
-      expect(state.messages.length,
-          webviewSession.state.messages.length);
-      final sessionContents =
-          webviewSession.agentMessages.map((m) => m.content).join();
-      expect(sessionContents, contains('浏览器场景的历史上下文'));
-      expect(sessionContents, isNot(contains('写作场景的历史上下文')));
-
-      // 切回 writing：写作上下文还在
-      chatNotifier.switchScenario(ScenarioIds.writing, '小说写作助手');
-      await _pumpUntil(() =>
-          container.read(agentChatProvider).scenarioId ==
-              ScenarioIds.writing);
-      expect(container.read(agentChatProvider).scenarioId,
-          ScenarioIds.writing);
-      expect(
-        sessions.getIfExists(ScenarioIds.writing)!.agentMessages
-            .map((m) => m.content)
-            .join(),
-        contains('写作场景的历史上下文'),
-        reason: '切回 writing 要能看到之前的上下文',
-      );
-    });
   });
 }

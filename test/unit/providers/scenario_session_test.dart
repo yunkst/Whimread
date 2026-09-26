@@ -18,7 +18,6 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/providers/agent_scenario_provider.dart';
-import 'package:novel_app/core/providers/agent_chat_providers.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/agent_chat_message.dart';
@@ -467,50 +466,6 @@ void main() {
   });
 
   // ===========================================================================
-  // 5. 兼容层 AgentChatNotifier 仍可用
-  // ===========================================================================
-
-  group('兼容层 AgentChatNotifier', () {
-    test('sendMessage 通过兼容层正常工作', () async {
-      final notifier = container.read(agentChatProvider.notifier);
-      await notifier.sendMessage('兼容层测试');
-
-      final state = container.read(agentChatProvider);
-      expect(state.messages.length, 2);
-    });
-
-    test('switchScenario 通过兼容层切换场景', () async {
-      final notifier = container.read(agentChatProvider.notifier);
-
-      await notifier.sendMessage('写作消息');
-      final writingState = container.read(agentChatProvider);
-      expect(writingState.scenarioId, ScenarioIds.writing);
-
-      notifier.switchScenario(ScenarioIds.webviewExtract, '网页提取');
-      final extractState = container.read(agentChatProvider);
-      expect(extractState.scenarioId, ScenarioIds.webviewExtract);
-    });
-
-    test('clearConversation 通过兼容层清空', () async {
-      final notifier = container.read(agentChatProvider.notifier);
-
-      await notifier.sendMessage('测试');
-      expect(container.read(agentChatProvider).messages.isNotEmpty, isTrue);
-
-      notifier.clearConversation();
-      expect(container.read(agentChatProvider).messages, isEmpty);
-    });
-
-    test('cancelRequest 通过兼容层取消', () {
-      final notifier = container.read(agentChatProvider.notifier);
-
-      notifier.cancelRequest();
-      final state = container.read(agentChatProvider);
-      expect(state.isLoading, isFalse);
-    });
-  });
-
-  // ===========================================================================
   // 6. currentChatStateProvider 正确映射
   // ===========================================================================
 
@@ -520,16 +475,20 @@ void main() {
       final state = container.read(currentChatStateProvider);
       expect(state.scenarioId, ScenarioIds.writing);
 
-      // 发消息
-      final notifier = container.read(agentChatProvider.notifier);
-      await notifier.sendMessage('测试');
+      // 发消息（直接走当前场景的 ScenarioSession）
+      final session = container
+          .read(scenarioSessionsProvider.notifier)
+          .get(ScenarioIds.writing);
+      await session.sendMessage(content: '测试');
       final updatedState = container.read(currentChatStateProvider);
       expect(updatedState.messages.length, 2);
     });
 
     test('切换场景后返回新场景的状态', () async {
-      final notifier = container.read(agentChatProvider.notifier);
-      await notifier.sendMessage('写作消息');
+      final session = container
+          .read(scenarioSessionsProvider.notifier)
+          .get(ScenarioIds.writing);
+      await session.sendMessage(content: '写作消息');
 
       // 切换场景
       container.read(currentAgentScenarioProvider.notifier).state =

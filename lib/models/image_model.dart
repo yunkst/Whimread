@@ -25,7 +25,11 @@ enum ImageModelBackendType {
   localSd,
 
   /// Local Dream 设备（安卓宿主模式 HTTP API，局域网内手机 NPU/CPU 推理）
-  localDream;
+  localDream,
+
+  /// Local Dream 嵌入式引擎（本机子进程 + localhost HTTP，
+  /// 骁龙 NPU/CPU；filePath 存模型包目录，remoteModelId 存包类型 dbName）
+  localDreamEmbedded;
 
   /// 数据库 backend_type 列名
   String get dbName {
@@ -34,6 +38,8 @@ enum ImageModelBackendType {
         return 'local_sd';
       case ImageModelBackendType.localDream:
         return 'local_dream';
+      case ImageModelBackendType.localDreamEmbedded:
+        return 'local_dream_embedded';
     }
   }
 
@@ -43,6 +49,8 @@ enum ImageModelBackendType {
         return ImageModelBackendType.localSd;
       case 'local_dream':
         return ImageModelBackendType.localDream;
+      case 'local_dream_embedded':
+        return ImageModelBackendType.localDreamEmbedded;
       default:
         // 兼容旧值（如已下线的 'comfyui'）：回退到本地引擎
         return ImageModelBackendType.localSd;

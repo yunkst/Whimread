@@ -140,11 +140,9 @@ void main() {
           'characters',
           'media_items',
           'outlines',
-          'chat_scenes',
           'character_relationships',
           'bookshelves',
           'novel_bookshelves',
-          'prompt_history',
           'prompt_tag_categories',
           'prompt_tags',
           'site_scripts',
@@ -159,6 +157,14 @@ void main() {
         // v34 删除了 scene_illustrations 死表
         expect(tableNames.contains('scene_illustrations'), isFalse,
             reason: 'scene_illustrations 在 v34 已被删除');
+
+        // v51 清理了 chat_scenes / prompt_history / prompt_tag_history 死表
+        expect(tableNames.contains('chat_scenes'), isFalse,
+            reason: 'chat_scenes 在 v51 已被删除');
+        expect(tableNames.contains('prompt_history'), isFalse,
+            reason: 'prompt_history 在 v51 已被删除');
+        expect(tableNames.contains('prompt_tag_history'), isFalse,
+            reason: 'prompt_tag_history 在 v51 已被删除');
 
         await db.close();
       });
@@ -486,7 +492,7 @@ void main() {
         final tableNames = tables.map((t) => t['name'] as String).toSet();
 
         expect(tableNames.contains('outlines'), isTrue);
-        expect(tableNames.contains('chat_scenes'), isTrue);
+        expect(tableNames.contains('prompt_tags'), isTrue);
         expect(tableNames.contains('character_relationships'), isTrue);
         expect(tableNames.contains('bookshelves'), isTrue);
 
@@ -502,10 +508,11 @@ void main() {
     });
 
     group('v26 — prompt_history 标签快照列', () {
-      test('prompt_history 表应包含 tag_group_ids 列', () async {
+      test('升级到 v26 后 prompt_history 表应包含 tag_group_ids 列', () async {
         final db = await createEmptyDb();
         await DatabaseMigrations.createV1Tables(db);
-        await DatabaseMigrations.upgrade(db, 1, DatabaseMigrations.currentVersion);
+        // 该表是 v51 已清理的历史死表，这里只验证 v26 这一历史迁移步骤本身
+        await DatabaseMigrations.upgrade(db, 1, 26);
 
         final columns =
             await db.rawQuery("PRAGMA table_info(prompt_history)");

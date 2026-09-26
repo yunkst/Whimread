@@ -84,16 +84,6 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i3.Future<String?>);
 
   @override
-  _i3.Future<List<_i4.Chapter>> getCachedChapters(String? novelUrl) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #getCachedChapters,
-          [novelUrl],
-        ),
-        returnValue: _i3.Future<List<_i4.Chapter>>.value(<_i4.Chapter>[]),
-      ) as _i3.Future<List<_i4.Chapter>>);
-
-  @override
   _i3.Future<List<_i4.Chapter>> getCachedNovelChapters(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -137,40 +127,4 @@ class MockIChapterRepository extends _i1.Mock
         returnValue: _i3.Future<List<_i5.ChapterSearchResult>>.value(
             <_i5.ChapterSearchResult>[]),
       ) as _i3.Future<List<_i5.ChapterSearchResult>>);
-
-  @override
-  _i3.Future<_i4.Chapter?> getChapterById(int? id) => (super.noSuchMethod(
-        Invocation.method(
-          #getChapterById,
-          [id],
-        ),
-        returnValue: _i3.Future<_i4.Chapter?>.value(),
-      ) as _i3.Future<_i4.Chapter?>);
-
-  @override
-  _i3.Future<String?> getChapterUrlById(int? id) => (super.noSuchMethod(
-        Invocation.method(
-          #getChapterUrlById,
-          [id],
-        ),
-        returnValue: _i3.Future<String?>.value(),
-      ) as _i3.Future<String?>);
-
-  @override
-  _i3.Future<bool> chapterExistsById(int? id) => (super.noSuchMethod(
-        Invocation.method(
-          #chapterExistsById,
-          [id],
-        ),
-        returnValue: _i3.Future<bool>.value(false),
-      ) as _i3.Future<bool>);
-
-  @override
-  _i3.Future<int?> getChapterIdByUrl(String? url) => (super.noSuchMethod(
-        Invocation.method(
-          #getChapterIdByUrl,
-          [url],
-        ),
-        returnValue: _i3.Future<int?>.value(),
-      ) as _i3.Future<int?>);
 }

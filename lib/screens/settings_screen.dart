@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
 import 'image_model_management_screen.dart';
+import 'local_dream_engine_screen.dart';
 import 'feedback_submit_screen.dart';
 import 'log_viewer_screen.dart';
 import 'managed_model_picker_screen.dart';
@@ -242,6 +243,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const ImageModelManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.memory_outlined, color: appColors.agentAccent),
+                title: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text('Local Dream 引擎'),
+                    SizedBox(width: 6),
+                    _BetaTag(),
+                  ],
+                ),
+                subtitle: const Text('本机 NPU 生图引擎自检与测试（骁龙）'),
+                trailing: const Icon(Icons.arrow_forward_ios),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const LocalDreamEngineScreen(),
                     ),
                   );
                 },

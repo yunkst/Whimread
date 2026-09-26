@@ -6,11 +6,12 @@
 import 'dart:async' as _i3;
 
 import 'package:mockito/mockito.dart' as _i1;
-import 'package:novel_app/controllers/chapter_list/chapter_loader.dart' as _i5;
+import 'package:novel_app/controllers/chapter_list/chapter_loader.dart' as _i6;
 import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart'
     as _i2;
-import 'package:novel_app/models/chapter.dart' as _i6;
+import 'package:novel_app/models/chapter.dart' as _i7;
 import 'package:novel_app/models/novel.dart' as _i4;
+import 'package:novel_app/models/reading_anchor.dart' as _i5;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -79,6 +80,32 @@ class MockINovelRepository extends _i1.Mock implements _i2.INovelRepository {
       ) as _i3.Future<int>);
 
   @override
+  _i3.Future<_i5.ReadingAnchor?> getLastReadAnchor(String? novelUrl) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getLastReadAnchor,
+          [novelUrl],
+        ),
+        returnValue: _i3.Future<_i5.ReadingAnchor?>.value(),
+      ) as _i3.Future<_i5.ReadingAnchor?>);
+
+  @override
+  _i3.Future<int> updateLastReadAnchor(
+    String? novelUrl,
+    _i5.ReadingAnchor? anchor,
+  ) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #updateLastReadAnchor,
+          [
+            novelUrl,
+            anchor,
+          ],
+        ),
+        returnValue: _i3.Future<int>.value(0),
+      ) as _i3.Future<int>);
+
+  @override
   _i3.Future<int> updateBackgroundSetting(
     String? novelUrl,
     String? backgroundSetting,
@@ -112,15 +139,6 @@ class MockINovelRepository extends _i1.Mock implements _i2.INovelRepository {
         ),
         returnValue: _i3.Future<int>.value(0),
       ) as _i3.Future<int>);
-
-  @override
-  _i3.Future<_i4.Novel?> getNovelByTitle(String? title) => (super.noSuchMethod(
-        Invocation.method(
-          #getNovelByTitle,
-          [title],
-        ),
-        returnValue: _i3.Future<_i4.Novel?>.value(),
-      ) as _i3.Future<_i4.Novel?>);
 
   @override
   _i3.Future<_i4.Novel?> getNovelByUrl(String? novelUrl) => (super.noSuchMethod(
@@ -185,7 +203,7 @@ class MockINovelRepository extends _i1.Mock implements _i2.INovelRepository {
 /// A class which mocks [ChapterLoader].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockChapterLoader extends _i1.Mock implements _i5.ChapterLoader {
+class MockChapterLoader extends _i1.Mock implements _i6.ChapterLoader {
   MockChapterLoader() {
     _i1.throwOnMissingStub(this);
   }
@@ -201,7 +219,7 @@ class MockChapterLoader extends _i1.Mock implements _i5.ChapterLoader {
       ) as _i3.Future<void>);
 
   @override
-  _i3.Future<List<_i6.Chapter>> loadChapters(
+  _i3.Future<List<_i7.Chapter>> loadChapters(
     String? novelUrl, {
     bool? forceRefresh = false,
   }) =>
@@ -211,11 +229,11 @@ class MockChapterLoader extends _i1.Mock implements _i5.ChapterLoader {
           [novelUrl],
           {#forceRefresh: forceRefresh},
         ),
-        returnValue: _i3.Future<List<_i6.Chapter>>.value(<_i6.Chapter>[]),
-      ) as _i3.Future<List<_i6.Chapter>>);
+        returnValue: _i3.Future<List<_i7.Chapter>>.value(<_i7.Chapter>[]),
+      ) as _i3.Future<List<_i7.Chapter>>);
 
   @override
-  _i3.Future<List<_i6.Chapter>> refreshFromBackend(
+  _i3.Future<List<_i7.Chapter>> refreshFromBackend(
     String? novelUrl, {
     bool? forceRefresh = false,
   }) =>
@@ -225,8 +243,8 @@ class MockChapterLoader extends _i1.Mock implements _i5.ChapterLoader {
           [novelUrl],
           {#forceRefresh: forceRefresh},
         ),
-        returnValue: _i3.Future<List<_i6.Chapter>>.value(<_i6.Chapter>[]),
-      ) as _i3.Future<List<_i6.Chapter>>);
+        returnValue: _i3.Future<List<_i7.Chapter>>.value(<_i7.Chapter>[]),
+      ) as _i3.Future<List<_i7.Chapter>>);
 
   @override
   _i3.Future<int> loadLastReadChapter(String? novelUrl) => (super.noSuchMethod(

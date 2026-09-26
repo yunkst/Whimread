@@ -64,9 +64,17 @@ android {
     // 启动资源引导动态下载（lib/services/app_resource_manager.dart），不再打进 APK。
     // CMake 仍会编出 so（供 tool/publish_resources.dart 收集上传到资源 bucket），
     // 这里只从打包产物中排除。
+    //
+    // Local Dream 嵌入式引擎（libstable_diffusion_core.so，2026-09）例外：
+    // 它不是被 dlopen 的库而是被 spawn 的可执行文件，Android 10+ W^X 禁止
+    // exec 私有目录文件，必须经 installer 解包到 nativeLibraryDir——因此
+    // 1) 不能像 libsds.so 一样动态下载；2) 必须 useLegacyPackaging=true
+    // （否则 so 不解压、直接从 APK 内映射，nativeLibraryDir 下没有文件可执行）。
+    // 产物放置：Local Dream build.sh 产出 → android/app/src/main/jniLibs/arm64-v8a/
     packagingOptions {
         jniLibs {
             excludes += "**/libsds.so"
+            useLegacyPackaging = true
         }
     }
 

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.2.0-preview.5+151
+version: 3.2.0-preview.6+152
 
 repository: https://github.com/yunkst/Whimread
 homepage: https://github.com/yunkst/Whimread
@@ -188,6 +188,11 @@ flutter:
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
+
+  # Local Dream 嵌入式引擎（方案 A）：模型目录内置在 Dart 代码中
+  # （lib/services/local_dream_embedded/model_pack.dart，逐条移植自
+  # Local Dream ModelRepository.kt）；qnnlibs/ 为 QNN 运行库占位
+  # （Local Dream build.sh 产物，首启解压到应用私有目录）。
 
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package

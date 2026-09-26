@@ -230,31 +230,4 @@ void main() {
       expect(LogCategory.values.length, equals(9));
     });
   });
-
-  group('LogStatistics - 统计', () {
-    test('空统计应正确', () {
-      final stats = LogStatistics(
-        total: 0,
-        byLevel: {for (final l in LogLevel.values) l: 0},
-        byCategory: {for (final c in LogCategory.values) c: 0},
-      );
-      expect(stats.total, equals(0));
-      expect(stats.levelPercentage, isEmpty);
-    });
-
-    test('levelPercentage 应正确计算', () {
-      final stats = LogStatistics(
-        total: 100,
-        byLevel: {
-          LogLevel.debug: 10,
-          LogLevel.info: 30,
-          LogLevel.warning: 40,
-          LogLevel.error: 20,
-        },
-        byCategory: {for (final c in LogCategory.values) c: 0},
-      );
-      expect(stats.levelPercentage[LogLevel.error], closeTo(0.2, 0.001));
-      expect(stats.levelPercentage[LogLevel.warning], closeTo(0.4, 0.001));
-    });
-  });
 }

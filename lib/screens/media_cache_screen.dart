@@ -3,7 +3,6 @@
 /// 列出 media_items 全部媒体（AI 生成图/视频 + 用户上传），支持：
 /// - 查看总占用、按 kind 筛选（全部/图片/视频）
 /// - 单项删除（删本地文件 + 元数据）
-/// - 批量"清空可回源缓存"（仅删 source≠localUpload，保留用户上传）
 ///
 /// localOnly（用户上传）项标注"本地唯一副本，删除不可恢复"。
 library;
@@ -78,34 +77,26 @@ class _MediaCacheScreenState extends ConsumerState<MediaCacheScreen> {
     _refresh();
   }
 
-  Future<void> _clearRemotable() async {
-    final confirmed = await ConfirmDialog.show(
-      context,
-      title: '清空可回源缓存',
-      message: '将删除所有 AI 生成的图片/视频缓存（可重新生成/回源），'
-          '保留你上传的图片。是否继续？',
-      confirmText: '清空',
-      isDangerous: true,
-    );
-    if (confirmed != true) return;
-    final count = await ref.read(mediaProxyProvider).clearRemotable();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已清空 $count 项可回源缓存')),
-      );
-    }
-    _refresh();
-  }
-
   String _sourceLabel(MediaSource s) {
     switch (s) {
-      case MediaSource.text2img:
-        return '文生图';
-      case MediaSource.imageToVideo:
-        return '图生视频';
       case MediaSource.localUpload:
         return '用户上传';
     }
+  }
+
+  Future<void> _clearAll() async {
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: '清空媒体',
+      message: '将删除全部媒体（含本地唯一副本，删除后不可恢复）。是否继续？',
+      confirmText: '清空',
+      isDangerous: true,
+    );
+    if (confirmed != true || !mounted) return;
+    for (final item in _all) {
+      await ref.read(mediaProxyProvider).delete(item.mediaId);
+    }
+    _refresh();
   }
 
   @override
@@ -149,10 +140,10 @@ class _MediaCacheScreenState extends ConsumerState<MediaCacheScreen> {
                         ),
                       ),
                       TextButton.icon(
-                        onPressed: _all.isEmpty ? null : _clearRemotable,
+                        onPressed: _all.isEmpty ? null : _clearAll,
                         icon: const Icon(Icons.cleaning_services_outlined,
                             size: 18),
-                        label: const Text('清空可回源'),
+                        label: const Text('清空全部'),
                       ),
                     ],
                   ),

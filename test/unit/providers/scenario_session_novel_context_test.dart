@@ -92,9 +92,6 @@ class _FakeNovelRepository implements INovelRepository {
   Future<int> getLastReadChapter(String novelUrl) => throw UnimplementedError();
 
   @override
-  Future<Novel?> getNovelByTitle(String title) => throw UnimplementedError();
-
-  @override
   Future<Novel?> getNovelByUrl(String novelUrl) => throw UnimplementedError();
 
   @override

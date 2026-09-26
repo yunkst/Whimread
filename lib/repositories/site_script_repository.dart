@@ -518,29 +518,6 @@ class SiteScriptRepository extends BaseRepository {
     }
   }
 
-  /// 按 remote_id 查询（v47，云端下载脚本的本地副本定位）
-  Future<SiteScript?> findByRemoteId(String remoteId) async {
-    try {
-      final db = await database;
-      final results = await db.query(
-        'site_scripts',
-        where: 'remote_id = ?',
-        whereArgs: [remoteId],
-        limit: 1,
-      );
-      if (results.isEmpty) return null;
-      return SiteScript.fromMap(results.first);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '按 remote_id 查询脚本失败: remoteId=$remoteId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'find_by_remote_id', 'failed'],
-      );
-      rethrow;
-    }
-  }
-
   /// 落库一条云端下载的脚本（v47）。
   ///
   /// - 若同 domain 已存在**本地自建**脚本（source='local'），**不覆盖**，

@@ -152,27 +152,6 @@ void main() {
   });
 
   // ============================================================
-  // deleteVersionsByChapter
-  // ============================================================
-
-  group('deleteVersionsByChapter', () {
-    test('应删除章节的所有版本', () async {
-      await createVersion('url1');
-      await createVersion('url1');
-      await createVersion('url2');
-
-      final affected = await versionRepo.deleteVersionsByChapter('url1');
-      expect(affected, 2);
-
-      final remaining = await versionRepo.getVersions('url1');
-      expect(remaining.length, 0);
-
-      final other = await versionRepo.getVersions('url2');
-      expect(other.length, 1);
-    });
-  });
-
-  // ============================================================
   // deleteVersionsByNovel
   // ============================================================
 
@@ -354,20 +333,6 @@ void main() {
   });
 
   group('ChapterRepository 级联删除', () {
-    test('deleteChapterCache 应级联删除版本', () async {
-      await chapterRepo.cacheChapter(
-        'novel1',
-        Chapter(title: '测试', url: 'url1'),
-        '内容',
-      );
-      await createVersion('url1');
-
-      await chapterRepo.deleteChapterCache('url1');
-
-      final versions = await versionRepo.getVersions('url1');
-      expect(versions.length, 0);
-    });
-
     test('deleteCachedChapters 应级联删除版本', () async {
       await chapterRepo.cacheChapter(
         'novel1',

@@ -6,34 +6,6 @@ part of 'ui_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$toastNotifierHash() => r'5e6227980861a53aa28452e8fd607ec12e9e99fd';
-
-/// Toast状态管理器
-///
-/// **职责**:
-/// - 管理Toast消息状态
-/// - 提供显示各类Toast的接口
-/// - 自动触发状态更新通知UI层
-///
-/// **架构原则**:
-/// - Notifier只管理状态，不直接显示Toast
-/// - UI层通过ref.listen监听状态变化并显示
-/// - 显示后立即清除状态，避免重复显示
-///
-/// Copied from [ToastNotifier].
-@ProviderFor(ToastNotifier)
-final toastNotifierProvider =
-    AutoDisposeNotifierProvider<ToastNotifier, ToastState>.internal(
-  ToastNotifier.new,
-  name: r'toastNotifierProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$toastNotifierHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-typedef _$ToastNotifier = AutoDisposeNotifier<ToastState>;
 String _$homeTabIndexNotifierHash() =>
     r'ae5b68787619996beffce4a6588df8070b02985d';
 

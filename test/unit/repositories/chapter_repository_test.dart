@@ -29,8 +29,6 @@ class _FakeChapterVersionRepository implements IChapterVersionRepository {
   @override
   Future<int> deleteVersion(int id) async => 0;
   @override
-  Future<int> deleteVersionsByChapter(String chapterUrl) async => 0;
-  @override
   Future<int> deleteVersionsByNovel(String novelUrl) async => 0;
   @override
   Future<int> evictOldestVersions(String chapterUrl, {int maxCount = 5, sqflite.DatabaseExecutor? executor}) async => 0;

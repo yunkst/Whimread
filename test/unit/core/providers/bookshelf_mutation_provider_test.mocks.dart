@@ -9,6 +9,7 @@ import 'package:mockito/mockito.dart' as _i1;
 import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart'
     as _i2;
 import 'package:novel_app/models/novel.dart' as _i4;
+import 'package:novel_app/models/reading_anchor.dart' as _i5;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -77,6 +78,32 @@ class MockINovelRepository extends _i1.Mock implements _i2.INovelRepository {
       ) as _i3.Future<int>);
 
   @override
+  _i3.Future<_i5.ReadingAnchor?> getLastReadAnchor(String? novelUrl) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getLastReadAnchor,
+          [novelUrl],
+        ),
+        returnValue: _i3.Future<_i5.ReadingAnchor?>.value(),
+      ) as _i3.Future<_i5.ReadingAnchor?>);
+
+  @override
+  _i3.Future<int> updateLastReadAnchor(
+    String? novelUrl,
+    _i5.ReadingAnchor? anchor,
+  ) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #updateLastReadAnchor,
+          [
+            novelUrl,
+            anchor,
+          ],
+        ),
+        returnValue: _i3.Future<int>.value(0),
+      ) as _i3.Future<int>);
+
+  @override
   _i3.Future<int> updateBackgroundSetting(
     String? novelUrl,
     String? backgroundSetting,
@@ -110,15 +137,6 @@ class MockINovelRepository extends _i1.Mock implements _i2.INovelRepository {
         ),
         returnValue: _i3.Future<int>.value(0),
       ) as _i3.Future<int>);
-
-  @override
-  _i3.Future<_i4.Novel?> getNovelByTitle(String? title) => (super.noSuchMethod(
-        Invocation.method(
-          #getNovelByTitle,
-          [title],
-        ),
-        returnValue: _i3.Future<_i4.Novel?>.value(),
-      ) as _i3.Future<_i4.Novel?>);
 
   @override
   _i3.Future<_i4.Novel?> getNovelByUrl(String? novelUrl) => (super.noSuchMethod(

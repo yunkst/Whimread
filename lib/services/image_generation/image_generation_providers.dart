@@ -8,28 +8,40 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/database_providers.dart' show databaseConnectionProvider;
-import '../../core/providers/services/network_service_providers.dart' show apiServiceWrapperProvider;
 import '../../models/image_model.dart';
 import '../media/media_proxy.dart';
+import '../local_dream_embedded/engine_manager.dart';
 import 'image_generation_backend.dart';
 import 'local_dream_backend.dart';
+import 'local_dream_embedded_backend.dart';
 import 'local_sd_backend.dart';
 
 /// 本地 sd.cpp 后端 Provider（阶段 B：FFI 真实现；签名与阶段 A 一致）
 final localSdCppBackendProvider = Provider<LocalSdCppBackend>((ref) {
   final dbConn = ref.watch(databaseConnectionProvider);
-  final api = ref.watch(apiServiceWrapperProvider);
   return LocalSdCppBackend(
-    mediaProxy: MediaProxy(dbConn: dbConn, api: api),
+    mediaProxy: MediaProxy(dbConn: dbConn),
   );
 });
 
 /// Local Dream 远程设备后端 Provider
 final localDreamBackendProvider = Provider<LocalDreamBackend>((ref) {
   final dbConn = ref.watch(databaseConnectionProvider);
-  final api = ref.watch(apiServiceWrapperProvider);
   return LocalDreamBackend(
-    mediaProxy: MediaProxy(dbConn: dbConn, api: api),
+    mediaProxy: MediaProxy(dbConn: dbConn),
+  );
+});
+
+/// Local Dream 嵌入式引擎后端 Provider（引擎子进程全局单例）
+final localDreamEmbeddedEngineManagerProvider =
+    Provider<LocalDreamEngineManager>((ref) => LocalDreamEngineManager());
+
+final localDreamEmbeddedBackendProvider = Provider<LocalDreamEmbeddedBackend>(
+    (ref) {
+  final dbConn = ref.watch(databaseConnectionProvider);
+  return LocalDreamEmbeddedBackend(
+    mediaProxy: MediaProxy(dbConn: dbConn),
+    engineManager: ref.watch(localDreamEmbeddedEngineManagerProvider),
   );
 });
 
@@ -39,6 +51,8 @@ final imageGenerationBackendsProvider =
   return {
     ImageModelBackendType.localSd: ref.watch(localSdCppBackendProvider),
     ImageModelBackendType.localDream: ref.watch(localDreamBackendProvider),
+    ImageModelBackendType.localDreamEmbedded:
+        ref.watch(localDreamEmbeddedBackendProvider),
   };
 });
 

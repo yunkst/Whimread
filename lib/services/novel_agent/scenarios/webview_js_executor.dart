@@ -237,9 +237,11 @@ class WebViewJsExecutor {
   /// Agent 生成的脚本有两种格式：
   ///   1. async IIFE: `(async function() { ... })()` → 提取内部函数体
   ///   2. 同步 IIFE: `(function() { ... })()` → 提取内部函数体
-  ///   3. 非包裹的函数体 → 原样返回（兼容）
+  ///   3. 非包裹的函数体 → 原样保留（兼容）
   ///
   /// 返回的函数体首部注入同源守卫前导（[buildSandboxPreamble]）。
+  /// 所有路径（含回退）都必须注入：守卫是运行时唯一的网络出口拦截，
+  /// 漏注入等于沙箱旁路。
   static String extractAsyncFunctionBody(String script) {
     final trimmed = script.trim();
 
@@ -249,11 +251,11 @@ class WebViewJsExecutor {
       r'^\(\s*(?:async\s+)?function\s*\([^)]*\)\s*\{',
     );
     final match = iifePattern.firstMatch(trimmed);
-    if (match == null) return script;
+    if (match == null) return buildSandboxPreamble() + trimmed;
 
     // 找到第一个 { 的位置
     final firstBrace = trimmed.indexOf('{', match.start);
-    if (firstBrace == -1) return script;
+    if (firstBrace == -1) return buildSandboxPreamble() + trimmed;
 
     // 找到匹配的最后一个 }（去掉末尾的 )()
     var depth = 0;
@@ -270,7 +272,7 @@ class WebViewJsExecutor {
       }
     }
 
-    if (lastBrace == -1) return script;
+    if (lastBrace == -1) return buildSandboxPreamble() + trimmed;
 
     // 提取 { } 之间的内容（去掉外层花括号），首部注入同源守卫前导
     final body = trimmed.substring(firstBrace + 1, lastBrace).trim();

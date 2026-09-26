@@ -147,30 +147,6 @@ class ToolArgParser {
   // 列表参数
   // ══════════════════════════════════════
 
-  /// 提取可选 int 列表参数
-  ///
-  /// - 缺失或 null → (null, null)
-  /// - List → 逐项转 int（double 自动 toInt，String 数字尝试解析）
-  /// - 非 List 类型 → (null, error)
-  /// 容错：列表中无法解析的项会被跳过，不会整列表失败。
-  (List<int>?, String?) optionalIntList(String key) {
-    if (!args.containsKey(key) || args[key] == null) return (null, null);
-    final v = args[key];
-    if (v is! List) return (null, _typeError(key, 'array', v.runtimeType));
-    final result = <int>[];
-    for (final item in v) {
-      if (item is int) {
-        result.add(item);
-      } else if (item is double) {
-        result.add(item.toInt());
-      } else if (item is String) {
-        final parsed = int.tryParse(item);
-        if (parsed != null) result.add(parsed);
-      }
-    }
-    return (result, null);
-  }
-
   /// 提取可选 String 列表参数
   ///
   /// - 缺失或 null → (null, null)

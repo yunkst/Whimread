@@ -9,6 +9,9 @@
 /// ref.invalidate 刷新（与 characterListProvider 同款刷新约定）。
 library;
 
+import 'dart:io' show Platform;
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,6 +20,7 @@ import '../../core/providers/image_model_download_providers.dart';
 import '../../core/providers/image_model_providers.dart';
 import '../../models/image_model.dart';
 import '../../services/image_model_import_service.dart';
+import '../../services/local_dream_embedded/model_pack.dart';
 import '../../services/logger_service.dart';
 import '../../utils/format_utils.dart';
 import '../../utils/toast_utils.dart';
@@ -24,6 +28,7 @@ import '../../widgets/common/common_widgets.dart';
 import '../../widgets/empty_states/empty_state_view.dart';
 import 'image_model/dialogs/image_model_edit_dialog.dart';
 import 'image_model/dialogs/local_dream_model_dialog.dart';
+import 'image_model/local_dream_pack_download_screen.dart';
 
 class ImageModelManagementScreen extends ConsumerWidget {
   const ImageModelManagementScreen({super.key});
@@ -59,6 +64,11 @@ class ImageModelManagementScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            onPressed: () => _showPackMenu(context, ref),
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Local Dream 模型包（下载/导入）',
+          ),
           IconButton(
             onPressed: () => _addRemoteModel(context, ref),
             icon: const Icon(Icons.phonelink_setup_outlined),
@@ -109,6 +119,103 @@ class ImageModelManagementScreen extends ConsumerWidget {
 
   static Set<String> _nameSet(List<ImageModel> all, ImageModel exclude) =>
       {for (final m in all) if (m.id != exclude.id) m.name};
+
+  /// Local Dream 模型包入口：下载（内置目录/manifest）或从目录导入
+  Future<void> _showPackMenu(BuildContext context, WidgetRef ref) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.cloud_download_outlined),
+              title: const Text('下载模型包'),
+              subtitle: const Text('从内置目录或自定义 manifest 下载'),
+              onTap: () => Navigator.pop(sheetContext, 'download'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_outlined),
+              title: const Text('从目录导入模型包'),
+              subtitle: const Text('已在本机有 Local Dream 模型文件时使用'),
+              onTap: () => Navigator.pop(sheetContext, 'import'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'download' && context.mounted) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const LocalDreamPackDownloadScreen(),
+        ),
+      );
+    } else if (action == 'import' && context.mounted) {
+      await _importPack(context, ref);
+    }
+  }
+
+  /// 导入 Local Dream 模型包目录（选类型 → SAF 选目录 → 拷贝校验落库）
+  Future<void> _importPack(BuildContext context, WidgetRef ref) async {
+    // 1. 选包类型（sd15cpu 与 sd15npu 文件相同，无法从内容推断）
+    final type = await showModalBottomSheet<LocalDreamPackType>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('选择模型包类型',
+                  style: Theme.of(sheetContext).textTheme.titleMedium),
+            ),
+            ...LocalDreamPackType.values.map(
+              (t) => ListTile(
+                title: Text(t.label),
+                subtitle: Text(
+                    '必需文件 ${t.requiredFiles.length} 个'
+                    '${t == LocalDreamPackType.sdxl ? ' · 需骁龙 8 Gen 3+' : t == LocalDreamPackType.sd15Npu ? ' · 需骁龙 NPU (V68+)' : ' · CPU 兜底'}'),
+                onTap: () => Navigator.pop(sheetContext, t),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (type == null || !context.mounted) return;
+
+    // 2. 选目录
+    final sourceDirPath = await FilePicker.getDirectoryPath(
+      dialogTitle: '选择 Local Dream 模型包目录（将复制文件）',
+    );
+    if (sourceDirPath == null || !context.mounted) return;
+
+    // 3. 拷贝必需文件到包目录（建行/拷贝/v3/config 合并/置状态都在服务层）
+    final downloader = ref.read(localDreamPackDownloaderProvider);
+    try {
+      final dirName = sourceDirPath
+          .split(Platform.pathSeparator)
+          .where((s) => s.isNotEmpty)
+          .last;
+      final result = await downloader.importPackDirectory(
+        type: type,
+        sourceDir: sourceDirPath,
+        displayName: dirName,
+      );
+      ref.invalidate(imageModelLifecycleProvider);
+      if (!context.mounted) return;
+      if (result.row.status == ImageModelStatus.ready) {
+        ToastUtils.showSuccess('已导入「${result.row.name}」', context: context);
+      } else {
+        ToastUtils.showError('导入失败：${result.row.errorMessage}', context: context);
+      }
+    } catch (e) {
+      LoggerService.instance.e('导入模型包失败: $e',
+          category: LogCategory.ai, tags: ['local_dream_pack', 'import']);
+      if (context.mounted) ToastUtils.showError('导入失败：$e', context: context);
+    }
+  }
 
   /// 添加 Local Dream 设备模型：填设备地址 → 拉取设备模型列表选择 → 落库
   Future<void> _addRemoteModel(BuildContext context, WidgetRef ref) async {
@@ -341,9 +448,15 @@ class _ModelCard extends ConsumerWidget {
             const SizedBox(height: 8),
             if (isReady)
               Text(
-                model.backendType == ImageModelBackendType.localDream
-                    ? 'Local Dream 设备 · ${model.remoteHost} · ${model.remoteModelId}'
-                    : '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
+                switch (model.backendType) {
+                  ImageModelBackendType.localDreamEmbedded =>
+                    'Local Dream 本机引擎 · ${_packTypeLabel(model)} · '
+                        '${_packFileCount(model)} 个文件',
+                  ImageModelBackendType.localDream =>
+                    'Local Dream 设备 · ${model.remoteHost} · ${model.remoteModelId}',
+                  _ =>
+                    '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
+                },
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
@@ -409,9 +522,14 @@ class _ModelCard extends ConsumerWidget {
           PopupMenuItem(value: 'delete', child: Text('删除')),
         ];
       case ImageModelStatus.failed:
-        return const [
-          PopupMenuItem(value: 'retry', child: Text('重试')),
-          PopupMenuItem(value: 'delete', child: Text('删除')),
+        // 目录导入的包（无下载源）重试只会再次失败，应重新导入而非重试
+        final importedPack =
+            model.backendType == ImageModelBackendType.localDreamEmbedded &&
+                model.sourceUrl.isEmpty;
+        return [
+          if (!importedPack)
+            const PopupMenuItem(value: 'retry', child: Text('重试')),
+          const PopupMenuItem(value: 'delete', child: Text('删除')),
         ];
       case ImageModelStatus.ready:
         return [
@@ -433,6 +551,14 @@ class _ModelCard extends ConsumerWidget {
     return idx >= 0 ? path.substring(idx + 1) : path;
   }
 
+  static String _packTypeLabel(ImageModel model) {
+    final type = LocalDreamPackType.parse(model.remoteModelId);
+    return type?.label ?? (model.remoteModelId.isEmpty ? '未知类型' : model.remoteModelId);
+  }
+
+  static int _packFileCount(ImageModel model) =>
+      LocalDreamPackType.parse(model.remoteModelId)?.requiredFiles.length ?? 0;
+
   Widget _chip(BuildContext context, String text, Color color) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
@@ -449,20 +575,33 @@ class _ModelCard extends ConsumerWidget {
       BuildContext context, WidgetRef ref, String action) async {
     final repo = ref.read(imageModelRepositoryProvider);
     final downloadService = ref.read(imageModelDownloadServiceProvider);
+    final packDownloader = ref.read(localDreamPackDownloaderProvider);
+    final isEmbedded =
+        model.backendType == ImageModelBackendType.localDreamEmbedded;
     switch (action) {
       // ===== 生命周期动作 =====
       case 'pause':
-        await downloadService.pause(model.id!);
+        if (isEmbedded) {
+          packDownloader.pause(model.id!);
+        } else {
+          await downloadService.pause(model.id!);
+        }
         ref.invalidate(imageModelLifecycleProvider);
         break;
       case 'resume':
-        await downloadService.resume(model);
+        if (isEmbedded) {
+          await packDownloader.startDownload(model);
+        } else {
+          await downloadService.resume(model);
+        }
         ref.invalidate(imageModelLifecycleProvider);
         break;
       case 'retry':
-        // failed 行按来源分流：有源文件的转换失败 → 重试转换；否则重试下载
-        final src = model.sourceUrl.isNotEmpty;
-        if (src) {
+        // failed 行按来源分流：模型包 → 重跑包下载；有源文件的转换失败 →
+        // 重试转换；否则重试单文件下载
+        if (isEmbedded) {
+          await packDownloader.startDownload(model);
+        } else if (model.sourceUrl.isNotEmpty) {
           await downloadService.resume(model);
         } else {
           await downloadService.retryConversion(model);
@@ -481,10 +620,15 @@ class _ModelCard extends ConsumerWidget {
           isDangerous: true,
         );
         if (confirmed != true) return;
-        // 清理下载/转换临时文件 + 最终模型文件，再删记录
-        await downloadService.cleanupFiles(model.id!);
-        await ImageModelImportService.instance.deleteModelFile(model.filePath);
-        await repo.delete(model.id!);
+        if (isEmbedded) {
+          // 包下载器统一清理：取消任务 + 删包目录 + 删行
+          await packDownloader.cancelAndDelete(model);
+        } else {
+          // 清理下载/转换临时文件 + 最终模型文件，再删记录
+          await downloadService.cleanupFiles(model.id!);
+          await ImageModelImportService.instance.deleteModelFile(model.filePath);
+          await repo.delete(model.id!);
+        }
         ref.invalidate(imageModelLifecycleProvider);
         if (context.mounted) {
           ToastUtils.showSuccess('已删除「${model.name}」', context: context);

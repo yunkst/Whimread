@@ -109,12 +109,8 @@ Dio dio(Ref ref) {
 ///
 /// **使用示例**:
 /// ```dart
-/// // 方式1: 直接使用（已自动初始化）
+/// // 直接使用（已自动初始化）
 /// final apiService = ref.watch(apiServiceWrapperProvider);
-///
-/// // 方式2: 仅获取 Future（异步场景）
-/// final initFuture = ref.watch(apiServiceWrapperInitProvider);
-/// await initFuture;
 /// ```
 ///
 /// **注意事项**:
@@ -138,22 +134,6 @@ ApiServiceWrapper apiServiceWrapper(Ref ref) {
   _initializeApiService(apiService);
 
   return apiService;
-}
-
-/// ApiServiceWrapper 初始化 Provider
-///
-/// 提供 ApiServiceWrapper 的初始化 Future，用于需要等待初始化的场景。
-///
-/// **使用示例**:
-/// ```dart
-/// // 在应用启动时等待初始化
-/// final initFuture = ref.watch(apiServiceWrapperInitProvider);
-/// await initFuture;
-/// ```
-@Riverpod(keepAlive: true)
-Future<void> apiServiceWrapperInit(Ref ref) async {
-  final apiService = ref.watch(apiServiceWrapperProvider);
-  await apiService.init();
 }
 
 /// 异步初始化 ApiServiceWrapper

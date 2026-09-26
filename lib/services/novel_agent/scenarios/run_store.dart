@@ -152,9 +152,6 @@ class RunStore {
   /// 当前记录数
   int get length => _store.length;
 
-  /// 是否有成功执行的条目
-  bool get hasSuccessfulEntries => _store.values.any((e) => e.success);
-
   /// 清空（测试用）
   void clear() {
     _store.clear();

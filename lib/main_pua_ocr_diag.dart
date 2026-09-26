@@ -1,6 +1,8 @@
 /// 诊断：用 TextPainter 渲染 PUA 单字，统计非白像素，验证字体加载 + 文字渲染。
 /// 加黑方块对照，验证 canvas 本身能写入像素。
 /// 用法：flutter run -t lib/main_pua_ocr_diag.dart -d emulator-5554
+library;
+
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;

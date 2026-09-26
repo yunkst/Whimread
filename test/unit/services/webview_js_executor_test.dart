@@ -147,10 +147,14 @@ void main() {
       expect(body, endsWith('return x + y;'));
     });
 
-    test('非 IIFE 格式 → 原样返回', () {
+    test('非 IIFE 格式 → 保留函数体但注入沙箱前导', () {
       const script = "const x = 42; return x;";
       final body = WebViewJsExecutor.extractAsyncFunctionBody(script);
-      expect(body, equals(script));
+      // 兼容路径也必须注入守卫，否则裸函数体即沙箱旁路
+      expect(body, contains('WHIMREAD_SANDBOX'));
+      expect(body.indexOf('WHIMREAD_SANDBOX'), lessThan(body.indexOf('const x')),
+          reason: '守卫前导必须在函数体之前');
+      expect(body, endsWith('const x = 42; return x;'));
     });
 
     test('嵌套花括号 → 正确匹配最外层', () {

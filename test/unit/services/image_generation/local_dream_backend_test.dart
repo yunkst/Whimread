@@ -111,8 +111,7 @@ void main() {
   });
 
   LocalDreamBackend backend(DatabaseConnection dbConn) => LocalDreamBackend(
-        mediaProxy:
-            MediaProxy(dbConn: dbConn, api: ApiServiceWrapper()),
+        mediaProxy: MediaProxy(dbConn: dbConn),
         clientFactory: (host) => LocalDreamClient(
           host: LocalDreamClient.normalizeHost(host),
           controlPort: controlServer.port,
@@ -169,8 +168,7 @@ void main() {
     await socket.close();
     final b = LocalDreamBackend(
       mediaProxy: MediaProxy(
-          dbConn: DatabaseConnection.forTesting(db),
-          api: ApiServiceWrapper()),
+          dbConn: DatabaseConnection.forTesting(db)),
       // 强制指向空闲端口：本机有代理工具劫持回环连接时表现为 HTTP 502，
       // 正常环境表现为连接拒绝，两种失败都必须映射为非 null 的可读文案
       clientFactory: (host) => LocalDreamClient(

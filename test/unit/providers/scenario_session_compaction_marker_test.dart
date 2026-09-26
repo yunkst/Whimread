@@ -15,14 +15,12 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_app/core/providers/agent_chat_providers.dart' show novelAgentServiceProvider;
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/services/dsl_engine/llm_provider.dart' show ChatMessage;
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/novel_agent_service.dart';
-import 'package:novel_app/services/novel_agent/scenarios/writing_scenario.dart' show ScenarioIds;
 
 // ---------------------------------------------------------------------------
 // _SlowCompactionMock — 慢 sendMessage（不立即 complete），让事件流 listener

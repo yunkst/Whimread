@@ -515,11 +515,11 @@ class ContextCompactor {
 
   /// 构建 toolCallId → toolName 索引
   ///
-  /// 复用 `_protectToolPairing` 的回溯模式：对每条 tool 消息，先查正向建好的
-  /// `id → name` 映射（来自所有 assistant.toolCalls）；命中即用，否则回溯找最近的
-  /// 带 toolCalls 的 assistant。找不到则标 `'unknown'`。
+  /// 正向建 `id → name` 映射（来自所有 assistant.toolCalls）；tool 消息的
+  /// toolCallId 命中即用，miss 则标 `'unknown'`——回溯搜索的数据源与正向映射
+  /// 完全同源，miss 后回溯必然也 miss，故不做回溯。
   Map<String, String> _buildToolCallIdIndex(List<ChatMessage> messages) {
-    // 1) 正向建 id → name 映射（assistant 端声明）
+    // 正向建 id → name 映射（assistant 端声明）
     final forward = <String, String>{};
     for (final m in messages) {
       if (m.role == 'assistant' && m.toolCalls != null) {
@@ -530,29 +530,9 @@ class ContextCompactor {
     }
 
     final result = <String, String>{};
-    for (int i = 0; i < messages.length; i++) {
-      final m = messages[i];
+    for (final m in messages) {
       if (m.role != 'tool' || m.toolCallId == null) continue;
-      final id = m.toolCallId!;
-      if (forward.containsKey(id)) {
-        result[id] = forward[id]!;
-        continue;
-      }
-      // 2) 回溯找最近的 assistant(toolCalls)
-      for (int j = i - 1; j >= 0; j--) {
-        final prev = messages[j];
-        if (prev.role == 'assistant' && prev.toolCalls != null) {
-          for (final tc in prev.toolCalls!) {
-            if (tc.id == id) {
-              result[id] = tc.name;
-              break;
-            }
-          }
-          if (result.containsKey(id)) break;
-        }
-      }
-      // 3) 仍找不到：标记 unknown
-      result.putIfAbsent(id, () => 'unknown');
+      result[m.toolCallId!] = forward[m.toolCallId!] ?? 'unknown';
     }
     return result;
   }

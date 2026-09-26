@@ -47,15 +47,6 @@ class AgentToolCall {
 
 enum AgentToolStatus { running, completed, error, rejected }
 
-/// Agent 状态机
-enum AgentState {
-  idle,
-  thinking,
-  executing,
-  done,
-  error,
-}
-
 /// Agent 流式事件（sealed class）
 sealed class AgentEvent {
   /// 运行实例标识。null = 主 Agent 旧路径；非 null = 某次 dispatch_subagent 派出的子 Agent。

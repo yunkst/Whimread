@@ -5,7 +5,6 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 import 'dart:async' as _i6;
 import 'dart:io' as _i7;
-import 'dart:typed_data' as _i9;
 
 import 'package:dio/dio.dart' as _i2;
 import 'package:mockito/mockito.dart' as _i1;
@@ -235,100 +234,6 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
         returnValue: _i6.Future<void>.value(),
         returnValueForMissingStub: _i6.Future<void>.value(),
       ) as _i6.Future<void>);
-
-  @override
-  _i6.Future<List<Map<String, dynamic>>> getText2ImgModels() =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #getText2ImgModels,
-          [],
-        ),
-        returnValue: _i6.Future<List<Map<String, dynamic>>>.value(
-            <Map<String, dynamic>>[]),
-      ) as _i6.Future<List<Map<String, dynamic>>>);
-
-  @override
-  _i6.Future<String> submitText2ImgTask({
-    required String? prompt,
-    String? modelName,
-    String? negativePrompt,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #submitText2ImgTask,
-          [],
-          {
-            #prompt: prompt,
-            #modelName: modelName,
-            #negativePrompt: negativePrompt,
-          },
-        ),
-        returnValue: _i6.Future<String>.value(_i8.dummyValue<String>(
-          this,
-          Invocation.method(
-            #submitText2ImgTask,
-            [],
-            {
-              #prompt: prompt,
-              #modelName: modelName,
-              #negativePrompt: negativePrompt,
-            },
-          ),
-        )),
-      ) as _i6.Future<String>);
-
-  @override
-  _i6.Future<(_i9.Uint8List?, int)> fetchText2ImgImage(String? taskId) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #fetchText2ImgImage,
-          [taskId],
-        ),
-        returnValue: _i6.Future<(_i9.Uint8List?, int)>.value((null, 0)),
-      ) as _i6.Future<(_i9.Uint8List?, int)>);
-
-  @override
-  _i6.Future<String> submitImageToVideoTask({
-    required String? prompt,
-    required _i9.Uint8List? imageBytes,
-    required String? imageFilename,
-    String? modelName,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #submitImageToVideoTask,
-          [],
-          {
-            #prompt: prompt,
-            #imageBytes: imageBytes,
-            #imageFilename: imageFilename,
-            #modelName: modelName,
-          },
-        ),
-        returnValue: _i6.Future<String>.value(_i8.dummyValue<String>(
-          this,
-          Invocation.method(
-            #submitImageToVideoTask,
-            [],
-            {
-              #prompt: prompt,
-              #imageBytes: imageBytes,
-              #imageFilename: imageFilename,
-              #modelName: modelName,
-            },
-          ),
-        )),
-      ) as _i6.Future<String>);
-
-  @override
-  _i6.Future<(_i9.Uint8List?, int)> fetchImageToVideoVideo(String? taskId) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #fetchImageToVideoVideo,
-          [taskId],
-        ),
-        returnValue: _i6.Future<(_i9.Uint8List?, int)>.value((null, 0)),
-      ) as _i6.Future<(_i9.Uint8List?, int)>);
 
   @override
   _i6.Future<List<_i4.RemoteScriptMeta>> searchRemoteScripts(

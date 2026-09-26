@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import '../models/chapter.dart';
 import '../models/chapter_version.dart';
@@ -15,7 +16,7 @@ import '../core/interfaces/repositories/i_paragraph_annotation_repository.dart';
 /// 普通 provider 通过 `IChapterRepository` 类型拿不到写能力 → 编译期阻止绕过
 /// Notifier 直接写库（正是「agent 写完章节列表不刷新」bug 的根因）。
 ///
-/// 12 个原写方法 + 2 个事务方法（[createCustomChapterWithShift] /
+/// 7 个原写方法 + 2 个事务方法（[createCustomChapterWithShift] /
 /// [deleteChapterAndReindex]），事务方法把多次独立 DB 调用合并为单个
 /// `db.transaction`，修原子性缺陷。
 abstract interface class IChapterWriter {
@@ -23,25 +24,19 @@ abstract interface class IChapterWriter {
   Future<int> cacheChapter(String novelUrl, Chapter chapter, String content);
   Future<int> updateChapterContent(String chapterUrl, String content,
       {String source = 'edit'});
-  Future<int> updateChapterContentById(int id, String content);
-  Future<int> deleteChapterCache(String chapterUrl);
   Future<int> deleteCachedChapters(String novelUrl);
 
   // ===== novel_chapters 表（部分跨两表）=====
   Future<void> cacheNovelChapters(String novelUrl, List<Chapter> chapters);
-  Future<int> createCustomChapter(String novelUrl, String title, String content,
-      [int? index]);
   Future<void> updateCustomChapter(
       String chapterUrl, String title, String content);
-  Future<void> deleteCustomChapter(String chapterUrl);
-  Future<void> shiftChapterIndicesFrom(String novelUrl, int fromIndex);
   Future<void> updateChaptersOrder(String novelUrl, List<Chapter> chapters);
   Future<void> markChapterAsRead(String novelUrl, String chapterUrl);
 
   // ===== 事务方法（合并多次独立 DB 调用，原子化）=====
   /// 在 [insertIndex] 位置插入新章节：单事务内先 shift 后续索引 +1 再 insert 两表。
   ///
-  /// 替代调用方「shiftChapterIndicesFrom + createCustomChapter」两次独立事务
+  /// 替代「先 shift 后续索引腾位、再分别 insert 两表」的多次独立事务写法
   /// ——后者若 shift 成功后 insert 失败会留下 chapterIndex 空洞。
   /// [insertIndex] 为 null 时追加到末尾（内部走 MAX+1，无需 shift）。
   Future<int> createCustomChapterWithShift(
@@ -53,8 +48,8 @@ abstract interface class IChapterWriter {
 
   /// 删除章节并把剩余章节的 chapterIndex 连续化：单事务内 delete 两表 + reindex。
   ///
-  /// 替代调用方「deleteCustomChapter + getCachedNovelChapters + cacheNovelChapters
-  /// (remaining)」三步——原子化，避免删除后未重排留下索引缺口。
+  /// 替代「delete 两表 + 重查列表 + 全量重写列表」三步——原子化，
+  /// 避免删除后未重排留下索引缺口。
   Future<void> deleteChapterAndReindex(String novelUrl, String chapterUrl);
 }
 
@@ -101,15 +96,14 @@ class ChapterRepository extends BaseRepository
   /// 批量检查缓存状态，返回未缓存的章节URL列表
   @override
   Future<List<String>> filterUncachedChapters(List<String> chapterUrls) async {
-    final uncached = <String>[];
-
-    for (final url in chapterUrls) {
-      if (!await isChapterCached(url)) {
-        uncached.add(url);
-      }
-    }
-
-    return uncached;
+    // 单次批量查询代替逐 URL 调 isChapterCached（后者未命中时还会
+    // SELECT 整章正文判断存在性，全书预加载场景是 N+1 查询）。
+    // 返回语义保持不变：按入参顺序输出未缓存的 URL 子集，重复项原样保留。
+    final status = await getChaptersCacheStatus(chapterUrls);
+    return [
+      for (final url in chapterUrls)
+        if (status[url] != true) url,
+    ];
   }
 
   /// 批量查询章节缓存状态
@@ -120,20 +114,29 @@ class ChapterRepository extends BaseRepository
 
     try {
       final db = await database;
-      final placeholders = List.filled(chapterUrls.length, '?').join(',');
 
-      final results = await db.rawQuery('''
-        SELECT chapterUrl, 1 as isCached
-        FROM chapter_cache
-        WHERE chapterUrl IN ($placeholders)
-      ''', chapterUrls);
+      // 去重后分批查询：部分设备 SQLite 主机变量上限为 999，全书章节
+      // 一次性 IN 查询可能超限，按 500 一批拆分（去重不影响返回语义）。
+      const batchSize = 500;
+      final uniqueUrls = chapterUrls.toSet().toList();
 
       final Map<String, bool> statusMap = {};
+      for (var i = 0; i < uniqueUrls.length; i += batchSize) {
+        final batchUrls =
+            uniqueUrls.sublist(i, min(i + batchSize, uniqueUrls.length));
+        final placeholders = List.filled(batchUrls.length, '?').join(',');
 
-      for (final row in results) {
-        final chapterUrl = row['chapterUrl'] as String;
-        statusMap[chapterUrl] = true;
-        _addCachedInMemory(chapterUrl);
+        final results = await db.rawQuery('''
+          SELECT chapterUrl
+          FROM chapter_cache
+          WHERE chapterUrl IN ($placeholders)
+        ''', batchUrls);
+
+        for (final row in results) {
+          final chapterUrl = row['chapterUrl'] as String;
+          statusMap[chapterUrl] = true;
+          _addCachedInMemory(chapterUrl);
+        }
       }
 
       for (final url in chapterUrls) {
@@ -264,30 +267,6 @@ class ChapterRepository extends BaseRepository
     });
   }
 
-  /// 删除章节缓存
-  ///
-  /// 同时清理内存缓存、版本历史和段落标注，防止"幻读"
-  @override
-  Future<int> deleteChapterCache(String chapterUrl) async {
-    _removeFromMemoryCache(chapterUrl);
-    // 级联删除版本历史
-    await _versionRepo.deleteVersionsByChapter(chapterUrl);
-    // 级联删除段落标注
-    await _annotationRepo?.deleteByChapter(chapterUrl);
-    final db = await database;
-    final affected = await db.delete(
-      'chapter_cache',
-      where: 'chapterUrl = ?',
-      whereArgs: [chapterUrl],
-    );
-    LoggerService.instance.d(
-      '删除章节缓存: $chapterUrl (affected=$affected)',
-      category: LogCategory.database,
-      tags: ['chapter', 'cache', 'delete'],
-    );
-    return affected;
-  }
-
   /// 获取缓存的章节内容
   @override
   Future<String?> getCachedChapter(String chapterUrl) async {
@@ -302,28 +281,6 @@ class ChapterRepository extends BaseRepository
       return maps.first['content'] as String;
     }
     return null;
-  }
-
-  /// 获取小说的所有缓存章节
-  @override
-  Future<List<Chapter>> getCachedChapters(String novelUrl) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'chapter_cache',
-      where: 'novelUrl = ?',
-      whereArgs: [novelUrl],
-      orderBy: 'chapterIndex ASC',
-    );
-
-    return List.generate(maps.length, (i) {
-      return Chapter(
-        title: maps[i]['title'],
-        url: maps[i]['chapterUrl'],
-        content: maps[i]['content'],
-        isCached: true,
-        chapterIndex: maps[i]['chapterIndex'],
-      );
-    });
   }
 
   /// 删除小说的所有缓存章节
@@ -465,120 +422,6 @@ class ChapterRepository extends BaseRepository
         chapterUrl.startsWith('user_chapter_');
   }
 
-  /// 创建用户自定义章节
-  ///
-  /// 使用事务保证两表写入的原子性，同时更新内存缓存
-  @override
-  Future<int> createCustomChapter(String novelUrl, String title, String content,
-      [int? index]) async {
-    final db = await database;
-
-    // 如果提供了index,使用提供的index;否则使用最大索引+1
-    late final int chapterIndex;
-    if (index != null) {
-      chapterIndex = index;
-    } else {
-      final result = await db.rawQuery(
-        'SELECT MAX(chapterIndex) as maxIndex FROM novel_chapters WHERE novelUrl = ?',
-        [novelUrl],
-      );
-      chapterIndex =
-          result.isNotEmpty ? (result.first['maxIndex'] as int? ?? 0) : 0;
-    }
-
-    final chapterUrl =
-        'custom://chapter/${DateTime.now().millisecondsSinceEpoch}';
-
-    late final int ncId;
-    try {
-      // 使用事务保证两表写入的原子性
-      await db.transaction((txn) async {
-        ncId = await txn.insert(
-          'novel_chapters',
-          {
-            'novelUrl': novelUrl,
-            'chapterUrl': chapterUrl,
-            'title': title,
-            'chapterIndex': chapterIndex,
-            'isUserInserted': 1,
-            'insertedAt': DateTime.now().millisecondsSinceEpoch,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-
-        await txn.insert(
-          'chapter_cache',
-          {
-            'novelUrl': novelUrl,
-            'chapterUrl': chapterUrl,
-            'title': title,
-            'content': content,
-            'chapterIndex': chapterIndex,
-            'cachedAt': DateTime.now().millisecondsSinceEpoch,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '创建自定义章节失败: novelUrl=$novelUrl title=$title - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'custom', 'create', 'failed'],
-      );
-      rethrow;
-    }
-
-    // 写入成功后同步更新内存缓存
-    _addCachedInMemory(chapterUrl);
-    LoggerService.instance.i(
-      '创建自定义章节: $chapterUrl (index=$chapterIndex)',
-      category: LogCategory.database,
-      tags: ['chapter', 'custom', 'create', 'success'],
-    );
-
-    return ncId;
-  }
-
-  /// 将指定小说中 chapterIndex >= [fromIndex] 的所有章节的 chapterIndex +1
-  ///
-  /// 用于 create_custom_chapter 在指定位置插入新章节时，
-  /// 为新章节腾出 chapterIndex 空间，确保 list_chapters 排序正确。
-  /// 同时更新 novel_chapters 和 chapter_cache 两张表。
-  @override
-  Future<void> shiftChapterIndicesFrom(String novelUrl, int fromIndex) async {
-    try {
-      final db = await database;
-      await db.transaction((txn) async {
-        // novel_chapters 表
-        await txn.rawUpdate(
-          'UPDATE novel_chapters SET chapterIndex = chapterIndex + 1 '
-          'WHERE novelUrl = ? AND chapterIndex >= ?',
-          [novelUrl, fromIndex],
-        );
-        // chapter_cache 表
-        await txn.rawUpdate(
-          'UPDATE chapter_cache SET chapterIndex = chapterIndex + 1 '
-          'WHERE novelUrl = ? AND chapterIndex >= ?',
-          [novelUrl, fromIndex],
-        );
-      });
-      LoggerService.instance.i(
-        '调整章节索引: novelUrl=$novelUrl fromIndex=$fromIndex',
-        category: LogCategory.database,
-        tags: ['chapter', 'shift_index', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '调整章节索引失败: novelUrl=$novelUrl fromIndex=$fromIndex - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'shift_index', 'failed'],
-      );
-      rethrow;
-    }
-  }
-
   /// 更新用户创建的章节内容
   ///
   /// 跨 novel_chapters 与 chapter_cache 两表更新，使用事务保证原子性：
@@ -611,36 +454,6 @@ class ChapterRepository extends BaseRepository
       '更新自定义章节: $chapterUrl',
       category: LogCategory.database,
       tags: ['chapter', 'custom', 'update', 'success'],
-    );
-  }
-
-  /// 删除用户创建的章节
-  ///
-  /// 跨 novel_chapters 与 chapter_cache 两表删除，使用事务保证原子性：
-  /// 任一表删除失败则整体回滚，避免出现章节元数据已删但缓存内容残留的不一致状态。
-  @override
-  Future<void> deleteCustomChapter(String chapterUrl) async {
-    final db = await database;
-
-    await db.transaction((txn) async {
-      await txn.delete(
-        'novel_chapters',
-        where: 'chapterUrl = ?',
-        whereArgs: [chapterUrl],
-      );
-
-      await txn.delete(
-        'chapter_cache',
-        where: 'chapterUrl = ?',
-        whereArgs: [chapterUrl],
-      );
-    });
-
-    _removeFromMemoryCache(chapterUrl);
-    LoggerService.instance.i(
-      '删除自定义章节: $chapterUrl',
-      category: LogCategory.database,
-      tags: ['chapter', 'custom', 'delete', 'success'],
     );
   }
 
@@ -865,70 +678,6 @@ class ChapterRepository extends BaseRepository
     }
   }
 
-  // ========== ID-based 查询方法（Agent 工具用） ==========
-
-  /// 根据 ID 查询章节（JOIN 两表获取完整信息）
-  @override
-  Future<Chapter?> getChapterById(int id) async {
-    final db = await database;
-    final maps = await db.rawQuery('''
-      SELECT
-        nc.id, nc.novelUrl, nc.chapterUrl, nc.title,
-        nc.chapterIndex, nc.isUserInserted, nc.readAt,
-        cc.content
-      FROM novel_chapters nc
-      LEFT JOIN chapter_cache cc ON nc.chapterUrl = cc.chapterUrl
-      WHERE nc.id = ?
-    ''', [id]);
-    if (maps.isEmpty) return null;
-    return Chapter(
-      id: maps.first['id'] as int?,
-      title: maps.first['title'] as String,
-      url: maps.first['chapterUrl'] as String,
-      content: maps.first['content'] as String?,
-      isCached: maps.first['content'] != null,
-      chapterIndex: maps.first['chapterIndex'] as int?,
-      isUserInserted: (maps.first['isUserInserted'] as int?) == 1,
-      readAt: maps.first['readAt'] as int?,
-      isAccompanied: false,
-    );
-  }
-
-  /// 根据 ID 获取章节 URL（内部 ID→URL 解析用）
-  @override
-  Future<String?> getChapterUrlById(int id) async {
-    final db = await database;
-    final maps = await db.query(
-      'novel_chapters',
-      columns: ['chapterUrl'],
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isEmpty) return null;
-    return maps.first['chapterUrl'] as String;
-  }
-
-  /// 根据 ID 检查章节是否存在
-  @override
-  Future<bool> chapterExistsById(int id) async {
-    final db = await database;
-    final maps = await db.query(
-      'novel_chapters',
-      columns: ['id'],
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    return maps.isNotEmpty;
-  }
-
-  /// 根据 ID 更新章节内容（解析 URL 后委托 updateChapterContent）
-  @override
-  Future<int> updateChapterContentById(int id, String content) async {
-    final chapterUrl = await getChapterUrlById(id);
-    if (chapterUrl == null) return 0;
-    return updateChapterContent(chapterUrl, content);
-  }
-
   /// 事务：shift 后续索引 + insert 两表。
   ///
   /// [insertIndex] 为 null 时追加到末尾（MAX+1，无需 shift）；
@@ -1080,19 +829,5 @@ class ChapterRepository extends BaseRepository
       );
       rethrow;
     }
-  }
-
-  /// 根据 URL 获取章节 ID（搜索结果用）
-  @override
-  Future<int?> getChapterIdByUrl(String url) async {
-    final db = await database;
-    final maps = await db.query(
-      'novel_chapters',
-      columns: ['id'],
-      where: 'chapterUrl = ?',
-      whereArgs: [url],
-    );
-    if (maps.isEmpty) return null;
-    return maps.first['id'] as int;
   }
 }

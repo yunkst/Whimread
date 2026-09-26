@@ -414,10 +414,6 @@ class PreloadService {
   List<PreloadTask> getQueueSnapshot() =>
       List<PreloadTask>.unmodifiable(_queue);
 
-  /// 获取已入队去重快照（与队列快照一致；保留 API 兼容）
-  List<PreloadTask> getEnqueuedSnapshot() =>
-      List<PreloadTask>.unmodifiable(_queue);
-
   /// 获取已处理（成功）历史快照，最新在前
   List<PreloadHistoryEntry> getProcessedHistory() =>
       List.unmodifiable(_processedHistory);

@@ -35,12 +35,6 @@ abstract class IChapterVersionRepository {
   /// 返回受影响行数
   Future<int> deleteVersion(int id);
 
-  /// 删除指定章节的所有版本（级联删除用）
-  ///
-  /// [chapterUrl] 章节URL
-  /// 返回受影响行数
-  Future<int> deleteVersionsByChapter(String chapterUrl);
-
   /// 删除指定小说所有章节的版本（级联删除用）
   ///
   /// [novelUrl] 小说URL

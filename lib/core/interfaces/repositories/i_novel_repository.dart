@@ -70,12 +70,6 @@ abstract class INovelRepository {
   /// 返回章节索引，如果不存在则返回0
   Future<int> getLastReadChapter(String novelUrl);
 
-  /// 根据 title 查找小说
-  ///
-  /// [title] 小说标题
-  /// 返回小说对象，如果不存在则返回null
-  Future<Novel?> getNovelByTitle(String title);
-
   /// 根据 URL 查找小说
   ///
   /// [novelUrl] 小说 URL（唯一标识）

@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 50;
+  static const int currentVersion = 51;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -1042,6 +1042,25 @@ class DatabaseMigrations {
             db, 'idx_character_images_character', 'character_images', 'characterId');
         _log('迁移 v49 → v50: 新建 character_images 表（角色图集）');
         break;
+
+      // ========== 版本 51：清理死表与遗留媒体来源 ==========
+      // chat_scenes（v10）/ prompt_history（v22）/ prompt_tag_history（v28）
+      // 建表后业务代码从未读写（模型与仓储均已移除），属死表，统一 DROP。
+      // 唯一索引随表删除，无需单独处理。
+      case 51:
+        await db.execute('DROP TABLE IF EXISTS chat_scenes');
+        await db.execute('DROP TABLE IF EXISTS prompt_history');
+        await db.execute('DROP TABLE IF EXISTS prompt_tag_history');
+        // text2img / image_to_video 回源端点已随 ComfyUI 后端下线，
+        // 存量记录归一为 local_upload（不可回源语义），与 MediaSource
+        // 枚举瘦身配套（api_service_wrapper 的两个 fetch 方法已删）。
+        await db.execute(
+          "UPDATE media_items SET source = 'local_upload' "
+          "WHERE source IN ('text2img', 'image_to_video')",
+        );
+        _log('迁移 v50 → v51: 清理死表 chat_scenes/prompt_history/prompt_tag_history'
+            '，media_items 遗留来源归一为 local_upload');
+        break;
     }
   }
 
@@ -1049,9 +1068,10 @@ class DatabaseMigrations {
 
   /// 修复数据库：重新执行 v1→currentVersion 所有迁移
   ///
-  /// 非破坏性操作，仅补全缺失的表/列/索引，不会删除现有数据。
-  /// 适用于数据库损坏、缺少表或列的修复场景。
-  /// 因为所有迁移都是幂等的，可以安全地重复执行。
+  /// 非破坏性操作，仅补全缺失的表/列/索引。适用于数据库损坏、缺少表或
+  /// 列的修复场景。因为所有迁移都是幂等的，可以安全地重复执行。
+  /// 例外：v51 会 DROP 死表（chat_scenes/prompt_history/prompt_tag_history）
+  /// 并归一 media_items 遗留来源——这些表本就无业务数据，重复执行无副作用。
   static Future<void> repair(Database db) async {
     _log('开始数据库修复（检查并补全缺失的表/列/索引）...');
     await upgrade(db, 1, currentVersion);

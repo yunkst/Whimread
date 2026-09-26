@@ -29,8 +29,8 @@ import 'package:novel_app/repositories/chapter_repository.dart';
 
 /// `IChapterWriter` 是 `chapter_repository.dart` 内部定义的 abstract interface，
 /// Mockito `mockBuilder` 无法索引到（同 `_FakeBookshelfWriter` 的理由）。
-/// 手写最小 fake：Notifier 实际调用的 7 个方法计数 + 记录入参 + 可选一次性抛异常；
-/// 其余 7 个方法空实现（Notifier 不调用）。
+/// 手写最小 fake：Notifier 实际调用的方法计数 + 记录入参 + 可选一次性抛异常；
+/// 其余方法空实现（Notifier 不调用）。
 class _FakeChapterWriter implements IChapterWriter {
   int updateChapterContentCalls = 0;
   int deleteCachedChaptersCalls = 0;
@@ -137,27 +137,11 @@ class _FakeChapterWriter implements IChapterWriter {
     lastMarkRead = (novelUrl: novelUrl, chapterUrl: chapterUrl);
   }
 
-  // ===== Notifier 不调用的 7 个方法（空实现，满足接口）=====
-
-  @override
-  Future<int> updateChapterContentById(int id, String content) async => 0;
-
-  @override
-  Future<int> deleteChapterCache(String chapterUrl) async => 0;
-
-  @override
-  Future<int> createCustomChapter(String novelUrl, String title, String content,
-      [int? index]) async => 0;
+  // ===== Notifier 不调用的方法（空实现，满足接口）=====
 
   @override
   Future<void> updateCustomChapter(
       String chapterUrl, String title, String content) async {}
-
-  @override
-  Future<void> deleteCustomChapter(String chapterUrl) async {}
-
-  @override
-  Future<void> shiftChapterIndicesFrom(String novelUrl, int fromIndex) async {}
 }
 
 void main() {

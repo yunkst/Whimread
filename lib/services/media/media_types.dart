@@ -26,41 +26,19 @@ enum MediaKind {
       ext == 'mp4' ? MediaKind.video : MediaKind.image;
 }
 
-/// 媒体来源 — 决定回源端点；localUpload 不回源。
+/// 媒体来源 — localUpload 不回源。
+///
+/// 历史上的 text2img/imageToVideo 回源端点已随 ComfyUI 后端下线，
+/// v51 迁移把存量记录归一为 local_upload，枚举随之瘦身。
 enum MediaSource {
-  /// 文生图：回源 GET /api/text2img/image/{mediaId}
-  text2img,
-
-  /// 图生视频：回源 GET /api/image-to-video/video/{mediaId}
-  imageToVideo,
-
   /// 用户上传：仅本地，不回源，不可被"清空可回源缓存"批量删除
   localUpload;
 
   /// 数据库 source 列名
-  String get dbName {
-    switch (this) {
-      case MediaSource.text2img:
-        return 'text2img';
-      case MediaSource.imageToVideo:
-        return 'image_to_video';
-      case MediaSource.localUpload:
-        return 'local_upload';
-    }
-  }
+  String get dbName => 'local_upload';
 
-  static MediaSource fromDbName(String name) {
-    switch (name) {
-      case 'text2img':
-        return MediaSource.text2img;
-      case 'image_to_video':
-        return MediaSource.imageToVideo;
-      case 'local_upload':
-        return MediaSource.localUpload;
-      default:
-        return MediaSource.localUpload;
-    }
-  }
+  /// 未知的存量来源（如历史 text2img/image_to_video 行）按不可回源处理
+  static MediaSource fromDbName(String name) => MediaSource.localUpload;
 }
 
 /// MediaStore.listAll 返回项（缓存管理页用）

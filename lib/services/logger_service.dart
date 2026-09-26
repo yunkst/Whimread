@@ -75,30 +75,6 @@ enum LogCategory {
   const LogCategory(this.key, this.label);
 }
 
-/// 日志统计数据
-class LogStatistics {
-  /// 总日志数
-  final int total;
-
-  /// 各级别日志数量
-  final Map<LogLevel, int> byLevel;
-
-  /// 各分类日志数量
-  final Map<LogCategory, int> byCategory;
-
-  /// 各级别占比
-  Map<LogLevel, double> get levelPercentage {
-    if (total == 0) return {};
-    return byLevel.map((level, count) => MapEntry(level, count / total));
-  }
-
-  const LogStatistics({
-    required this.total,
-    required this.byLevel,
-    required this.byCategory,
-  });
-}
-
 /// 日志条目模型
 ///
 /// 用于存储单条日志记录，包含时间戳、级别、消息和堆栈信息。
@@ -220,14 +196,6 @@ class LogEntry {
 ///
 /// // 按分类获取
 /// final dbLogs = LoggerService.instance.getLogsByCategory(LogCategory.database);
-///
-/// // 按标签获取
-/// final apiLogs = LoggerService.instance.getLogsByTag('api');
-///
-/// // 获取统计信息
-/// final stats = LoggerService.instance.getStatistics();
-/// print('总日志: ${stats.total}');
-/// print('错误占比: ${stats.levelPercentage[LogLevel.error]}');
 ///
 /// // 清空日志
 /// await LoggerService.instance.clearLogs();
@@ -484,18 +452,6 @@ class LoggerService {
     _reporterCallback = null;
   }
 
-  /// 获取指定级别及以上的日志（供上报服务初始化时补齐已累积的日志）
-  List<LogEntry> getLogsAboveLevel(LogLevel level) {
-    return _logs.where((log) => log.level.index >= level.index).toList();
-  }
-
-  /// 删除指定时间之前的日志
-  Future<void> removeLogsBefore(DateTime cutoff) async {
-    _logs.removeWhere((log) => log.timestamp.isBefore(cutoff));
-    await _persistLogs();
-    logChangeNotifier.value++;
-  }
-
   /// 调度持久化任务
   void _schedulePersist() {
     _pendingPersist = true;
@@ -605,19 +561,6 @@ class LoggerService {
     return _logs.where((log) => log.category == category).toList();
   }
 
-  /// 按标签获取日志
-  ///
-  /// 参数：
-  /// - [tag] 标签名称（不区分大小写）
-  ///
-  /// 返回包含该标签的所有日志
-  List<LogEntry> getLogsByTag(String tag) {
-    final lowerTag = tag.toLowerCase();
-    return _logs.where((log) {
-      return log.tags.any((t) => t.toLowerCase() == lowerTag);
-    }).toList();
-  }
-
   /// 清空所有日志
   ///
   /// 清空内存队列和SharedPreferences中的所有日志。
@@ -627,37 +570,6 @@ class LoggerService {
     await _persistLogs();
     // 通知监听器日志已清空
     logChangeNotifier.value++;
-  }
-
-  /// 获取当前日志数量
-  ///
-  /// 返回内存队列中的日志条数。
-  int get logCount => _logs.length;
-
-  /// 获取日志统计信息
-  LogStatistics getStatistics() {
-    final byLevel = <LogLevel, int>{};
-    final byCategory = <LogCategory, int>{};
-
-    // 初始化计数器
-    for (final level in LogLevel.values) {
-      byLevel[level] = 0;
-    }
-    for (final category in LogCategory.values) {
-      byCategory[category] = 0;
-    }
-
-    // 统计
-    for (final log in _logs) {
-      byLevel[log.level] = byLevel[log.level]! + 1;
-      byCategory[log.category] = byCategory[log.category]! + 1;
-    }
-
-    return LogStatistics(
-      total: _logs.length,
-      byLevel: byLevel,
-      byCategory: byCategory,
-    );
   }
 
   /// 导出日志到文件

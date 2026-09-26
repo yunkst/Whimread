@@ -3,12 +3,10 @@
 /// - currentChatSessionIdProvider: 某场景当前选中的会话 id（按场景隔离，
 ///   null 表示该场景还没选）
 /// - chatSessionsByScenarioProvider: 某 scenario 下所有会话的列表
-/// - chatMessagesBySessionProvider: 某 session 所有消息的列表
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../models/chat_message_record.dart';
 import '../../models/chat_session.dart';
 import 'database_providers.dart';
 
@@ -27,14 +25,4 @@ final chatSessionsByScenarioProvider =
     FutureProvider.family<List<ChatSession>, String>((ref, scenarioId) async {
   final repo = ref.watch(chatSessionRepositoryProvider);
   return repo.listSessionsByScenario(scenarioId);
-});
-
-/// 列出某 session 的全部消息（按 orderIndex ASC）
-///
-/// 注：当前持久化流程在 user 刚发出 / agent 刚完成时分别落库，
-/// 列表刷新主要被 UI 「切换 session」时调用。
-final chatMessagesBySessionProvider =
-    FutureProvider.family<List<ChatMessageRecord>, int>((ref, sessionId) async {
-  final repo = ref.watch(chatSessionRepositoryProvider);
-  return repo.listMessages(sessionId);
 });

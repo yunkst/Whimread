@@ -106,8 +106,20 @@ class MediaExecutor with ToolExecutorHelpers {
     if (modelNameErr != null) return modelNameErr;
     final (characterName, characterErr) = parser.nullableString('character');
     if (characterErr != null) return characterErr;
+    final (aspectRatio, aspectErr) = parser.nullableString('aspect_ratio');
+    if (aspectErr != null) return aspectErr;
 
     final count = (countRaw ?? 1).clamp(1, 4);
+    // 比例预设合法性校验（Local Dream 同款快捷项 + 任意 w:h）
+    if (aspectRatio != null && aspectRatio.isNotEmpty) {
+      final match = RegExp(r'^\s*\d{1,4}\s*:\s*\d{1,4}\s*$').hasMatch(aspectRatio);
+      if (!match) {
+        return jsonEncode(guidanceError(
+          'invalid_aspect_ratio',
+          'aspect_ratio 需为 "宽:高" 格式的比例（如 "1:1"、"3:4"、"16:9"）。',
+        ));
+      }
+    }
 
     // ---------- 角色图集关联（可选） ----------
     final characterRepo = ref.read(characterRepositoryProvider);
@@ -172,6 +184,9 @@ class MediaExecutor with ToolExecutorHelpers {
           prompt: prompt,
           negativePrompt: negativePrompt,
           count: count,
+          aspectRatio: (aspectRatio == null || aspectRatio.isEmpty)
+              ? null
+              : aspectRatio,
         ),
       );
 

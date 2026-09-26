@@ -50,12 +50,6 @@ abstract class IChapterRepository {
   /// 返回章节内容，如果不存在则返回null
   Future<String?> getCachedChapter(String chapterUrl);
 
-  /// 获取小说的所有缓存章节
-  ///
-  /// [novelUrl] 小说的URL
-  /// 返回章节列表，按章节索引升序排列
-  Future<List<Chapter>> getCachedChapters(String novelUrl);
-
   // ========== 章节列表查询 ==========
 
   /// 获取缓存的章节列表
@@ -101,29 +95,4 @@ abstract class IChapterRepository {
     String? novelUrl,
   });
 
-  // ========== ID-based 查询方法（Agent 工具用） ==========
-
-  /// 根据 ID 查询章节（JOIN 两表获取完整信息）
-  ///
-  /// [id] novel_chapters.id
-  /// 返回 Chapter 对象，不存在则返回 null
-  Future<Chapter?> getChapterById(int id);
-
-  /// 根据 ID 获取章节 URL（内部 ID→URL 解析用）
-  ///
-  /// [id] novel_chapters.id
-  /// 返回 chapterUrl，不存在则返回 null
-  Future<String?> getChapterUrlById(int id);
-
-  /// 根据 ID 检查章节是否存在
-  ///
-  /// [id] novel_chapters.id
-  /// 返回是否存在的布尔值
-  Future<bool> chapterExistsById(int id);
-
-  /// 根据 URL 获取章节 ID（搜索结果用）
-  ///
-  /// [url] chapterUrl
-  /// 返回 novel_chapters.id，不存在则返回 null
-  Future<int?> getChapterIdByUrl(String url);
 }

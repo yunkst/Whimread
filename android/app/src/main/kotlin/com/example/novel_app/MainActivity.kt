@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -16,6 +17,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val APP_INSTALL_CHANNEL = "com.example.novel_app/app_install"
     private val DEVICE_CHANNEL = "com.example.novel_app/device"
+    private val ENGINE_CHANNEL = "com.example.novel_app/engine"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -33,6 +35,42 @@ class MainActivity : FlutterActivity() {
                 "sign" -> DeviceAttestation.signChallenge(call, result)
                 "hasKey" -> result.success(DeviceAttestation.hasKey())
                 "androidId" -> result.success(DeviceAttestation.getAndroidId(this))
+                else -> result.notImplemented()
+            }
+        }
+
+        // Local Dream 嵌入式引擎 Channel：Dart 侧 spawn 子进程需要
+        // nativeLibraryDir（Android 10+ W^X 只允许执行该目录下的二进制）；
+        // prepareQnnLibs 把 assets/local_dream/qnnlibs 解压到私有目录
+        // （Flutter rootBundle 无法枚举资产目录，须在 Kotlin 侧 list）。
+        // hasQnnLibsAssets 为纯查询（不解压），供状态自检使用。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ENGINE_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getNativeLibraryDir" -> result.success(applicationInfo.nativeLibraryDir)
+                "hasQnnLibsAssets" -> {
+                    try {
+                        val names = assets.list("local_dream/qnnlibs")
+                        result.success(names != null && names.isNotEmpty())
+                    } catch (e: Exception) {
+                        // 查询失败与"未打包"（正常回 false）是两种故障：记日志便于区分
+                        Log.w("LocalDreamEngine", "hasQnnLibsAssets 查询失败", e)
+                        result.success(false)
+                    }
+                }
+                "prepareQnnLibs" -> {
+                    // 解压几十至上百 MB 的 QNN 运行库是重 IO，放后台线程执行，
+                    // 防首次冷启主线程 ANR；MethodChannel result 须回主线程调用
+                    Thread {
+                        try {
+                            val dir = prepareQnnLibs()
+                            runOnUiThread { result.success(dir) }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.error("QNN_PREPARE_FAILED", e.message, null)
+                            }
+                        }
+                    }.start()
+                }
                 else -> result.notImplemented()
             }
         }
@@ -55,6 +93,33 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+    }
+
+    /// 把 assets/local_dream/qnnlibs 下的 QNN 运行库解压到
+    /// filesDir/local_dream_runtime，返回运行时目录绝对路径。
+    /// 已存在且大小一致的文件跳过（对齐 Local Dream BackendService 逻辑）。
+    /// 资产目录为空/缺失时返回空串（由 Dart 侧给出"未打包"引导文案）。
+    private fun prepareQnnLibs(): String {
+        val runtimeDir = java.io.File(filesDir, "local_dream_runtime")
+        if (!runtimeDir.exists()) runtimeDir.mkdirs()
+        val names = assets.list("local_dream/qnnlibs") ?: emptyArray()
+        if (names.isEmpty()) return ""
+        for (name in names) {
+            val target = java.io.File(runtimeDir, name)
+            // 大小校验启发式：AssetInputStream.available() 在 AOSP 实现里
+            // 通常返回整个资产的字节数，但这是实现细节而非 API 契约
+            // （个别实现可能返回剩余可读量甚至 0），只能作"是否重拷"的
+            // 粗判，不保证与目标文件字节级一致。
+            val needsCopy = !target.exists() || run {
+                assets.open("local_dream/qnnlibs/$name").use { it.available().toLong() } != target.length()
+            }
+            if (needsCopy) {
+                assets.open("local_dream/qnnlibs/$name").use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        return runtimeDir.absolutePath
     }
 
     private fun installApk(filePath: String): Boolean {

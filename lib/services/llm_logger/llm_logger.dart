@@ -90,6 +90,9 @@ class LlmLogger extends ChangeNotifier {
   /// 是否正在写入
   bool _isWriting = false;
 
+  /// 写入失败累计次数（诊断用；失败条目保留在队列等待下次重试）
+  int _writeFailCount = 0;
+
   /// 内存缓存（最近的记录，用于列表页快速访问）
   final List<LlmCallRecord> _recentCache = [];
 
@@ -324,29 +327,6 @@ class LlmLogger extends ChangeNotifier {
     }
   }
 
-  /// 获取日志文件总大小（字节）
-  Future<int> getTotalSize() async {
-    if (_logDir == null) return 0;
-    int totalSize = 0;
-    try {
-      final dir = Directory(_logDir!);
-      if (!await dir.exists()) return 0;
-      await for (final entity in dir.list()) {
-        if (entity is File) {
-          totalSize += await entity.length();
-        }
-      }
-    } catch (e, st) {
-      LoggerService.instance.w(
-        'LLM日志: 计算日志目录大小失败: $e',
-        category: LogCategory.ai,
-        tags: ['llm-logger', 'fs-err'],
-        stackTrace: st.toString(),
-      );
-    }
-    return totalSize;
-  }
-
   // ==================== 内部实现 ====================
 
   /// 更新内存缓存（仅内存，不写文件）
@@ -370,14 +350,20 @@ class LlmLogger extends ChangeNotifier {
   }
 
   /// 异步刷新写入队列
+  ///
+  /// 写入成功后才从队列移除已写条目；失败时条目保留在队首，等待下次
+  /// [_enqueueWrite] 再次触发刷新时重试（此前实现先清空队列再写文件，
+  /// 写失败会导致已出队的日志永久丢失）。失败批次不立即自我重试，
+  /// 避免持续失败时形成重入死循环。
   Future<void> _flushWriteQueue() async {
     if (_isWriting || _writeQueue.isEmpty || _logDir == null) return;
 
     _isWriting = true;
+    // 本轮计划写入的条目数；写入期间新入队的条目不计入本批次
+    final batchCount = _writeQueue.length;
+    var success = false;
     try {
-      // 取出当前队列中所有待写数据
-      final lines = List<String>.from(_writeQueue);
-      _writeQueue.clear();
+      final lines = _writeQueue.take(batchCount).toList();
 
       final today = _dateStr(DateTime.now().toUtc());
       final file = File('$_logDir/$_logFilePrefix$today.jsonl');
@@ -389,12 +375,33 @@ class LlmLogger extends ChangeNotifier {
       } else {
         await file.writeAsString(content, flush: true);
       }
-    } catch (e) {
-      debugPrint('LlmLogger: 写入日志失败: $e');
+
+      // 写入成功才真正移除已写条目；若期间被 clear() 清空导致不足
+      // batchCount 条，则把剩余条目全部清掉（避免 RangeError）
+      if (_writeQueue.length >= batchCount) {
+        _writeQueue.removeRange(0, batchCount);
+      } else {
+        _writeQueue.clear();
+      }
+      success = true;
+    } catch (e, st) {
+      // 失败：本批条目仍保留在队首，待下次触发刷新时重试
+      _writeFailCount++;
+      LoggerService.instance.w(
+        'LLM日志: 写入日志失败（累计$_writeFailCount次），'
+        '$batchCount 条记录保留在队列重试: $e',
+        category: LogCategory.ai,
+        tags: ['llm-logger', 'fs-err'],
+        stackTrace: st.toString(),
+      );
     } finally {
       _isWriting = false;
-      // 如果队列中又有新数据，继续刷新
-      if (_writeQueue.isNotEmpty) {
+      // 写入成功：剩余条目均为写入期间新入队的，继续刷新；
+      // 写入失败：失败批次仍占住队首，只有其后再有新条目入队才继续，
+      // 不立即重试失败批次，避免持续失败时的重入死循环
+      final hasNewEntries =
+          success ? _writeQueue.isNotEmpty : _writeQueue.length > batchCount;
+      if (hasNewEntries) {
         _flushWriteQueue();
       }
     }

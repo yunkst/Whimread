@@ -276,16 +276,6 @@ class MockSiteScriptRepository extends _i1.Mock
       ) as _i3.Future<({String? id, String? reason, bool success})>);
 
   @override
-  _i3.Future<_i6.SiteScript?> findByRemoteId(String? remoteId) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #findByRemoteId,
-          [remoteId],
-        ),
-        returnValue: _i3.Future<_i6.SiteScript?>.value(),
-      ) as _i3.Future<_i6.SiteScript?>);
-
-  @override
   _i3.Future<({String id, bool isInsert})> insertRemoteDownload(
           _i6.SiteScript? script) =>
       (super.noSuchMethod(

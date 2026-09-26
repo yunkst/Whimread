@@ -110,21 +110,6 @@ void main() {
     });
   });
 
-  group('CharacterRepository批量操作验证', () {
-    late MockIDatabaseConnection mockDbConnection;
-    late CharacterRepository characterRepository;
-
-    setUp(() {
-      mockDbConnection = MockIDatabaseConnection();
-      characterRepository = CharacterRepository(dbConnection: mockDbConnection);
-    });
-
-    test('应该有updateOrInsertCharacter方法', () {
-      // 验证方法签名存在
-      expect(characterRepository.updateOrInsertCharacter is Function, isTrue);
-    });
-  });
-
   group('Character模型验证', () {
     test('Character对象应该正确构造', () {
       final character = Character(

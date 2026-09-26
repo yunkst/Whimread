@@ -55,9 +55,6 @@ class TestDatabaseSetup {
     await db.delete('novel_bookshelves');
     await db.delete('character_relationships');
     await db.delete('outlines');
-    await db.delete('chat_scenes');
-    await db.delete('prompt_history');
-    await db.delete('prompt_tag_history');
     await db.delete('prompt_tags');
     await db.delete('prompt_tag_categories');
     await db.delete('site_scripts');
@@ -78,9 +75,6 @@ class TestDatabaseSetup {
       'novel_bookshelves',
       'character_relationships',
       'outlines',
-      'chat_scenes',
-      'prompt_history',
-      'prompt_tag_history',
       'prompt_tags',
       'prompt_tag_categories',
       'site_scripts',
@@ -112,12 +106,9 @@ class TestDatabaseSetup {
       'characters',
       'media_items',
       'outlines',
-      'chat_scenes',
       'character_relationships',
       'bookshelves',
       'novel_bookshelves',
-      'prompt_history',
-      'prompt_tag_history',
       'prompt_tags',
       'prompt_tag_categories',
       'site_scripts',

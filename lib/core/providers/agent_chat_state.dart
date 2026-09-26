@@ -1,7 +1,6 @@
 /// Agent Chat 状态定义
 ///
-/// 独立文件，避免 agent_chat_providers.dart 和 scenario_sessions_provider.dart
-/// 之间的循环依赖。
+/// 独立文件，避免与 scenario_sessions_provider.dart 之间的循环依赖。
 library;
 
 import '../../models/agent_chat_message.dart';

@@ -1,7 +1,7 @@
 /// 日志级别/分类配色工具
 ///
-/// 集中管理日志相关颜色，消除 `log_viewer_screen.dart` 与
-/// `log_report_settings_screen.dart` 中重复的 `_getLevelColor` / `_levelColor`。
+/// 集中管理日志相关颜色，消除 `log_viewer_screen.dart` 中重复的
+/// `_getLevelColor` / `_levelColor`。
 ///
 /// - **级别色（debug/info/warning/error）**：映射到 [AppColors] 的语义色，
 ///   随主题明暗变化。

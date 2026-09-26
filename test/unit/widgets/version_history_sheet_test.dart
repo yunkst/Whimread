@@ -34,12 +34,6 @@ class _RecordingWriter implements IChapterWriter {
   }
 
   @override
-  Future<int> updateChapterContentById(int id, String content) async => 1;
-
-  @override
-  Future<int> deleteChapterCache(String chapterUrl) async => 1;
-
-  @override
   Future<int> deleteCachedChapters(String novelUrl) async => 1;
 
   @override
@@ -47,19 +41,8 @@ class _RecordingWriter implements IChapterWriter {
       String novelUrl, List<Chapter> chapters) async {}
 
   @override
-  Future<int> createCustomChapter(String novelUrl, String title,
-      String content, [int? index]) async =>
-      1;
-
-  @override
   Future<void> updateCustomChapter(
       String chapterUrl, String title, String content) async {}
-
-  @override
-  Future<void> deleteCustomChapter(String chapterUrl) async {}
-
-  @override
-  Future<void> shiftChapterIndicesFrom(String novelUrl, int fromIndex) async {}
 
   @override
   Future<void> updateChaptersOrder(
@@ -108,9 +91,6 @@ class _RecordingVersionRepo implements IChapterVersionRepository {
     deletedIds.add(id);
     return 1;
   }
-
-  @override
-  Future<int> deleteVersionsByChapter(String chapterUrl) async => 1;
 
   @override
   Future<int> deleteVersionsByNovel(String novelUrl) async => 1;

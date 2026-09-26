@@ -555,12 +555,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// 等待 WebView 加载完成（URL 匹配 targetUrl）
   ///
   /// 返回 `true` 表示成功等到 URL 匹配；`false` 表示超时。
-  /// [trustOnTimeout] 为 true 时，超时不再抛错（Headless WebView 在某些平台
-  /// 的 getUrl() 不更新，但 loadUrl 本身成功）。
+  /// 超时后的处理（如 Headless 模式信任 loadUrl 调用）由调用方自行判断。
   Future<bool> _waitForUrl(
     String targetUrl, {
     Duration timeout = _pageLoadTimeout,
-    bool trustOnTimeout = false,
   }) async {
     final start = DateTime.now();
     while (DateTime.now().difference(start) < timeout) {
@@ -968,10 +966,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         urlRequest: URLRequest(url: WebUri(url)),
       );
 
-      final loaded = await _waitForUrl(
-        url,
-        trustOnTimeout: _isHeadless,
-      );
+      final loaded = await _waitForUrl(url);
       if (!loaded && !_isHeadless) {
         return jsonEncode({
           'error': 'NAVIGATE_TIMEOUT',
@@ -1541,7 +1536,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// HeadlessWebViewPool 的 WebView 构造时**未注册 onLoadStop**（_ensureReady
   /// 用 `HeadlessInAppWebView(onWebViewCreated: ...)` 无 onLoadStop 参数），
   /// 因此 WebViewPageLoader 的事件驱动等待在此不可用，沿用 getUrl 字符串轮询。
-  /// 超时信任 loadUrl 调用本身（同 [_ensureHeadlessPageLoaded] 的 trustOnTimeout 策略）。
+  /// 超时信任 loadUrl 调用本身（同 [_ensureHeadlessPageLoaded] 的超时信任策略）。
   Future<void> _waitControllerForUrl(
     InAppWebViewController controller,
     String targetUrl,

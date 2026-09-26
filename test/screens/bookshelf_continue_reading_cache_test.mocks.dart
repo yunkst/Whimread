@@ -6,10 +6,11 @@
 import 'dart:async' as _i4;
 
 import 'package:mockito/mockito.dart' as _i1;
-import 'package:novel_app/core/interfaces/i_database_connection.dart' as _i6;
+import 'package:novel_app/core/interfaces/i_database_connection.dart' as _i7;
 import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart'
     as _i3;
 import 'package:novel_app/models/novel.dart' as _i5;
+import 'package:novel_app/models/reading_anchor.dart' as _i6;
 import 'package:sqflite/sqflite.dart' as _i2;
 
 // ignore_for_file: type=lint
@@ -89,6 +90,32 @@ class MockINovelRepository extends _i1.Mock implements _i3.INovelRepository {
       ) as _i4.Future<int>);
 
   @override
+  _i4.Future<_i6.ReadingAnchor?> getLastReadAnchor(String? novelUrl) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getLastReadAnchor,
+          [novelUrl],
+        ),
+        returnValue: _i4.Future<_i6.ReadingAnchor?>.value(),
+      ) as _i4.Future<_i6.ReadingAnchor?>);
+
+  @override
+  _i4.Future<int> updateLastReadAnchor(
+    String? novelUrl,
+    _i6.ReadingAnchor? anchor,
+  ) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #updateLastReadAnchor,
+          [
+            novelUrl,
+            anchor,
+          ],
+        ),
+        returnValue: _i4.Future<int>.value(0),
+      ) as _i4.Future<int>);
+
+  @override
   _i4.Future<int> updateBackgroundSetting(
     String? novelUrl,
     String? backgroundSetting,
@@ -122,15 +149,6 @@ class MockINovelRepository extends _i1.Mock implements _i3.INovelRepository {
         ),
         returnValue: _i4.Future<int>.value(0),
       ) as _i4.Future<int>);
-
-  @override
-  _i4.Future<_i5.Novel?> getNovelByTitle(String? title) => (super.noSuchMethod(
-        Invocation.method(
-          #getNovelByTitle,
-          [title],
-        ),
-        returnValue: _i4.Future<_i5.Novel?>.value(),
-      ) as _i4.Future<_i5.Novel?>);
 
   @override
   _i4.Future<_i5.Novel?> getNovelByUrl(String? novelUrl) => (super.noSuchMethod(
@@ -196,7 +214,7 @@ class MockINovelRepository extends _i1.Mock implements _i3.INovelRepository {
 ///
 /// See the documentation for Mockito's code generation for more information.
 class MockIDatabaseConnection extends _i1.Mock
-    implements _i6.IDatabaseConnection {
+    implements _i7.IDatabaseConnection {
   MockIDatabaseConnection() {
     _i1.throwOnMissingStub(this);
   }

@@ -140,16 +140,6 @@ void main() {
     expect(preview.endsWith('…'), isTrue);
   });
 
-  test('ChapterRepository.deleteChapterCache 级联清理章节标注', () async {
-    await chapterRepo.cacheChapter(
-        novelUrl, Chapter(title: '章节', url: chapterUrl), '正文');
-    await repo.upsert(annotation(0));
-
-    await chapterRepo.deleteChapterCache(chapterUrl);
-
-    expect(await repo.getForChapter(chapterUrl), isEmpty);
-  });
-
   test('ChapterRepository.deleteCachedChapters 级联清理小说标注', () async {
     await chapterRepo.cacheChapter(
         novelUrl, Chapter(title: '章节', url: chapterUrl), '正文');
@@ -186,9 +176,6 @@ class _NoopVersionRepo implements IChapterVersionRepository {
 
   @override
   Future<int> deleteVersion(int id) async => 0;
-
-  @override
-  Future<int> deleteVersionsByChapter(String chapterUrl) async => 0;
 
   @override
   Future<int> deleteVersionsByNovel(String novelUrl) async => 0;

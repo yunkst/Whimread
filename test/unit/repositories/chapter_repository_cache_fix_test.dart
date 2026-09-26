@@ -10,9 +10,8 @@ import '../../helpers/test_database_setup.dart';
 ///
 /// 验证以下修复：
 /// 1. P0: LRU淘汰策略 — 内存缓存满时淘汰最旧条目，而非全量清空
-/// 2. P1: 删除操作同步清理内存Set — deleteChapterCache/deleteCachedChapters
-/// 3. P1: 创建章节后同步更新内存缓存 — createCustomChapter
-/// 4. P3: cacheChapter的ConflictAlgorithm.replace确保forceRefresh安全
+/// 2. P1: 删除操作同步清理内存Set — deleteCachedChapters
+/// 3. P3: cacheChapter的ConflictAlgorithm.replace确保forceRefresh安全
 
 void main() {
   TestDatabaseSetup.init();
@@ -140,22 +139,6 @@ void main() {
       );
     });
 
-    test('deleteChapterCache 应同时清理内存缓存', () async {
-      // 确认已在内存中
-      expect(await repository.isChapterCached(testChapterUrl), isTrue);
-
-      // 删除缓存
-      await repository.deleteChapterCache(testChapterUrl);
-
-      // 验证：内存和数据库都不再存在
-      final content = await repository.getCachedChapter(testChapterUrl);
-      expect(content, isNull, reason: '数据库中的缓存应被删除');
-
-      // 再次检查缓存状态（这应该查数据库而非命中内存）
-      final isCached = await repository.isChapterCached(testChapterUrl);
-      expect(isCached, isFalse, reason: '删除后 isChapterCached 应返回 false');
-    });
-
     test('deleteCachedChapters 应批量清理内存缓存', () async {
       // 缓存多个章节
       final urls = List.generate(10, (i) => '$testChapterUrl$i');
@@ -187,43 +170,6 @@ void main() {
 
       // 内存缓存已清空，但 db 中仍有数据，isChapterCached 会走 db 查询
       expect(await repository.isChapterCached(testChapterUrl), isTrue);
-    });
-  });
-
-  // ============================================================
-  // P1: createCustomChapter 同步更新内存缓存
-  // ============================================================
-  group('P1: createCustomChapter 同步更新内存缓存', () {
-    test('创建自定义章节后应立即标记为已缓存', () async {
-      final id = await repository.createCustomChapter(
-        'custom://test-novel',
-        '自定义章节',
-        '自定义内容',
-      );
-
-      expect(id, isNotNull);
-      expect(id, greaterThan(0));
-
-      // 获取创建的章节URL，验证 isChapterCached
-      final chapters = await repository.getCachedNovelChapters('custom://test-novel');
-      expect(chapters.length, 1);
-
-      final createdUrl = chapters.first.url;
-      final isCached = await repository.isChapterCached(createdUrl);
-      expect(isCached, isTrue, reason: 'createCustomChapter后应立即可从内存命中');
-    });
-
-    test('createCustomChapter 使用事务保证两表原子性', () async {
-      // 正常情况下两表都应有数据
-      final id = await repository.createCustomChapter(
-        'custom://test-novel-2',
-        '原子性测试',
-        '测试内容原子性',
-      );
-
-      final chapters = await repository.getCachedNovelChapters('custom://test-novel-2');
-      expect(chapters.length, 1);
-      expect(chapters.first.isCached, isTrue, reason: 'LEFT JOIN应能匹配到chapter_cache记录');
     });
   });
 

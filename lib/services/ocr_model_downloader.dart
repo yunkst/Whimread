@@ -13,6 +13,7 @@
 ///
 /// 重试:失败 3 次,30 秒间隔(指数退避)。最终失败抛异常给调用方
 ///   (通常是 `ocrPredictorProvider`,UI 那边 catch StateError 报"模型下载中")。
+library;
 
 import 'dart:async';
 import 'dart:convert';

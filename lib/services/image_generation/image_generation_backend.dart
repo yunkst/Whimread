@@ -30,6 +30,11 @@ class ImageGenerationRequest {
   final double? cfg;
   final int? seed;
 
+  /// 画面比例预设（"1:1"/"3:4"/"4:3"/"16:9"…）。
+  /// 仅支持比例裁切的后端使用（Local Dream 引擎的 SDXL/Anima：固定画布 +
+  /// 合成重绘裁切）；像素后端（local_sd）与 SD1.5 忽略此值，用原生画布。
+  final String? aspectRatio;
+
   const ImageGenerationRequest({
     required this.model,
     required this.prompt,
@@ -40,6 +45,7 @@ class ImageGenerationRequest {
     this.steps,
     this.cfg,
     this.seed,
+    this.aspectRatio,
   });
 
   int get effectiveWidth => width ?? model.defaultWidth;

@@ -66,7 +66,7 @@ LoggerService loggerService(Ref ref) {
 /// **功能**:
 /// - JSONL 文件落盘（按天分文件，7 天自动清理）
 /// - 内存缓存最近 200 条记录
-/// - 查询接口：getRecent / getById / clear / getTotalSize
+/// - 查询接口：getRecent / getById / clear
 /// - 通过 [LlmLogger.changeNotifier] 推送变化通知
 ///
 /// **依赖**:

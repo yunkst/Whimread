@@ -9,7 +9,6 @@
 /// - 结果为设备编码好的 PNG bytes，直接走 MediaProxy.upload 落盘登记。
 library;
 
-import 'dart:math' show min;
 
 import '../../models/image_model.dart';
 import '../logger_service.dart';
@@ -95,9 +94,11 @@ class LocalDreamBackend implements ImageGenerationBackend {
           steps: request.effectiveSteps,
           cfg: request.effectiveCfg,
           seed: baseSeed + i,
+          // SDXL 固定画布按比例合成裁切（引擎端处理；SD1.5 恒 1:1 被忽略）
+          aspectRatio: request.aspectRatio,
         );
-        final complete = await _generateOne(client, genRequest,
-            onProgress: onProgress);
+        final complete =
+            await client.generateAndWait(genRequest, onProgress: onProgress);
         final mediaId = await _mediaProxy.upload(
           complete.bytes,
           MediaKind.image,
@@ -116,34 +117,6 @@ class LocalDreamBackend implements ImageGenerationBackend {
     } finally {
       client.close();
     }
-  }
-
-  /// 消费一次 SSE 流，返回 complete 事件；progress 透传给 [onProgress]，
-  /// error 事件转成异常抛出。
-  Future<LocalDreamCompleteEvent> _generateOne(
-    LocalDreamClient client,
-    LocalDreamGenerateRequest request, {
-    void Function(int step, int total)? onProgress,
-  }) async {
-    LocalDreamCompleteEvent? complete;
-    await for (final event in client.generate(request)) {
-      switch (event) {
-        case LocalDreamProgressEvent(:final step, :final totalSteps):
-          // 真实设备会发出重复帧与 step > total 的帧（8 步实测出现过
-          // step=10），归一化后再透传，保证上层 step/total 恒在 0..1
-          if (totalSteps > 0) {
-            onProgress?.call(min(step, totalSteps), totalSteps);
-          }
-        case LocalDreamCompleteEvent():
-          complete = event;
-        case LocalDreamErrorEvent(:final message):
-          throw LocalDreamException('设备生成失败：$message');
-      }
-    }
-    if (complete == null) {
-      throw const LocalDreamException('设备连接中断，未返回完整图片');
-    }
-    return complete;
   }
 
   @override
