@@ -8,28 +8,28 @@
 ///
 /// 架构：
 /// - 使用 ReaderContentController 处理内容加载
+/// - 使用 ReaderConcatController 处理无限滚动拼接（块几何缓存/回收/锚点）
 /// - 使用 ReaderInteractionController 处理用户交互
 /// - 使用 AutoScrollMixin 处理自动滚动
 ///
 /// 依赖：
 /// - ReaderContentController (lib/controllers/reader_content_controller.dart)
+/// - ReaderConcatController (lib/controllers/reader_concat_controller.dart)
 /// - ReaderInteractionController (lib/controllers/reader_interaction_controller.dart)
 /// - AutoScrollMixin (lib/mixins/reader/auto_scroll_mixin.dart)
 ///
 /// 状态管理：
 /// - 使用 Riverpod 管理全局设置（字体大小、滚动速度、编辑模式）
-/// - 使用 Controller 管理本地状态（内容、交互）
+/// - 使用 Controller 管理本地状态（内容、交互、拼接块）
 
 library;
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
-import '../models/reading_anchor.dart';
 import '../models/search_result.dart';
 import '../services/api_service_wrapper.dart';
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
@@ -44,8 +44,8 @@ import '../widgets/reader/reader_bottom_bar.dart'; // ReaderBottomBar组件
 import '../widgets/reader/reader_content_view.dart'; // ReaderContentView组件
 import '../widgets/reader/reader_error_view.dart'; // ReaderErrorView组件
 import '../utils/toast_utils.dart';
-import '../utils/reading_anchor_math.dart';
 import '../controllers/reader_content_controller.dart';
+import '../controllers/reader_concat_controller.dart';
 import '../services/logger_service.dart';
 import '../utils/error_helper.dart';
 // Riverpod Providers
@@ -137,74 +137,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 工具栏/底栏覆盖层淡入淡出时长
   static const Duration _chromeFadeDuration = Duration(milliseconds: 150);
 
-  // ========== 无限滚动拼接（滚到顶/底自动拼接前/后章节） ==========
-  /// 已拼接进阅读视图的章节块（按显示顺序）
-  List<_ChapterBlock> _blocks = [];
+  // ========== 无限滚动拼接控制器 ==========
+  /// 章节块列表、块几何缓存（块高/起点偏移）、顶/底边缘拼接、当前章检测、
+  /// 块窗口回收与章内阅读锚点（采样/落库/恢复跳转）全部由它持有。
+  /// 本 State 经其只读快照渲染 build 产物，经其显式方法变更拼接状态。
+  late ReaderConcatController _concat;
 
-  /// 章节起点标记的 GlobalKey（key = 章节 URL），供当前章检测与重定位
-  final Map<String, GlobalKey> _blockStartKeys = {};
-
-  /// 拼接进行中的方向（两方向互斥，进行中不再触发新拼接）
-  _ConcatDirection _concatDirection = _ConcatDirection.none;
-
-  /// 待插入的上一章块（先 Offstage 测高，再插入 + 滚动补偿）
-  _ChapterBlock? _pendingPrependBlock;
-  final GlobalKey _prependMeasureKey = GlobalKey();
-
-  /// 拼接失败标记（正文区显示重试入口）
-  bool _prevConcatFailed = false;
-  bool _nextConcatFailed = false;
-
-  /// 上次结构变化（拼接/失败）时间，作为冷却防止边缘反复触发
-  DateTime _lastConcatAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// 距顶/底多远（像素）即触发拼接
-  static const double _concatEdgeTriggerPx = 600;
-
-  /// 章节切换检测锚点：章节起点越过「视口顶 + 此值」即视为进入该章
-  static const double _chapterAnchorPx = 96;
-
-  /// 两次拼接动作之间的最小间隔
-  static const Duration _concatCooldown = Duration(milliseconds: 800);
-
-  // ----- 章节块内存回收（窗口裁剪） -----
-  /// 各章节块的实测高度（key = 章节 URL）：滚过章节边界时由相邻起点标记
-  /// 采样累计。顶部回收用它补偿滚动位置；字体变化/正文刷新即失效。
-  final Map<String, double> _knownBlockHeights = {};
-
-  /// 各章节起点的内容偏移（key = 章节 URL）：可测标记直接采样，
-  /// 不可测时由相邻块高推导（首块恒为顶部 padding）。
-  /// 当前章检测基于它——不依赖标记是否还在布局里（ListView 缓存区
-  /// 只有几百像素，整章之外的上/下章标记早已销毁）。
-  final Map<String, double> _blockStartOffsets = {};
-
-  /// 章节块保留窗口：当前章前后各保留多少章，超出即回收正文内存
-  static const int _keepBlocksPerSide = 3;
-
-  /// 正文 ListView 的顶部 padding（回收补偿量 = 顶部 padding + Σ块高）
-  static const double _contentTopPadding = 16.0;
-
-  /// 字体变化检测（变更即清空块高缓存）
-  double? _lastSeenFontSize;
-
-  // ========== 章内阅读位置锚点（重开同一章恢复到上次位置） ==========
-  /// 最近一次采样到的锚点（滚动时持续更新，退出阅读页时兜底落库）
-  ReadingAnchor? _lastReadingAnchor;
-
-  /// 上次锚点落库时间（节流，避免高频滚动反复写库）
-  DateTime _lastAnchorWriteAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// 锚点落库最小间隔
-  static const Duration _anchorWriteInterval = Duration(seconds: 5);
-
-  /// 首次内容加载完成后是否尝试恢复锚点（切章/刷新/搜索跳转不恢复）
+  // ========== 章内锚点装载时序 ==========
+  /// 首次内容加载完成后是否尝试恢复锚点（切章/刷新/搜索跳转不恢复）。
+  /// 与搜索跳转互斥的装载决策，属阅读页时序，不属拼接控制器。
   bool _anchorRestorePending = true;
-
-  /// 恢复跳转进行中：跳转自身触发的滚动不采样、不落库
-  bool _isRestoringAnchor = false;
-
-  /// 恢复跳转的最大「估算→跳转」迭代轮数（目标段落进入缓存区即精确校正）
-  static const int _anchorRestoreMaxAttempts = 4;
 
   // ========== 按标注重写（annotation_rewrite 场景会话驱动）==========
   /// 改写 agent 正在运行（本地态；用于控制 FAB 显示转圈 + 防重复点击）。
@@ -252,11 +194,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       headlessService: ref.read(headlessWebViewContentServiceProvider),
     );
 
+    // ========== 初始化 ReaderConcatController（无限滚动拼接 + 锚点） ==========
+    // 拼接块状态由控制器持有；需要重建 UI 时经 setState 回调回到本 State，
+    // mounted 判断/当前章/章节列表/块内容加载也以回调形式注入。
+    _concat = ReaderConcatController(
+      ref: ref,
+      scrollController: _scrollController,
+      isMounted: () => mounted,
+      setState: (fn) => setState(fn),
+      currentChapter: () => _currentChapter,
+      chapters: () => widget.chapters,
+      novelUrl: () => widget.novel.url,
+      loadBlockContent: _loadBlockContent,
+      onCurrentChapterDetected: _setCurrentChapter,
+      onAppendApplied: resumeAutoScrollIfIntended,
+    );
+
     // 初始化自动滚动控制器
     initAutoScroll(scrollController: _scrollController);
 
-    // 滚动监听：无限滚动的当前章检测 + 顶/底边缘拼接触发
-    _scrollController.addListener(_onScrollChanged);
+    // 滚动监听：无限滚动的当前章检测 + 顶/底边缘拼接触发 + 锚点采样
+    _scrollController.addListener(_concat.handleScrollChanged);
 
     // 设置 Agent 阅读上下文（小说 + 章节）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -300,9 +258,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
     // 章内阅读位置兜底落库（节流窗口内的最后位置不丢；deactivate 阶段
     // ref 仍有效，写库异步完成即可，幂等写入无副作用）
-    final anchor = _lastReadingAnchor;
+    final anchor = _concat.lastReadingAnchor;
     if (anchor != null) {
-      unawaited(_writeReadingAnchor(anchor));
+      unawaited(_concat.writeReadingAnchor(anchor));
     }
     super.deactivate();
   }
@@ -310,7 +268,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   @override
   void dispose() {
     disposeAutoScroll(); // 清理自动滚动资源（AutoScrollMixin）
-    _scrollController.removeListener(_onScrollChanged);
+    _scrollController.removeListener(_concat.handleScrollChanged);
     _scrollController.dispose();
     _bannerTimer?.cancel();
     // 恢复系统状态栏/导航栏（沉浸模式可能隐藏了它们）
@@ -357,8 +315,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 启动预加载章节（使用新的PreloadService）
   Future<void> _startPreloadingChapters() async {
     try {
-      final currentIndex =
-          widget.chapters.indexWhere((c) => c.url == _currentChapter.url);
+      final currentIndex = _currentChapterIndex;
       if (currentIndex == -1) return;
 
       final chapterUrls = widget.chapters.map((c) => c.url).toList();
@@ -408,25 +365,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         if (!_scrollController.hasClients) return;
         // 无限滚动视图下，当前章上方可能已拼接前序章节，
         // 重定位到当前章起点；起点不可测（尚未布局）则回退到 0
-        final target = _scrollOffsetOfChapterStart(_currentChapter.url);
+        final target = _concat.scrollOffsetOfChapterStart(_currentChapter.url);
         _scrollController.jumpTo(target ?? 0);
       });
     }
-  }
-
-  /// 计算章节起点标记相对于滚动内容原点的偏移；标记未布局时返回 null
-  double? _scrollOffsetOfChapterStart(String chapterUrl) {
-    final markerContext = _blockStartKeys[chapterUrl]?.currentContext;
-    if (markerContext == null) return null;
-    final renderBox = markerContext.findRenderObject();
-    if (renderBox is! RenderBox || !renderBox.attached || !renderBox.hasSize) {
-      return null;
-    }
-    final viewport = RenderAbstractViewport.maybeOf(renderBox);
-    if (viewport == null) return null;
-    final viewportTop = (viewport as RenderBox).localToGlobal(Offset.zero).dy;
-    final markerTop = renderBox.localToGlobal(Offset.zero).dy;
-    return _scrollController.offset + (markerTop - viewportTop);
   }
 
   /// 滚动到搜索匹配位置
@@ -479,14 +421,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _currentChapter = targetChapter;
       // 显式切章到章首，不做章内位置恢复
       _anchorRestorePending = false;
-      _blocks = [];
-      _blockStartKeys.clear();
-      _knownBlockHeights.clear();
-      _blockStartOffsets.clear();
-      _concatDirection = _ConcatDirection.none;
-      _pendingPrependBlock = null;
-      _prevConcatFailed = false;
-      _nextConcatFailed = false;
+      _concat.resetForNavigation();
       // 切章即丢揭示登记（与原语义一致）
       _pendingReveals.clear();
       _pendingOldTexts.clear();
@@ -518,8 +453,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }
 
   void _goToPreviousChapter() {
-    final currentIndex =
-        widget.chapters.indexWhere((c) => c.url == _currentChapter.url);
+    final currentIndex = _currentChapterIndex;
     if (currentIndex > 0) {
       _navigateToChapter(widget.chapters[currentIndex - 1]);
     } else {
@@ -528,8 +462,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }
 
   void _goToNextChapter() {
-    final currentIndex =
-        widget.chapters.indexWhere((c) => c.url == _currentChapter.url);
+    final currentIndex = _currentChapterIndex;
     if (currentIndex != -1 && currentIndex < widget.chapters.length - 1) {
       _navigateToChapter(widget.chapters[currentIndex + 1]);
     } else {
@@ -923,10 +856,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (mounted) setState(() => _annotationsByChapter.remove(chapterUrl));
   }
 
-  /// 段落拆分（与显示层一致：按 '\n' 拆 + 过滤空行）
-  static List<String> _splitParagraphs(String content) =>
-      content.split('\n').where((p) => p.trim().isNotEmpty).toList();
-
   /// ref.listen 回调：agent 写库 → diff 新旧段落 → 登记待揭示段落
   ///
   /// 守卫：
@@ -955,8 +884,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       return;
     }
 
-    final oldParas = _splitParagraphs(prev.content);
-    final newParas = _splitParagraphs(next.content);
+    // 段落拆分与显示层同源（ReaderChapterSegment.splitParagraphs）
+    final oldParas = ReaderChapterSegment.splitParagraphs(prev.content);
+    final newParas = ReaderChapterSegment.splitParagraphs(next.content);
 
     var prefix = 0;
     while (prefix < oldParas.length &&
@@ -1196,13 +1126,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // 监听设置状态变化（仅用于触发 rebuild；字段值通过 getter 实时读取）
     ref.watch(readerSettingsStateNotifierProvider);
 
-    // 字体大小变化 → 全部内容重新排版，块高与起点偏移缓存整体失效
-    final fontSize = _fontSize;
-    if (_lastSeenFontSize != null && _lastSeenFontSize != fontSize) {
-      _knownBlockHeights.clear();
-      _blockStartOffsets.clear();
-    }
-    _lastSeenFontSize = fontSize;
+    // 字体大小变化 → 全部内容重新排版，块高与起点偏移缓存整体失效。
+    // 经拼接控制器显式失效（原实现在此直接改写 _knownBlockHeights 等
+    // State 成员，现收敛为控制器方法，行为不变）。
+    _concat.invalidateGeometryForFontSize(_fontSize);
 
     // 使用 ref.watch 监听编辑模式状态
     final isEditMode = ref.watch(readerEditModeProvider);
@@ -1216,8 +1143,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _onContentChangedForRewrite,
     );
 
-    // 全局内容状态 → 章节块同步（导航装载 / 刷新 / 编辑保存 / 改写落库）
-    _syncBlocksFromProvider(contentState);
+    // 全局内容状态 → 章节块同步（导航装载 / 刷新 / 编辑保存 / 改写落库）。
+    // ⚠️ 时序约束：必须保留在 build 内、_buildSegments 之前**同步**执行，
+    // 不能改成 ref.listen 回调——loadChapter 的装载序列是「setCurrentContext
+    // → setLoading(true) → clearContent → 抓取 → setContent →
+    // setLoading(false)」多次离散赋值，Riverpod 监听器会在每次赋值时同步
+    // 触发，会观察到「新章节上下文 + 旧章节内容」的中间态（setCurrentContext
+    // 已写入、clearContent 尚未执行），把旧内容错建成新章节的块；而 build
+    // 只在状态“落定”后的帧边界执行（要么 isLoading=true、要么内容已与当前章
+    // 一致），天然规避中间态。每帧重复调用幂等。块变更经拼接控制器的显式
+    // 方法完成（不再直接改写 State 成员）。
+    _concat.syncCurrentBlockFrom(contentState);
 
     // 正文分段：阅读模式 = 全部已拼接章节；编辑模式 = 仅当前章
     final segments = _buildSegments(isEditMode);
@@ -1286,7 +1222,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         onTap: _toggleChrome,
         child: ReaderContentView(
           segments: segments,
-          blockStartKeys: _blockStartKeys,
+          blockStartKeys: _concat.blockStartKeys,
           fontSize: _fontSize,
           textBrightness: _textBrightness,
           isEditMode: isEditMode,
@@ -1335,6 +1271,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         ? MediaQuery.paddingOf(context).bottom + 88
         : 88.0;
 
+    // 拼接控制器状态的只读快照（帧内取一次，供下方覆盖层/测高层使用）
+    final pendingPrepend = _concat.pendingPrependBlock;
+
     return Stack(
       children: [
         content,
@@ -1347,46 +1286,46 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             child: _buildRewriteBanner(context),
           ),
         // 拼接失败重试入口（上一章：顶部；下一章：底栏上方）
-        if (_prevConcatFailed)
+        if (_concat.prevConcatFailed)
           Positioned(
             top: topTipOffset,
             left: 16,
             right: 16,
             child: Center(
               child: _buildConcatRetryChip('上一章加载失败，点击重试', () {
-                setState(() => _prevConcatFailed = false);
-                _prependPreviousChapter(force: true);
+                setState(() => _concat.clearPrevConcatFailure());
+                _concat.prependPreviousChapter(force: true);
               }),
             ),
           ),
-        if (_concatDirection == _ConcatDirection.next)
+        if (_concat.concatDirection == ReaderConcatDirection.next)
           Positioned(
             bottom: bottomTipOffset,
             left: 0,
             right: 0,
             child: Center(child: _buildConcatStatusChip('正在加载下一章…')),
           ),
-        if (_nextConcatFailed)
+        if (_concat.nextConcatFailed)
           Positioned(
             bottom: bottomTipOffset,
             left: 16,
             right: 16,
             child: Center(
               child: _buildConcatRetryChip('下一章加载失败，点击重试', () {
-                setState(() => _nextConcatFailed = false);
-                _appendNextChapter(force: true);
+                setState(() => _concat.clearNextConcatFailure());
+                _concat.appendNextChapter(force: true);
               }),
             ),
           ),
         // 上一章的 Offstage 测量层（与正文同宽同构，测高后插入 + 滚动补偿）
-        if (_pendingPrependBlock != null)
+        if (pendingPrepend != null)
           Positioned(
             left: 0,
             top: 0,
             width: MediaQuery.sizeOf(context).width - 32,
             child: Offstage(
               child: SizedBox(
-                key: _prependMeasureKey,
+                key: _concat.prependMeasureKey,
                 width: MediaQuery.sizeOf(context).width - 32,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1394,19 +1333,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                   children: [
                     // 与正文列表同构：分隔线也计入插入高度
                     ReaderChapterDivider(
-                      title: _pendingPrependBlock!.chapter.title,
+                      title: pendingPrepend.chapter.title,
                     ),
-                    for (var i = 0;
-                        i < _pendingPrependBlock!.paragraphs.length;
-                        i++)
+                    for (var i = 0; i < pendingPrepend.paragraphs.length; i++)
                       ParagraphWidget(
-                        paragraph: _pendingPrependBlock!.paragraphs[i],
+                        paragraph: pendingPrepend.paragraphs[i],
                         index: i,
                         fontSize: _fontSize,
                         textBrightness: _textBrightness,
                         isEditMode: false,
                         hasAnnotation: _annotationsByChapter[
-                                _pendingPrependBlock!.chapter.url]
+                                pendingPrepend.chapter.url]
                             ?.containsKey(i) ??
                             false,
                       ),
@@ -1501,189 +1438,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
-  // ========== 无限滚动拼接（滚到顶/底自动拼接前/后章节） ==========
-
-  /// 滚动回调：当前章检测（更新标题/进度/预加载锚点） + 边缘拼接触发
-  void _onScrollChanged() {
-    if (!mounted || _blocks.isEmpty) return;
-    if (ref.read(readerEditModeProvider)) return;
-    _detectCurrentChapterByViewport();
-    _maybeTriggerConcat();
-    _trackReadingAnchor();
-  }
-
-  // ========== 章内阅读位置锚点（采样保存 + 重开恢复） ==========
-
-  /// 滚动时持续采样锚点并节流落库。
-  ///
-  /// 采样走渲染树（SliverList 子节点遍历），布局不可采样时自然跳过；
-  /// 恢复跳转期间不采样不落库，避免把中间估算位置写进库。
-  void _trackReadingAnchor() {
-    if (_isRestoringAnchor) return;
-    final anchor = _captureReadingAnchor();
-    if (anchor == null) return;
-    if (!ReadingAnchorMath.anchorChangedSignificantly(
-        _lastReadingAnchor, anchor)) {
-      return;
-    }
-    _lastReadingAnchor = anchor;
-    final now = DateTime.now();
-    if (now.difference(_lastAnchorWriteAt) < _anchorWriteInterval) return;
-    _lastAnchorWriteAt = now;
-    unawaited(_writeReadingAnchor(anchor));
-  }
-
-  /// 立即落库指定锚点（滚动节流写入与退出兜底共用）
-  Future<void> _writeReadingAnchor(ReadingAnchor anchor) async {
-    try {
-      await ref
-          .read(novelRepositoryProvider)
-          .updateLastReadAnchor(widget.novel.url, anchor);
-    } catch (e, stackTrace) {
-      LoggerService.instance.w(
-        '章内阅读位置锚点写入失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ui,
-        tags: ['reader', 'anchor', 'write-failed'],
-      );
-    }
-  }
-
-  /// 采样当前章内阅读锚点（视口顶所在段落）；渲染树不可采样时返回 null。
-  ReadingAnchor? _captureReadingAnchor() {
-    if (_blocks.isEmpty) return null;
-    if (!_scrollController.hasClients) return null;
-    if (ref.read(readerEditModeProvider)) return null;
-    final items = _sampleListItems();
-    if (items.isEmpty) return null;
-    final topItem =
-        ReadingAnchorMath.topVisibleItem(items, _scrollController.offset);
-    if (topItem == null) return null;
-    return ReadingAnchorMath.anchorFromTopItem(
-      topItem: topItem,
-      scrollOffset: _scrollController.offset,
-      paragraphInfoAt: _paragraphInfoAtFlatIndex,
-      chapterUrlOfFlat: _chapterUrlAtFlatIndex,
-    );
-  }
-
-  // ----- 渲染树采样 -----
-
-  /// 正文 ListView 的 RenderViewport（从章节起点标记向上找），拿不到返回 null
-  RenderViewport? _contentViewport() {
-    for (final key in _blockStartKeys.values) {
-      final box = key.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.attached) continue;
-      final viewport = RenderAbstractViewport.maybeOf(box);
-      if (viewport is RenderViewport) return viewport;
-    }
-    return null;
-  }
-
-  /// 采样正文 ListView 全部已布局条目（按扁平索引升序）。
-  ///
-  /// 走 SliverList 渲染子节点遍历，不依赖段落组件挂 GlobalKey——
-  /// 顶部拼接的 Offstage 测高树与正文同构，挂 GlobalKey 会重复注册崩溃。
-  List<ReaderListItemSample> _sampleListItems() {
-    final viewport = _contentViewport();
-    if (viewport == null || !_scrollController.hasClients) return const [];
-    final samples = <ReaderListItemSample>[];
-    for (var sliver = viewport.firstChild;
-        sliver != null;
-        sliver = viewport.childAfter(sliver)) {
-      // ListView 结构 = SliverPadding(padding) → SliverList
-      final RenderSliverMultiBoxAdaptor? adaptor;
-      if (sliver is RenderSliverMultiBoxAdaptor) {
-        adaptor = sliver;
-      } else if (sliver is RenderSliverPadding &&
-          sliver.child is RenderSliverMultiBoxAdaptor) {
-        adaptor = sliver.child as RenderSliverMultiBoxAdaptor;
-      } else {
-        adaptor = null;
-      }
-      if (adaptor == null) continue;
-      for (var child = adaptor.firstChild;
-          child != null;
-          child = adaptor.childAfter(child)) {
-        final index = child.parentData is SliverMultiBoxAdaptorParentData
-            ? (child.parentData as SliverMultiBoxAdaptorParentData).index
-            : null;
-        final offset = _contentOffsetOf(child);
-        if (index == null || offset == null) continue;
-        samples.add(ReaderListItemSample(
-          index: index,
-          contentOffset: offset,
-          height: child.size.height,
-        ));
-      }
-      break;
-    }
-    samples.sort((a, b) => a.index.compareTo(b.index));
-    return samples;
-  }
-
-  /// 已布局条目顶在滚动内容坐标系里的偏移（与当前章检测同款换算）
-  double? _contentOffsetOf(RenderBox box) {
-    if (!box.attached || !box.hasSize) return null;
-    final viewport = RenderAbstractViewport.maybeOf(box);
-    if (viewport == null || !viewport.attached) return null;
-    final viewportBox = viewport as RenderBox;
-    if (!viewportBox.hasSize) return null;
-    if (!_scrollController.hasClients) return null;
-    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
-    final visualY = box.localToGlobal(Offset.zero).dy - viewportTop;
-    return _scrollController.offset + visualY;
-  }
-
-  // ----- 扁平条目 ↔ 章内段落换算 -----
-  // 与 ReaderContentView 的条目序列一致：每章 = 分隔线 + 段落，末位尾部占位
-
-  /// 扁平条目序号 →（章节 URL, 章内段落序号）；分隔线/尾部占位返回 null
-  (String, int)? _paragraphInfoAtFlatIndex(int flatIndex) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      final inSegment = flatIndex - cursor - 1; // 跳过分隔线
-      if (inSegment >= 0 && inSegment < block.paragraphs.length) {
-        return (block.chapter.url, inSegment);
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
-  }
-
-  /// 扁平条目序号 → 所属章节 URL（分隔线归属其后章节；尾部占位返回 null）
-  String? _chapterUrlAtFlatIndex(int flatIndex) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      if (flatIndex <= cursor + block.paragraphs.length) {
-        return block.chapter.url;
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
-  }
-
-  /// 锚点目标条目的扁平索引（段落越界 clamp 到末段；章不在块列表返回 null）
-  int? _targetFlatIndex(ReadingAnchor anchor) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      if (block.chapter.url == anchor.chapterUrl) {
-        if (block.paragraphs.isEmpty) return cursor;
-        final paraIdx = anchor.paragraphIndex
-            .clamp(0, block.paragraphs.length - 1)
-            .toInt();
-        return cursor + 1 + paraIdx;
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
-  }
+  // ========== 章内阅读位置锚点（重开恢复入口） ==========
+  // 锚点的滚动采样、节流落库与恢复跳转执行都在 ReaderConcatController；
+  // 这里只负责「何时恢复」的决策（读取锚点 + 各类互斥守卫 + 恢复提示）。
 
   /// 恢复上次章内阅读位置（仅首次进入阅读页时经 [_handleScrollPosition] 触发）。
-  ///
-  /// 目标段落通常在 ListView 缓存区外（未布局），无法直接测偏移：
-  /// 用已布局条目线性外推估算偏移 → 跳转 → 目标进入缓存区后按实测
-  /// 偏移精确校正，最多迭代 [_anchorRestoreMaxAttempts] 轮。
   Future<void> _restoreReadingAnchor() async {
     try {
       final anchor = await ref
@@ -1697,8 +1456,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           widget.searchResult!.chapterUrl == _currentChapter.url) {
         return;
       }
-      _isRestoringAnchor = true;
-      final restored = await _jumpToAnchor(anchor);
+      final restored = await _concat.restoreAnchor(anchor);
       if (restored && mounted) {
         ToastUtils.showInfo('已回到上次阅读位置', context: context);
         LoggerService.instance.i(
@@ -1714,162 +1472,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         category: LogCategory.ui,
         tags: ['reader', 'anchor', 'restore-failed'],
       );
-    } finally {
-      _isRestoringAnchor = false;
     }
   }
 
-  /// 按锚点迭代定位并跳转；收敛（目标条目实测到位）返回 true。
-  Future<bool> _jumpToAnchor(ReadingAnchor anchor) async {
-    // 等内容首帧布局完成（loadChapter 完成时 ListView 可能还没构建）
-    await WidgetsBinding.instance.endOfFrame;
-    final targetFlat = _targetFlatIndex(anchor);
-    if (targetFlat == null || !_scrollController.hasClients) return false;
+  // ========== 视口当前章检测与拼接（执行体在 ReaderConcatController） ==========
 
-    for (var attempt = 0; attempt < _anchorRestoreMaxAttempts; attempt++) {
-      final items = _sampleListItems();
-      final exact = ReadingAnchorMath.locateItem(items, targetFlat);
-      if (exact != null) {
-        // 目标已布局：按实测偏移精确校正（含段内比例）
-        final maxOffset = _scrollController.position.maxScrollExtent;
-        final precise =
-            (exact.contentOffset + anchor.paragraphRatio * exact.height)
-                .clamp(0.0, maxOffset)
-                .toDouble();
-        if ((_scrollController.offset - precise).abs() >= 0.5) {
-          _scrollController.jumpTo(precise);
-          await WidgetsBinding.instance.endOfFrame;
-          if (!mounted || !_scrollController.hasClients) return false;
-        }
-        return true;
-      }
-      // 未布局：外推估算并跳转，让目标进入 ListView 缓存区
-      final estimate = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: targetFlat,
-        intraRatio: anchor.paragraphRatio,
-      );
-      if (estimate == null) return false;
-      final maxOffset = _scrollController.position.maxScrollExtent;
-      _scrollController
-          .jumpTo(estimate.clamp(0.0, maxOffset).toDouble());
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) return false;
-    }
-    LoggerService.instance.w(
-      '章内阅读位置恢复未收敛: targetFlat=$targetFlat',
-      category: LogCategory.ui,
-      tags: ['reader', 'anchor', 'restore-unconverged'],
-    );
-    return false;
-  }
-
-  /// 视口贴近顶部 → 拼接上一章；贴近底部 → 拼接下一章
-  void _maybeTriggerConcat() {
-    if (_concatDirection != _ConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
-    if (!position.hasContentDimensions) return;
-    if (DateTime.now().difference(_lastConcatAt) < _concatCooldown) return;
-
-    if (position.pixels <= _concatEdgeTriggerPx) {
-      _prependPreviousChapter();
-    } else if (position.pixels >=
-        position.maxScrollExtent - _concatEdgeTriggerPx) {
-      _appendNextChapter();
-    }
-  }
-
-  /// 当前章检测（基于章节起点的内容偏移）：
-  /// 当前章 = 「视口顶 + 锚点」之上起点最近的章节块。
-  ///
-  /// 起点偏移来源分三层，保证视口外的章节也能参与判定：
-  /// 1. 采样——分隔线标记进入缓存区时直接实测；
-  /// 2. 推导——首块恒为顶部 padding，其余由相邻块高前向/后向推导；
-  /// 3. 兜底——都未知（如刚改字体后未重滚）的章节不参判，保持当前章不变。
-  void _detectCurrentChapterByViewport() {
-    if (_blocks.length <= 1) return;
-
-    // 采样：可测标记 → 实测起点偏移；相邻两个可测标记 → 实测块高
-    int? lastMeasuredIndex;
-    var lastMeasuredOffset = 0.0;
-    for (var i = 0; i < _blocks.length; i++) {
-      final markerContext =
-          _blockStartKeys[_blocks[i].chapter.url]?.currentContext;
-      if (markerContext == null) continue;
-      final renderBox = markerContext.findRenderObject();
-      if (renderBox is! RenderBox ||
-          !renderBox.attached ||
-          !renderBox.hasSize) {
-        continue;
-      }
-      final viewport = RenderAbstractViewport.maybeOf(renderBox);
-      if (viewport == null) continue;
-      final viewportTop = (viewport as RenderBox).localToGlobal(Offset.zero).dy;
-      final visualY = renderBox.localToGlobal(Offset.zero).dy - viewportTop;
-      final contentOffset = _scrollController.offset + visualY;
-
-      _blockStartOffsets[_blocks[i].chapter.url] = contentOffset;
-      final lm = lastMeasuredIndex;
-      if (lm != null && lm == i - 1) {
-        final h = contentOffset - lastMeasuredOffset;
-        if (h > 0) {
-          _knownBlockHeights[_blocks[lm].chapter.url] = h;
-        }
-      }
-      lastMeasuredIndex = i;
-      lastMeasuredOffset = contentOffset;
-    }
-
-    _deriveBlockStartOffsets();
-
-    // 判定：起点 ≤ 「滚动位置 + 锚点」的最近章节
-    Chapter? target;
-    var best = double.negativeInfinity;
-    final anchor = _scrollController.offset + _chapterAnchorPx;
-    for (final block in _blocks) {
-      final start = _blockStartOffsets[block.chapter.url];
-      if (start == null) continue;
-      if (start <= anchor && start > best) {
-        best = start;
-        target = block.chapter;
-      }
-    }
-    if (target != null && target.url != _currentChapter.url) {
-      _setCurrentChapter(target);
-    }
-  }
-
-  /// 用已知块高推导未采样章节的起点偏移
-  void _deriveBlockStartOffsets() {
-    if (_blocks.isEmpty) return;
-    // 首块起点 = 内容原点 + 顶部 padding
-    _blockStartOffsets[_blocks.first.chapter.url] ??= _contentTopPadding;
-    // 前向：起点(i) = 起点(i-1) + 高度(i-1)
-    for (var i = 1; i < _blocks.length; i++) {
-      final prevStart = _blockStartOffsets[_blocks[i - 1].chapter.url];
-      final h = _knownBlockHeights[_blocks[i - 1].chapter.url];
-      if (prevStart != null && h != null) {
-        _blockStartOffsets.putIfAbsent(_blocks[i].chapter.url, () => prevStart + h);
-      }
-    }
-    // 后向：起点(i-1) = 起点(i) - 高度(i-1)
-    for (var i = _blocks.length - 1; i >= 1; i--) {
-      final nextStart = _blockStartOffsets[_blocks[i].chapter.url];
-      final h = _knownBlockHeights[_blocks[i - 1].chapter.url];
-      if (nextStart != null && h != null) {
-        _blockStartOffsets[_blocks[i - 1].chapter.url] ??= nextStart - h;
-      }
-    }
-  }
-
-  /// 视口滚动跨入新章节：切换当前章并同步标题/进度/标注/预加载/全局内容状态
+  /// 视口滚动跨入新章节：切换当前章并同步标题/进度/标注/预加载/全局内容状态。
+  /// 由拼接控制器在滚动回调中检测到章节越界后回调（onCurrentChapterDetected）。
   void _setCurrentChapter(Chapter chapter) {
-    final block = _blocks
-        .cast<_ChapterBlock?>()
-        .firstWhere((b) => b!.chapter.url == chapter.url, orElse: () => null);
-    if (block == null) return;
+    final rawContent = _concat.rawContentOf(chapter.url);
+    if (rawContent == null) return;
 
     setState(() => _currentChapter = chapter);
     LoggerService.instance.i(
@@ -1889,7 +1501,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (!_isRewriteRunning) {
       final notifier = ref.read(chapterContentStateNotifierProvider.notifier);
       notifier.setCurrentContext(chapter, widget.novel);
-      notifier.setContent(block.rawContent);
+      notifier.setContent(rawContent);
       notifier.setLoading(false);
       notifier.setError('');
     }
@@ -1905,227 +1517,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     unawaited(_startPreloadingChapters());
 
     // 切章后窗口外章节块可回收
-    _trimDistantBlocks();
-  }
-
-  /// 回收远离当前章的章节块（保留窗口：前后各 [_keepBlocksPerSide] 章）。
-  ///
-  /// ListView 只保留视口附近的渲染对象，但 [_blocks] 里的正文文本会随
-  /// 会话无限累积，长会话需要窗口裁剪：
-  /// - 下方回收（视口之下）：直接移除，无需补偿；滚回去会经 append 重载。
-  /// - 上方回收（视口之上）：移除会把下方内容上推，需把滚动位置等量上移。
-  ///   补偿量 = 顶部 padding + Σ被移除块高；任一块高度未采样到
-  ///   （如刚改过字体）则放弃本次回收，宁晚勿跳。
-  void _trimDistantBlocks() {
-    final currentIdx =
-        _blocks.indexWhere((b) => b.chapter.url == _currentChapter.url);
-    if (currentIdx == -1 || _blocks.length <= _keepBlocksPerSide * 2 + 1) {
-      return;
-    }
-    final before = _blocks;
-
-    // 下方回收
-    final tailFrom = currentIdx + _keepBlocksPerSide + 1;
-    if (tailFrom < _blocks.length) {
-      for (final b in _blocks.sublist(tailFrom)) {
-        _blockStartKeys.remove(b.chapter.url);
-        _knownBlockHeights.remove(b.chapter.url);
-        _blockStartOffsets.remove(b.chapter.url);
-      }
-      LoggerService.instance.d(
-        '回收尾部章节块: ${_blocks.sublist(tailFrom).map((b) => b.chapter.title).join("、")}',
-        category: LogCategory.ui,
-        tags: ['reader', 'concat', 'trim'],
-      );
-      _blocks = _blocks.sublist(0, tailFrom);
-    }
-
-    // 上方回收（需被移除块高全部已知才补偿）
-    var headTo = currentIdx - _keepBlocksPerSide;
-    if (headTo > 0) {
-      var removedHeight = _contentTopPadding;
-      for (var i = 0; i < headTo; i++) {
-        final h = _knownBlockHeights[_blocks[i].chapter.url];
-        if (h == null) {
-          LoggerService.instance.d(
-            '跳过顶部回收：前 $headTo 章块高未全部采样',
-            category: LogCategory.ui,
-            tags: ['reader', 'concat', 'trim'],
-          );
-          headTo = 0;
-          break;
-        }
-        removedHeight += h;
-      }
-      // 视口须明显低于被移除区域末端，避免补偿期间视野异常
-      if (headTo > 0 &&
-          _scrollController.hasClients &&
-          _scrollController.offset > removedHeight + 200) {
-        for (final b in _blocks.sublist(0, headTo)) {
-          _blockStartKeys.remove(b.chapter.url);
-          _knownBlockHeights.remove(b.chapter.url);
-          _blockStartOffsets.remove(b.chapter.url);
-        }
-        LoggerService.instance.d(
-          '回收顶部章节块: ${_blocks.sublist(0, headTo).map((b) => b.chapter.title).join("、")} '
-          '(补偿 ${removedHeight.round()}px)',
-          category: LogCategory.ui,
-          tags: ['reader', 'concat', 'trim'],
-        );
-        _blocks = _blocks.sublist(headTo);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          // 剩余块整体上移被回收区域的高度，起点偏移同步平移
-          // （新首块的采样起点恰为补偿量，平移后回到顶部 padding）
-          _blockStartOffsets.updateAll((_, off) => off - removedHeight);
-          if (!_scrollController.hasClients) return;
-          _scrollController.jumpTo(_scrollController.offset - removedHeight);
-        });
-      }
-    }
-
-    if (!identical(before, _blocks)) {
-      setState(() {});
-    }
-  }
-
-  /// 拼接下一章（滚动接近底部触发）。底部追加不影响上方内容的滚动位置，
-  /// 无需补偿。
-  Future<void> _appendNextChapter({bool force = false}) async {
-    if (_concatDirection != _ConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
-    if (!force && DateTime.now().difference(_lastConcatAt) < _concatCooldown) {
-      return;
-    }
-    final lastChapter = _blocks.last.chapter;
-    final lastIndex =
-        widget.chapters.indexWhere((c) => c.url == lastChapter.url);
-    if (lastIndex == -1 || lastIndex >= widget.chapters.length - 1) {
-      return; // 已是最后一章
-    }
-    final nextChapter = widget.chapters[lastIndex + 1];
-    if (_blocks.any((b) => b.chapter.url == nextChapter.url)) return;
-
-    _concatDirection = _ConcatDirection.next;
-    if (mounted) setState(() {});
-    try {
-      final content = await _loadBlockContent(nextChapter);
-      if (!mounted) return;
-      setState(() {
-        _blocks = [
-          ..._blocks,
-          _ChapterBlock(chapter: nextChapter, rawContent: content),
-        ];
-        _nextConcatFailed = false;
-        _lastConcatAt = DateTime.now();
-      });
-      LoggerService.instance.i(
-        '已拼接下一章: ${nextChapter.title}',
-        category: LogCategory.ui,
-        tags: ['reader', 'concat', 'append'],
-      );
-      // 新内容上屏（extent 增长）后接续自动滚动：等待加载期间，
-      // 自动滚动可能已在旧内容底部触底停止（控制器触底即 stop）
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) resumeAutoScrollIfIntended();
-      });
-      // 拼接后窗口外章节块可回收
-      _trimDistantBlocks();
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '拼接下一章失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ui,
-        tags: ['reader', 'concat', 'append', 'failed'],
-      );
-      _lastConcatAt = DateTime.now();
-      if (mounted) {
-        setState(() => _nextConcatFailed = true);
-      }
-    } finally {
-      _concatDirection = _ConcatDirection.none;
-      if (mounted) setState(() {});
-    }
-  }
-
-  /// 拼接上一章（滚动接近顶部触发）。
-  ///
-  /// 顶部插入会推挤下方内容，直接 setState 会让视野跳变。这里分两步：
-  /// 1. 先把上一章段落放进与正文同宽同构的 Offstage 测量层，测出总高度；
-  /// 2. 插入章节块，布局完成后把滚动位置等量下移该高度——
-  ///    视野内的段落纹丝不动，实现真正"无限上滚"。
-  Future<void> _prependPreviousChapter({bool force = false}) async {
-    if (_concatDirection != _ConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
-    if (!force && DateTime.now().difference(_lastConcatAt) < _concatCooldown) {
-      return;
-    }
-    final firstChapter = _blocks.first.chapter;
-    final firstIndex =
-        widget.chapters.indexWhere((c) => c.url == firstChapter.url);
-    if (firstIndex <= 0) return; // 已是第一章
-    final prevChapter = widget.chapters[firstIndex - 1];
-    if (_blocks.any((b) => b.chapter.url == prevChapter.url)) return;
-
-    _concatDirection = _ConcatDirection.prev;
-    if (mounted) setState(() {});
-    try {
-      final content = await _loadBlockContent(prevChapter);
-      if (!mounted) return;
-      setState(() {
-        _pendingPrependBlock =
-            _ChapterBlock(chapter: prevChapter, rawContent: content);
-      });
-
-      final height = await _measurePendingPrependBlock();
-      if (!mounted) return;
-      final block = _pendingPrependBlock;
-      if (block == null) return;
-      setState(() {
-        _blocks = [block, ..._blocks];
-        _pendingPrependBlock = null;
-        _prevConcatFailed = false;
-        _lastConcatAt = DateTime.now();
-      });
-      // 布局完成后补偿滚动位置（插入高度 = 视野下移量）；
-      // 已采样的起点偏移同步整体平移，新首块起点回到顶部 padding
-      final prependedUrl = block.chapter.url;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _blockStartOffsets.updateAll((_, off) => off + height);
-        _blockStartOffsets[prependedUrl] = _contentTopPadding;
-        if (!_scrollController.hasClients) return;
-        _scrollController.jumpTo(_scrollController.offset + height);
-      });
-      // 拼接后窗口外章节块可回收
-      _trimDistantBlocks();
-      LoggerService.instance.i(
-        '已拼接上一章: ${prevChapter.title} (补偿 ${height.round()}px)',
-        category: LogCategory.ui,
-        tags: ['reader', 'concat', 'prepend'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '拼接上一章失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ui,
-        tags: ['reader', 'concat', 'prepend', 'failed'],
-      );
-      _lastConcatAt = DateTime.now();
-      if (mounted) {
-        setState(() {
-          _pendingPrependBlock = null;
-          _prevConcatFailed = true;
-        });
-      }
-    } finally {
-      _concatDirection = _ConcatDirection.none;
-      if (mounted) setState(() {});
-    }
+    _concat.trimDistantBlocks();
   }
 
   /// 加载拼接章节内容（缓存优先，未命中走 HeadlessWebView 抓取并写缓存）。
   /// 抓取期间暂停预加载让出 WebView（与主章节加载一致）。
+  /// 注入给拼接控制器使用（loadBlockContent 回调）。
   Future<String> _loadBlockContent(Chapter chapter) async {
     final preloadService = ref.read(preloadServiceProvider);
     preloadService.pause();
@@ -2136,63 +1533,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
-  /// 测量 Offstage 测量层中待插入上一章的总高度
-  Future<double> _measurePendingPrependBlock() {
-    final completer = Completer<double>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        completer.completeError(Exception('阅读页已销毁，测量中止'));
-        return;
-      }
-      final renderBox = _prependMeasureKey.currentContext?.findRenderObject();
-      if (renderBox is RenderBox && renderBox.hasSize) {
-        completer.complete(renderBox.size.height);
-      } else {
-        completer.completeError(Exception('上一章高度测量失败'));
-      }
-    });
-    return completer.future;
-  }
-
-  /// 把全局内容状态同步进章节块：
-  /// - 导航重置后的首章装载（块缺失 → 建块）
-  /// - 刷新 / 编辑保存 / 改写落库（同章内容变化 → 原位替换，不移动视野）
-  void _syncBlocksFromProvider(ChapterContentState contentState) {
-    final chapter = contentState.currentChapter;
-    if (chapter == null || contentState.isLoading) return;
-    if (chapter.url != _currentChapter.url) return;
-    if (contentState.content.trim().isEmpty) return;
-
-    final index = _blocks.indexWhere((b) => b.chapter.url == chapter.url);
-    if (index == -1) {
-      _blocks = [
-        _ChapterBlock(chapter: chapter, rawContent: contentState.content),
-      ];
-    } else if (_blocks[index].rawContent != contentState.content) {
-      // 内容变化（刷新/编辑保存/改写落库）→ 原位替换并失效该块高度缓存
-      _blocks[index] =
-          _ChapterBlock(chapter: chapter, rawContent: contentState.content);
-      _knownBlockHeights.remove(chapter.url);
-      // 该章之后的块整体位移未知，废弃其起点采样，滚动经过时重新采样
-      for (var i = index + 1; i < _blocks.length; i++) {
-        _blockStartOffsets.remove(_blocks[i].chapter.url);
-      }
-    }
-  }
-
   /// 组装正文分段（阅读模式 = 全部章节块；编辑模式 = 仅当前章）
   List<ReaderChapterSegment> _buildSegments(bool isEditMode) {
-    if (_blocks.isEmpty) return const [];
+    final blocks = _concat.blocks;
+    if (blocks.isEmpty) return const [];
     final currentUrl = _currentChapter.url;
-    final Iterable<_ChapterBlock> blocksToShow = isEditMode
-        ? _blocks.where((b) => b.chapter.url == currentUrl)
-        : _blocks;
+    final Iterable<ReaderChapterBlock> blocksToShow = isEditMode
+        ? blocks.where((b) => b.chapter.url == currentUrl)
+        : blocks;
     return [for (final block in blocksToShow) _buildSegment(block, isEditMode)];
   }
 
-  ReaderChapterSegment _buildSegment(_ChapterBlock block, bool isEditMode) {
+  ReaderChapterSegment _buildSegment(ReaderChapterBlock block, bool isEditMode) {
     // 章节起点标记 key（0 高度条目携带，供视口检测/重定位）
-    _blockStartKeys.putIfAbsent(block.chapter.url, () => GlobalKey());
+    _concat.registerStartKey(block.chapter.url);
 
     var paragraphs = block.paragraphs;
     final pendingReveals = <int, String>{};
@@ -2308,20 +1662,3 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   @override
   double get scrollSpeed => _scrollSpeed;
 }
-
-/// 已拼接进阅读视图的章节内容块
-class _ChapterBlock {
-  final Chapter chapter;
-
-  /// 原始正文（快照/编辑保存/全局内容状态同步使用，保留原始格式）
-  final String rawContent;
-
-  /// 展示段落（按 '\n' 拆 + 过滤空行，与显示层一致）
-  late final List<String> paragraphs =
-      ReaderChapterSegment.splitParagraphs(rawContent);
-
-  _ChapterBlock({required this.chapter, required this.rawContent});
-}
-
-/// 拼接方向
-enum _ConcatDirection { none, next, prev }

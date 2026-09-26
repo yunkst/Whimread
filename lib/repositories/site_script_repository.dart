@@ -32,26 +32,24 @@ class SiteScriptRepository extends BaseRepository {
   Future<List<SiteScript>> getAll({
     int limit = 50,
     ScriptSource? sourceFilter,
-  }) async {
-    try {
-      final db = await database;
-      final results = await db.query(
-        'site_scripts',
-        where: sourceFilter != null ? 'source = ?' : null,
-        whereArgs: sourceFilter != null ? [sourceFilter.storageValue] : null,
-        orderBy: 'last_used_at DESC',
-        limit: limit,
-      );
-      return results.map(SiteScript.fromMap).toList();
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '查询所有脚本失败 - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'get_all', 'failed'],
-      );
-      rethrow;
-    }
+  }) {
+    return guard(
+      'site_script.getAll',
+      () async {
+        final db = await database;
+        final results = await db.query(
+          'site_scripts',
+          where: sourceFilter != null ? 'source = ?' : null,
+          whereArgs: sourceFilter != null ? [sourceFilter.storageValue] : null,
+          orderBy: 'last_used_at DESC',
+          limit: limit,
+        );
+        return results.map(SiteScript.fromMap).toList();
+      },
+      message: (e) => '查询所有脚本失败 - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'get_all', 'failed'],
+    );
   }
 
   /// 按 host 变体等价查询脚本（P1 起 FAB / headless 服务的标准查找入口）
@@ -70,222 +68,204 @@ class SiteScriptRepository extends BaseRepository {
     final key = SiteKey.tryFromHost(host);
     if (key == null) return null;
 
-    try {
-      final db = await database;
-      final results = await db.query('site_scripts');
-      for (final row in results) {
-        if (key.matchesHost(row['domain'] as String?)) {
-          return SiteScript.fromMap(row);
+    return guard(
+      'site_script.findByUrlHost',
+      () async {
+        final db = await database;
+        final results = await db.query('site_scripts');
+        for (final row in results) {
+          if (key.matchesHost(row['domain'] as String?)) {
+            return SiteScript.fromMap(row);
+          }
         }
-      }
-      return null;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '按 host 变体查询脚本失败: host=$host - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'find_by_url_host', 'failed'],
-      );
-      rethrow;
-    }
+        return null;
+      },
+      message: (e) => '按 host 变体查询脚本失败: host=$host - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'find_by_url_host', 'failed'],
+    );
   }
 
   /// 按 domain 查询
-  Future<SiteScript?> getByDomain(String domain) async {
-    try {
-      final db = await database;
-      final results = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [domain],
-        limit: 1,
-      );
-      if (results.isEmpty) return null;
-      return SiteScript.fromMap(results.first);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '按域名查询脚本失败: domain=$domain - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'get_by_domain', 'failed'],
-      );
-      rethrow;
-    }
+  Future<SiteScript?> getByDomain(String domain) {
+    return guard(
+      'site_script.getByDomain',
+      () async {
+        final db = await database;
+        final results = await db.query(
+          'site_scripts',
+          where: 'domain = ?',
+          whereArgs: [domain],
+          limit: 1,
+        );
+        if (results.isEmpty) return null;
+        return SiteScript.fromMap(results.first);
+      },
+      message: (e) => '按域名查询脚本失败: domain=$domain - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'get_by_domain', 'failed'],
+    );
   }
 
   /// 按 ID 查询
-  Future<SiteScript?> getById(String id) async {
-    try {
-      final db = await database;
-      final results = await db.query(
-        'site_scripts',
-        where: 'id = ?',
-        whereArgs: [id],
-        limit: 1,
-      );
-      if (results.isEmpty) return null;
-      return SiteScript.fromMap(results.first);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '按ID查询脚本失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'get_by_id', 'failed'],
-      );
-      rethrow;
-    }
+  Future<SiteScript?> getById(String id) {
+    return guard(
+      'site_script.getById',
+      () async {
+        final db = await database;
+        final results = await db.query(
+          'site_scripts',
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (results.isEmpty) return null;
+        return SiteScript.fromMap(results.first);
+      },
+      message: (e) => '按ID查询脚本失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'get_by_id', 'failed'],
+    );
   }
 
   /// 删除脚本
-  Future<void> delete(String id) async {
-    try {
-      final db = await database;
-      await db.delete('site_scripts', where: 'id = ?', whereArgs: [id]);
-      LoggerService.instance.i(
-        '删除脚本: id=$id',
-        category: LogCategory.database,
-        tags: ['site_script', 'delete', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除脚本失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'delete', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> delete(String id) {
+    return guard(
+      'site_script.delete',
+      () async {
+        final db = await database;
+        await db.delete('site_scripts', where: 'id = ?', whereArgs: [id]);
+        LoggerService.instance.i(
+          '删除脚本: id=$id',
+          category: LogCategory.database,
+          tags: ['site_script', 'delete', 'success'],
+        );
+      },
+      message: (e) => '删除脚本失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'delete', 'failed'],
+    );
   }
 
   /// 按 domain 删除
-  Future<void> deleteByDomain(String domain) async {
-    try {
-      final db = await database;
-      await db.delete('site_scripts', where: 'domain = ?', whereArgs: [domain]);
-      LoggerService.instance.i(
-        '删除域名所有脚本: domain=$domain',
-        category: LogCategory.database,
-        tags: ['site_script', 'delete_by_domain', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除域名脚本失败: domain=$domain - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'delete_by_domain', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> deleteByDomain(String domain) {
+    return guard(
+      'site_script.deleteByDomain',
+      () async {
+        final db = await database;
+        await db.delete('site_scripts', where: 'domain = ?', whereArgs: [domain]);
+        LoggerService.instance.i(
+          '删除域名所有脚本: domain=$domain',
+          category: LogCategory.database,
+          tags: ['site_script', 'delete_by_domain', 'success'],
+        );
+      },
+      message: (e) => '删除域名脚本失败: domain=$domain - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'delete_by_domain', 'failed'],
+    );
   }
 
   /// 更新 verified 状态
   ///
   /// 重要事件：setVerified(false) 意味着脚本被自动禁用
-  Future<void> setVerified(String id, bool verified) async {
-    try {
-      final db = await database;
-      await db.update(
-        'site_scripts',
-        {'verified': verified ? 1 : 0},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.w(
-        '脚本 verified 状态变更: id=$id verified=$verified',
-        category: LogCategory.database,
-        tags: ['site_script', 'set_verified'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新脚本 verified 状态失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'set_verified', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> setVerified(String id, bool verified) {
+    return guard(
+      'site_script.setVerified',
+      () async {
+        final db = await database;
+        await db.update(
+          'site_scripts',
+          {'verified': verified ? 1 : 0},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.w(
+          '脚本 verified 状态变更: id=$id verified=$verified',
+          category: LogCategory.database,
+          tags: ['site_script', 'set_verified'],
+        );
+      },
+      message: (e) => '更新脚本 verified 状态失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'set_verified', 'failed'],
+    );
   }
 
   /// 重命名站点显示名（脚本管理面板手动改名用）。
   ///
   /// 写入 `display_name` 列（书架站点 Tab 优先展示的名字）；传空串则清空、
   /// 展示方回退 host。
-  Future<void> setDisplayName(String id, String displayName) async {
-    try {
-      final db = await database;
-      await db.update(
-        'site_scripts',
-        {'display_name': displayName.trim()},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        '脚本显示名变更: id=$id displayName=${displayName.trim()}',
-        category: LogCategory.database,
-        tags: ['site_script', 'set_display_name'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新脚本显示名失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'set_display_name', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> setDisplayName(String id, String displayName) {
+    return guard(
+      'site_script.setDisplayName',
+      () async {
+        final db = await database;
+        await db.update(
+          'site_scripts',
+          {'display_name': displayName.trim()},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          '脚本显示名变更: id=$id displayName=${displayName.trim()}',
+          category: LogCategory.database,
+          tags: ['site_script', 'set_display_name'],
+        );
+      },
+      message: (e) => '更新脚本显示名失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'set_display_name', 'failed'],
+    );
   }
 
   /// 更新 use_count 和 last_used_at（标记已使用）
-  Future<void> markUsed(String id) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      await db.rawUpdate(
-        'UPDATE site_scripts SET use_count = use_count + 1, last_used_at = ? WHERE id = ?',
-        [now, id],
-      );
-      LoggerService.instance.d(
-        '脚本标记已用: id=$id',
-        category: LogCategory.cache,
-        tags: ['site_script', 'mark_used'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '标记脚本已用失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'mark_used', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> markUsed(String id) {
+    return guard(
+      'site_script.markUsed',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await db.rawUpdate(
+          'UPDATE site_scripts SET use_count = use_count + 1, last_used_at = ? WHERE id = ?',
+          [now, id],
+        );
+        LoggerService.instance.d(
+          '脚本标记已用: id=$id',
+          category: LogCategory.cache,
+          tags: ['site_script', 'mark_used'],
+        );
+      },
+      message: (e) => '标记脚本已用失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'mark_used', 'failed'],
+    );
   }
 
   /// 查询所有域名的站点显示名（display_name 非空的行）。
   ///
   /// 返回 `domain -> display_name`；键统一小写，便于与 URL host（书架侧
   /// 同为小写）对齐。用于书架页按站点拆分 Tab 的显示名解析。
-  Future<Map<String, String>> getDisplayNamesByDomain() async {
-    try {
-      final db = await database;
-      final results = await db.query(
-        'site_scripts',
-        columns: ['domain', 'display_name'],
-        where: "display_name != ''",
-      );
-      return {
-        for (final row in results)
-          (row['domain'] as String).toLowerCase():
-              row['display_name'] as String,
-      };
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '查询站点显示名失败 - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'get_display_names', 'failed'],
-      );
-      rethrow;
-    }
+  Future<Map<String, String>> getDisplayNamesByDomain() {
+    return guard(
+      'site_script.getDisplayNamesByDomain',
+      () async {
+        final db = await database;
+        final results = await db.query(
+          'site_scripts',
+          columns: ['domain', 'display_name'],
+          where: "display_name != ''",
+        );
+        return {
+          for (final row in results)
+            (row['domain'] as String).toLowerCase():
+                row['display_name'] as String,
+        };
+      },
+      message: (e) => '查询站点显示名失败 - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'get_display_names', 'failed'],
+    );
   }
 
   /// 按 domain 去重保存：已存在则 UPDATE，不存在则 INSERT
@@ -304,91 +284,89 @@ class SiteScriptRepository extends BaseRepository {
     String sampleUrl = '',
     bool chapterListOcr = false, // v39 拆列后独立标记
     bool chapterContentOcr = false,
-  }) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
+  }) {
+    return guard(
+      'site_script.upsertByDomain',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
 
-      final existing = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [domain],
-        orderBy: 'last_used_at DESC',
-      );
-
-      if (existing.isNotEmpty) {
-        // UPDATE：保留 id / created_at / use_count，重置 verified
-        final row = existing.first;
-        await db.update(
+        final existing = await db.query(
           'site_scripts',
-          {
-            'chapter_list_js': chapterListJs,
-            'chapter_content_js': chapterContentJs,
-            'url_pattern': urlPattern,
-            'sample_url': sampleUrl,
-            'last_used_at': now,
-            'verified': 0, // 脚本内容变了，需要重新验证
-            'chapter_list_ocr': chapterListOcr ? 1 : 0,
-            'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-          },
-          where: 'id = ?',
-          whereArgs: [row['id']],
+          where: 'domain = ?',
+          whereArgs: [domain],
+          orderBy: 'last_used_at DESC',
         );
 
-        // 清理同 domain 的历史重复记录（保留第一条，删除其余）
-        if (existing.length > 1) {
-          final keepId = row['id'] as String;
-          final deleted = await db.delete(
+        if (existing.isNotEmpty) {
+          // UPDATE：保留 id / created_at / use_count，重置 verified
+          final row = existing.first;
+          await db.update(
             'site_scripts',
-            where: 'domain = ? AND id != ?',
-            whereArgs: [domain, keepId],
+            {
+              'chapter_list_js': chapterListJs,
+              'chapter_content_js': chapterContentJs,
+              'url_pattern': urlPattern,
+              'sample_url': sampleUrl,
+              'last_used_at': now,
+              'verified': 0, // 脚本内容变了，需要重新验证
+              'chapter_list_ocr': chapterListOcr ? 1 : 0,
+              'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+            },
+            where: 'id = ?',
+            whereArgs: [row['id']],
           );
+
+          // 清理同 domain 的历史重复记录（保留第一条，删除其余）
+          if (existing.length > 1) {
+            final keepId = row['id'] as String;
+            final deleted = await db.delete(
+              'site_scripts',
+              where: 'domain = ? AND id != ?',
+              whereArgs: [domain, keepId],
+            );
+            LoggerService.instance.i(
+              '清理同域名重复脚本: domain=$domain, deleted=$deleted',
+              category: LogCategory.database,
+              tags: ['site_script', 'upsert', 'cleanup'],
+            );
+          }
+
           LoggerService.instance.i(
-            '清理同域名重复脚本: domain=$domain, deleted=$deleted',
+            '更新域名脚本 (upsert): domain=$domain id=${row['id']}',
             category: LogCategory.database,
-            tags: ['site_script', 'upsert', 'cleanup'],
+            tags: ['site_script', 'upsert', 'update'],
           );
+          return (id: row['id'] as String, isInsert: false);
         }
 
+        // INSERT：首次保存
+        final id = _newScriptId();
+        await db.insert('site_scripts', {
+          'id': id,
+          'domain': domain,
+          'url_pattern': urlPattern,
+          'chapter_list_js': chapterListJs,
+          'chapter_content_js': chapterContentJs,
+          'sample_url': sampleUrl,
+          'created_at': now,
+          'last_used_at': now,
+          'use_count': 0,
+          'verified': 0,
+          'chapter_list_ocr': chapterListOcr ? 1 : 0,
+          'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+        });
         LoggerService.instance.i(
-          '更新域名脚本 (upsert): domain=$domain id=${row['id']}',
+          '新增域名脚本 (upsert): domain=$domain id=$id',
           category: LogCategory.database,
-          tags: ['site_script', 'upsert', 'update'],
+          tags: ['site_script', 'upsert', 'insert'],
         );
-        return (id: row['id'] as String, isInsert: false);
-      }
-
-      // INSERT：首次保存
-      final id = _newScriptId();
-      await db.insert('site_scripts', {
-        'id': id,
-        'domain': domain,
-        'url_pattern': urlPattern,
-        'chapter_list_js': chapterListJs,
-        'chapter_content_js': chapterContentJs,
-        'sample_url': sampleUrl,
-        'created_at': now,
-        'last_used_at': now,
-        'use_count': 0,
-        'verified': 0,
-        'chapter_list_ocr': chapterListOcr ? 1 : 0,
-        'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-      });
-      LoggerService.instance.i(
-        '新增域名脚本 (upsert): domain=$domain id=$id',
-        category: LogCategory.database,
-        tags: ['site_script', 'upsert', 'insert'],
-      );
-      return (id: id, isInsert: true);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'upsert 脚本失败: domain=$domain - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'upsert', 'failed'],
-      );
-      rethrow;
-    }
+        return (id: id, isInsert: true);
+      },
+      message: (e) => 'upsert 脚本失败: domain=$domain - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'upsert', 'failed'],
+    );
   }
 
   /// 增量更新某域名某类型脚本（save_script 分次保存用）。
@@ -425,97 +403,95 @@ class SiteScriptRepository extends BaseRepository {
         (displayName != null && displayName.trim().isNotEmpty)
             ? displayName.trim()
             : null;
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
+    return guard(
+      'site_script.updateScriptPart',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
 
-      final existing = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [domain],
-        orderBy: 'last_used_at DESC',
-        limit: 1,
-      );
-
-      if (existing.isEmpty) {
-        // 首次保存：INSERT 一条新记录，本次列写脚本 + ocr，其余列填空串占位。
-        // 其余类型由后续 save_script 调同样的方法补齐，无需前置工具。
-        final insertId = _newScriptId();
-        await db.insert('site_scripts', {
-          'id': insertId,
-          'domain': domain,
-          'url_pattern': '',
-          'chapter_list_js':
-              scriptType == 'chapter_list' ? scriptJs : '',
-          'chapter_content_js':
-              scriptType == 'chapter_content' ? scriptJs : '',
-          'bookshelf_js': scriptType == 'bookshelf' ? scriptJs : '',
-          'chapter_list_ocr': scriptType == 'chapter_list' ? (ocr ? 1 : 0) : 0,
-          'chapter_content_ocr':
-              scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
-          'sample_url': testUrl ?? '',
-          'display_name': effectiveDisplayName ?? '',
-          'preferred_mode': preferredMode ?? 0,
-          'created_at': now,
-          'last_used_at': now,
-          'use_count': 0,
-          'verified': 0,
-        });
-        LoggerService.instance.i(
-          'updateScriptPart (insert): domain=$domain type=$scriptType ocr=$ocr id=$insertId',
-          category: LogCategory.database,
-          tags: ['site_script', 'update_part', 'insert'],
+        final existing = await db.query(
+          'site_scripts',
+          where: 'domain = ?',
+          whereArgs: [domain],
+          orderBy: 'last_used_at DESC',
+          limit: 1,
         );
-        return (success: true, id: insertId, reason: null);
-      }
 
-      // 已存在：UPDATE 对应列（+ 对应 ocr 列，bookshelf 除外）+ last_used_at，
-      // verified 重置为 0。
-      final id = existing.first['id'] as String;
-      final Map<String, Object?> updateValues = switch (scriptType) {
-        'chapter_list' => {
-            'chapter_list_js': scriptJs,
-            'chapter_list_ocr': ocr ? 1 : 0,
-          },
-        'chapter_content' => {
-            'chapter_content_js': scriptJs,
-            'chapter_content_ocr': ocr ? 1 : 0,
-          },
-        // bookshelf：无 ocr 列，只写脚本
-        _ => {'bookshelf_js': scriptJs},
-      };
-      updateValues['last_used_at'] = DateTime.now().millisecondsSinceEpoch;
-      updateValues['verified'] = 0;
-      if (testUrl != null) updateValues['sample_url'] = testUrl;
-      // 显示名仅在实际提供时覆盖，分次保存互不清空
-      if (effectiveDisplayName != null) {
-        updateValues['display_name'] = effectiveDisplayName;
-      }
-      // 创作模式仅在实际提供时覆盖
-      if (preferredMode != null) {
-        updateValues['preferred_mode'] = preferredMode;
-      }
-      await db.update(
-        'site_scripts',
-        updateValues,
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        'updateScriptPart (update): domain=$domain type=$scriptType ocr=$ocr id=$id',
-        category: LogCategory.database,
-        tags: ['site_script', 'update_part', 'update'],
-      );
-      return (success: true, id: id, reason: null);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'updateScriptPart 失败: domain=$domain - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'update_part', 'failed'],
-      );
-      rethrow;
-    }
+        if (existing.isEmpty) {
+          // 首次保存：INSERT 一条新记录，本次列写脚本 + ocr，其余列填空串占位。
+          // 其余类型由后续 save_script 调同样的方法补齐，无需前置工具。
+          final insertId = _newScriptId();
+          await db.insert('site_scripts', {
+            'id': insertId,
+            'domain': domain,
+            'url_pattern': '',
+            'chapter_list_js':
+                scriptType == 'chapter_list' ? scriptJs : '',
+            'chapter_content_js':
+                scriptType == 'chapter_content' ? scriptJs : '',
+            'bookshelf_js': scriptType == 'bookshelf' ? scriptJs : '',
+            'chapter_list_ocr': scriptType == 'chapter_list' ? (ocr ? 1 : 0) : 0,
+            'chapter_content_ocr':
+                scriptType == 'chapter_content' ? (ocr ? 1 : 0) : 0,
+            'sample_url': testUrl ?? '',
+            'display_name': effectiveDisplayName ?? '',
+            'preferred_mode': preferredMode ?? 0,
+            'created_at': now,
+            'last_used_at': now,
+            'use_count': 0,
+            'verified': 0,
+          });
+          LoggerService.instance.i(
+            'updateScriptPart (insert): domain=$domain type=$scriptType ocr=$ocr id=$insertId',
+            category: LogCategory.database,
+            tags: ['site_script', 'update_part', 'insert'],
+          );
+          return (success: true, id: insertId, reason: null);
+        }
+
+        // 已存在：UPDATE 对应列（+ 对应 ocr 列，bookshelf 除外）+ last_used_at，
+        // verified 重置为 0。
+        final id = existing.first['id'] as String;
+        final Map<String, Object?> updateValues = switch (scriptType) {
+          'chapter_list' => {
+              'chapter_list_js': scriptJs,
+              'chapter_list_ocr': ocr ? 1 : 0,
+            },
+          'chapter_content' => {
+              'chapter_content_js': scriptJs,
+              'chapter_content_ocr': ocr ? 1 : 0,
+            },
+          // bookshelf：无 ocr 列，只写脚本
+          _ => {'bookshelf_js': scriptJs},
+        };
+        updateValues['last_used_at'] = DateTime.now().millisecondsSinceEpoch;
+        updateValues['verified'] = 0;
+        if (testUrl != null) updateValues['sample_url'] = testUrl;
+        // 显示名仅在实际提供时覆盖，分次保存互不清空
+        if (effectiveDisplayName != null) {
+          updateValues['display_name'] = effectiveDisplayName;
+        }
+        // 创作模式仅在实际提供时覆盖
+        if (preferredMode != null) {
+          updateValues['preferred_mode'] = preferredMode;
+        }
+        await db.update(
+          'site_scripts',
+          updateValues,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          'updateScriptPart (update): domain=$domain type=$scriptType ocr=$ocr id=$id',
+          category: LogCategory.database,
+          tags: ['site_script', 'update_part', 'update'],
+        );
+        return (success: true, id: id, reason: null);
+      },
+      message: (e) => 'updateScriptPart 失败: domain=$domain - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'update_part', 'failed'],
+    );
   }
 
   /// 落库一条云端下载的脚本（v47）。
@@ -529,95 +505,93 @@ class SiteScriptRepository extends BaseRepository {
   ///   语义置 1（管理员审核通过才允许下载）。
   Future<({String id, bool isInsert})> insertRemoteDownload(
     SiteScript script,
-  ) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
+  ) {
+    return guard(
+      'site_script.insertRemoteDownload',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
 
-      final existing = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [script.domain],
-        orderBy: 'last_used_at DESC',
-      );
-      if (existing.isNotEmpty) {
-        final row = existing.first;
-        final existingSource = row['source'] as String? ?? 'local';
-        if (existingSource == 'local') {
-          // 本地自建脚本优先，不覆盖——调用方提示用户决策
+        final existing = await db.query(
+          'site_scripts',
+          where: 'domain = ?',
+          whereArgs: [script.domain],
+          orderBy: 'last_used_at DESC',
+        );
+        if (existing.isNotEmpty) {
+          final row = existing.first;
+          final existingSource = row['source'] as String? ?? 'local';
+          if (existingSource == 'local') {
+            // 本地自建脚本优先，不覆盖——调用方提示用户决策
+            LoggerService.instance.i(
+              'insertRemoteDownload: domain=${script.domain} 已有本地脚本，不覆盖 '
+              '(id=${row['id']})',
+              category: LogCategory.database,
+              tags: ['site_script', 'remote_download', 'skip_local'],
+            );
+            return (id: row['id'] as String, isInsert: false);
+          }
+          // 已有 remote 副本：覆盖载荷（重新下载 / 升级）
+          await db.update(
+            'site_scripts',
+            {
+              'chapter_list_js': script.chapterListJs,
+              'chapter_content_js': script.chapterContentJs,
+              'bookshelf_js': script.bookshelfJs,
+              'chapter_list_ocr': script.chapterListOcr ? 1 : 0,
+              'chapter_content_ocr': script.chapterContentOcr ? 1 : 0,
+              'url_pattern': script.urlPattern,
+              'sample_url': script.sampleUrl,
+              'remote_id': script.remoteId,
+              'remote_version': script.remoteVersion,
+              'sha256': script.sha256,
+              'last_synced_at': now,
+              'last_used_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+          // 清理同 domain 的其他 remote 重复副本（同 upsert 策略）
+          if (existing.length > 1) {
+            final keepId = row['id'] as String;
+            await db.delete(
+              'site_scripts',
+              where: 'domain = ? AND id != ?',
+              whereArgs: [script.domain, keepId],
+            );
+          }
           LoggerService.instance.i(
-            'insertRemoteDownload: domain=${script.domain} 已有本地脚本，不覆盖 '
-            '(id=${row['id']})',
+            'insertRemoteDownload (update): domain=${script.domain} '
+            'id=${row['id']} version=${script.remoteVersion}',
             category: LogCategory.database,
-            tags: ['site_script', 'remote_download', 'skip_local'],
+            tags: ['site_script', 'remote_download', 'update'],
           );
           return (id: row['id'] as String, isInsert: false);
         }
-        // 已有 remote 副本：覆盖载荷（重新下载 / 升级）
-        await db.update(
-          'site_scripts',
-          {
-            'chapter_list_js': script.chapterListJs,
-            'chapter_content_js': script.chapterContentJs,
-            'bookshelf_js': script.bookshelfJs,
-            'chapter_list_ocr': script.chapterListOcr ? 1 : 0,
-            'chapter_content_ocr': script.chapterContentOcr ? 1 : 0,
-            'url_pattern': script.urlPattern,
-            'sample_url': script.sampleUrl,
-            'remote_id': script.remoteId,
-            'remote_version': script.remoteVersion,
-            'sha256': script.sha256,
-            'last_synced_at': now,
-            'last_used_at': now,
-          },
-          where: 'id = ?',
-          whereArgs: [row['id']],
-        );
-        // 清理同 domain 的其他 remote 重复副本（同 upsert 策略）
-        if (existing.length > 1) {
-          final keepId = row['id'] as String;
-          await db.delete(
-            'site_scripts',
-            where: 'domain = ? AND id != ?',
-            whereArgs: [script.domain, keepId],
-          );
-        }
-        LoggerService.instance.i(
-          'insertRemoteDownload (update): domain=${script.domain} '
-          'id=${row['id']} version=${script.remoteVersion}',
-          category: LogCategory.database,
-          tags: ['site_script', 'remote_download', 'update'],
-        );
-        return (id: row['id'] as String, isInsert: false);
-      }
 
-      final id = _newScriptId();
-      await db.insert('site_scripts', {
-        ...script.toMap(),
-        'id': id,
-        'created_at': now,
-        'last_used_at': now,
-        'use_count': 0,
-        'verified': 1, // 云端已过审脚本，下载即视为已验证
-        'last_synced_at': now,
-        'source': ScriptSource.remote.storageValue,
-      });
-      LoggerService.instance.i(
-        'insertRemoteDownload (insert): domain=${script.domain} id=$id '
-        'remoteId=${script.remoteId} version=${script.remoteVersion}',
-        category: LogCategory.database,
-        tags: ['site_script', 'remote_download', 'insert'],
-      );
-      return (id: id, isInsert: true);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'insertRemoteDownload 失败: domain=${script.domain} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'remote_download', 'failed'],
-      );
-      rethrow;
-    }
+        final id = _newScriptId();
+        await db.insert('site_scripts', {
+          ...script.toMap(),
+          'id': id,
+          'created_at': now,
+          'last_used_at': now,
+          'use_count': 0,
+          'verified': 1, // 云端已过审脚本，下载即视为已验证
+          'last_synced_at': now,
+          'source': ScriptSource.remote.storageValue,
+        });
+        LoggerService.instance.i(
+          'insertRemoteDownload (insert): domain=${script.domain} id=$id '
+          'remoteId=${script.remoteId} version=${script.remoteVersion}',
+          category: LogCategory.database,
+          tags: ['site_script', 'remote_download', 'insert'],
+        );
+        return (id: id, isInsert: true);
+      },
+      message: (e) => 'insertRemoteDownload 失败: domain=${script.domain} - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'remote_download', 'failed'],
+    );
   }
 
   /// 已下载脚本升级到新版本（v47）：仅覆盖载荷与远端元信息。
@@ -632,42 +606,40 @@ class SiteScriptRepository extends BaseRepository {
     bool chapterContentOcr = false,
     required String sha256,
     required int remoteVersion,
-  }) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      await db.update(
-        'site_scripts',
-        {
-          'chapter_list_js': chapterListJs,
-          'chapter_content_js': chapterContentJs,
-          'bookshelf_js': bookshelfJs,
-          'chapter_list_ocr': chapterListOcr ? 1 : 0,
-          'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-          'url_pattern': urlPattern,
-          'sample_url': sampleUrl,
-          'sha256': sha256,
-          'remote_version': remoteVersion,
-          'last_synced_at': now,
-          'verified': 1,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        'updateFromRemote: id=$id version=$remoteVersion',
-        category: LogCategory.database,
-        tags: ['site_script', 'update_from_remote', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'updateFromRemote 失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'update_from_remote', 'failed'],
-      );
-      rethrow;
-    }
+  }) {
+    return guard(
+      'site_script.updateFromRemote',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await db.update(
+          'site_scripts',
+          {
+            'chapter_list_js': chapterListJs,
+            'chapter_content_js': chapterContentJs,
+            'bookshelf_js': bookshelfJs,
+            'chapter_list_ocr': chapterListOcr ? 1 : 0,
+            'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+            'url_pattern': urlPattern,
+            'sample_url': sampleUrl,
+            'sha256': sha256,
+            'remote_version': remoteVersion,
+            'last_synced_at': now,
+            'verified': 1,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          'updateFromRemote: id=$id version=$remoteVersion',
+          category: LogCategory.database,
+          tags: ['site_script', 'update_from_remote', 'success'],
+        );
+      },
+      message: (e) => 'updateFromRemote 失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'update_from_remote', 'failed'],
+    );
   }
 
   /// 本地脚本共享成功后回写远端元信息（v47）。
@@ -676,91 +648,85 @@ class SiteScriptRepository extends BaseRepository {
     required String remoteId,
     required int version,
     required String sha256,
-  }) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      await db.update(
-        'site_scripts',
-        {
-          'remote_id': remoteId,
-          'remote_version': version,
-          'sha256': sha256,
-          'shared': 1,
-          'last_synced_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        'markShared: id=$id remoteId=$remoteId version=$version',
-        category: LogCategory.database,
-        tags: ['site_script', 'mark_shared', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'markShared 失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'mark_shared', 'failed'],
-      );
-      rethrow;
-    }
+  }) {
+    return guard(
+      'site_script.markShared',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await db.update(
+          'site_scripts',
+          {
+            'remote_id': remoteId,
+            'remote_version': version,
+            'sha256': sha256,
+            'shared': 1,
+            'last_synced_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          'markShared: id=$id remoteId=$remoteId version=$version',
+          category: LogCategory.database,
+          tags: ['site_script', 'mark_shared', 'success'],
+        );
+      },
+      message: (e) => 'markShared 失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'mark_shared', 'failed'],
+    );
   }
 
   /// 取消共享（v47）：清空 shared 标记与远端元信息。
-  Future<void> markUnshared(String id) async {
-    try {
-      final db = await database;
-      await db.update(
-        'site_scripts',
-        {
-          'remote_id': null,
-          'remote_version': 0,
-          'shared': 0,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        'markUnshared: id=$id',
-        category: LogCategory.database,
-        tags: ['site_script', 'mark_unshared', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'markUnshared 失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'mark_unshared', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> markUnshared(String id) {
+    return guard(
+      'site_script.markUnshared',
+      () async {
+        final db = await database;
+        await db.update(
+          'site_scripts',
+          {
+            'remote_id': null,
+            'remote_version': 0,
+            'shared': 0,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          'markUnshared: id=$id',
+          category: LogCategory.database,
+          tags: ['site_script', 'mark_unshared', 'success'],
+        );
+      },
+      message: (e) => 'markUnshared 失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'mark_unshared', 'failed'],
+    );
   }
 
   /// 设置用户显式启停开关（v47，与 verified 自动化语义解耦）。
-  Future<void> setEnabled(String id, bool enabled) async {
-    try {
-      final db = await database;
-      await db.update(
-        'site_scripts',
-        {'enabled': enabled ? 1 : 0},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        '脚本 enabled 状态变更: id=$id enabled=$enabled',
-        category: LogCategory.database,
-        tags: ['site_script', 'set_enabled'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '设置脚本 enabled 失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'set_enabled', 'failed'],
-      );
-      rethrow;
-    }
+  Future<void> setEnabled(String id, bool enabled) {
+    return guard(
+      'site_script.setEnabled',
+      () async {
+        final db = await database;
+        await db.update(
+          'site_scripts',
+          {'enabled': enabled ? 1 : 0},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          '脚本 enabled 状态变更: id=$id enabled=$enabled',
+          category: LogCategory.database,
+          tags: ['site_script', 'set_enabled'],
+        );
+      },
+      message: (e) => '设置脚本 enabled 失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['site_script', 'set_enabled', 'failed'],
+    );
   }
 }

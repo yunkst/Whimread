@@ -112,49 +112,47 @@ class ChapterRepository extends BaseRepository
       List<String> chapterUrls) async {
     if (chapterUrls.isEmpty) return {};
 
-    try {
-      final db = await database;
+    // 失败必须上抛：返回 {} 会让调用方把"查询失败"当成"全部未缓存"，
+    // 触发整本书重抓（2026-09 审查 P2）——guard 记日志后 rethrow。
+    return guard(
+      'chapter.getChaptersCacheStatus',
+      () async {
+        final db = await database;
 
-      // 去重后分批查询：部分设备 SQLite 主机变量上限为 999，全书章节
-      // 一次性 IN 查询可能超限，按 500 一批拆分（去重不影响返回语义）。
-      const batchSize = 500;
-      final uniqueUrls = chapterUrls.toSet().toList();
+        // 去重后分批查询：部分设备 SQLite 主机变量上限为 999，全书章节
+        // 一次性 IN 查询可能超限，按 500 一批拆分（去重不影响返回语义）。
+        const batchSize = 500;
+        final uniqueUrls = chapterUrls.toSet().toList();
 
-      final Map<String, bool> statusMap = {};
-      for (var i = 0; i < uniqueUrls.length; i += batchSize) {
-        final batchUrls =
-            uniqueUrls.sublist(i, min(i + batchSize, uniqueUrls.length));
-        final placeholders = List.filled(batchUrls.length, '?').join(',');
+        final Map<String, bool> statusMap = {};
+        for (var i = 0; i < uniqueUrls.length; i += batchSize) {
+          final batchUrls =
+              uniqueUrls.sublist(i, min(i + batchSize, uniqueUrls.length));
+          final placeholders = List.filled(batchUrls.length, '?').join(',');
 
-        final results = await db.rawQuery('''
+          final results = await db.rawQuery('''
           SELECT chapterUrl
           FROM chapter_cache
           WHERE chapterUrl IN ($placeholders)
         ''', batchUrls);
 
-        for (final row in results) {
-          final chapterUrl = row['chapterUrl'] as String;
-          statusMap[chapterUrl] = true;
-          _addCachedInMemory(chapterUrl);
+          for (final row in results) {
+            final chapterUrl = row['chapterUrl'] as String;
+            statusMap[chapterUrl] = true;
+            _addCachedInMemory(chapterUrl);
+          }
         }
-      }
 
-      for (final url in chapterUrls) {
-        statusMap.putIfAbsent(url, () => false);
-      }
+        for (final url in chapterUrls) {
+          statusMap.putIfAbsent(url, () => false);
+        }
 
-      return statusMap;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '批量查询章节缓存状态失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'cache', 'batch_query_failed'],
-      );
-      // 失败必须上抛：返回 {} 会让调用方把"查询失败"当成"全部未缓存"，
-      // 触发整本书重抓（2026-09 审查 P2）
-      rethrow;
-    }
+        return statusMap;
+      },
+      message: (e) => '批量查询章节缓存状态失败: $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'cache', 'batch_query_failed'],
+    );
   }
 
   /// 清理内存状态
@@ -171,34 +169,32 @@ class ChapterRepository extends BaseRepository
   /// 缓存章节内容
   @override
   Future<int> cacheChapter(
-      String novelUrl, Chapter chapter, String content) async {
-    try {
-      final db = await database;
-      final result = await db.insert(
-        'chapter_cache',
-        {
-          'novelUrl': novelUrl,
-          'chapterUrl': chapter.url,
-          'title': chapter.title,
-          'content': content,
-          'chapterIndex': chapter.chapterIndex,
-          'cachedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      String novelUrl, Chapter chapter, String content) {
+    return guard(
+      'chapter.cacheChapter',
+      () async {
+        final db = await database;
+        final result = await db.insert(
+          'chapter_cache',
+          {
+            'novelUrl': novelUrl,
+            'chapterUrl': chapter.url,
+            'title': chapter.title,
+            'content': content,
+            'chapterIndex': chapter.chapterIndex,
+            'cachedAt': DateTime.now().millisecondsSinceEpoch,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
 
-      _addCachedInMemory(chapter.url);
+        _addCachedInMemory(chapter.url);
 
-      return result;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '缓存章节内容失败: ${chapter.title} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'cache', 'failed'],
-      );
-      rethrow;
-    }
+        return result;
+      },
+      message: (e) => '缓存章节内容失败: ${chapter.title} - $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'cache', 'failed'],
+    );
   }
 
   /// 更新章节内容
@@ -287,46 +283,44 @@ class ChapterRepository extends BaseRepository
   ///
   /// 同时清理内存缓存、版本历史和段落标注，防止"幻读"
   @override
-  Future<int> deleteCachedChapters(String novelUrl) async {
-    try {
-      // 先查询该小说的所有章节URL，用于清理内存缓存
-      final db = await database;
-      final urls = await db.query(
-        'chapter_cache',
-        columns: ['chapterUrl'],
-        where: 'novelUrl = ?',
-        whereArgs: [novelUrl],
-      );
-      for (final row in urls) {
-        _removeFromMemoryCache(row['chapterUrl'] as String);
-      }
+  Future<int> deleteCachedChapters(String novelUrl) {
+    return guard(
+      'chapter.deleteCachedChapters',
+      () async {
+        // 先查询该小说的所有章节URL，用于清理内存缓存
+        final db = await database;
+        final urls = await db.query(
+          'chapter_cache',
+          columns: ['chapterUrl'],
+          where: 'novelUrl = ?',
+          whereArgs: [novelUrl],
+        );
+        for (final row in urls) {
+          _removeFromMemoryCache(row['chapterUrl'] as String);
+        }
 
-      // 级联删除版本历史
-      await _versionRepo.deleteVersionsByNovel(novelUrl);
+        // 级联删除版本历史
+        await _versionRepo.deleteVersionsByNovel(novelUrl);
 
-      // 级联删除段落标注
-      await _annotationRepo?.deleteByNovel(novelUrl);
+        // 级联删除段落标注
+        await _annotationRepo?.deleteByNovel(novelUrl);
 
-      final deleted = await db.delete(
-        'chapter_cache',
-        where: 'novelUrl = ?',
-        whereArgs: [novelUrl],
-      );
-      LoggerService.instance.i(
-        '删除小说所有缓存章节: novelUrl=$novelUrl count=$deleted',
-        category: LogCategory.database,
-        tags: ['chapter', 'cache', 'delete_all'],
-      );
-      return deleted;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除小说所有缓存章节失败: novelUrl=$novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'cache', 'delete_all', 'failed'],
-      );
-      rethrow;
-    }
+        final deleted = await db.delete(
+          'chapter_cache',
+          where: 'novelUrl = ?',
+          whereArgs: [novelUrl],
+        );
+        LoggerService.instance.i(
+          '删除小说所有缓存章节: novelUrl=$novelUrl count=$deleted',
+          category: LogCategory.database,
+          tags: ['chapter', 'cache', 'delete_all'],
+        );
+        return deleted;
+      },
+      message: (e) => '删除小说所有缓存章节失败: novelUrl=$novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'cache', 'delete_all', 'failed'],
+    );
   }
 
   /// 缓存小说章节列表
@@ -490,26 +484,25 @@ class ChapterRepository extends BaseRepository
   /// [novelUrl] 小说URL
   /// [chapterUrl] 章节URL
   @override
-  Future<void> markChapterAsRead(String novelUrl, String chapterUrl) async {
-    try {
-      final db = await database;
+  Future<void> markChapterAsRead(String novelUrl, String chapterUrl) {
+    // 高频操作失败必须可见（每次翻页都触发）
+    return guard(
+      'chapter.markChapterAsRead',
+      () async {
+        final db = await database;
 
-      await db.update(
-        'novel_chapters',
-        {'readAt': DateTime.now().millisecondsSinceEpoch},
-        where: 'novelUrl = ? AND chapterUrl = ?',
-        whereArgs: [novelUrl, chapterUrl],
-      );
-    } catch (e, stackTrace) {
-      // 高频操作失败必须可见（每次翻页都触发）
-      LoggerService.instance.e(
-        '标记已读失败: novelUrl=$novelUrl chapterUrl=$chapterUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'mark_read', 'failed'],
-      );
-      rethrow;
-    }
+        await db.update(
+          'novel_chapters',
+          {'readAt': DateTime.now().millisecondsSinceEpoch},
+          where: 'novelUrl = ? AND chapterUrl = ?',
+          whereArgs: [novelUrl, chapterUrl],
+        );
+      },
+      message: (e) =>
+          '标记已读失败: novelUrl=$novelUrl chapterUrl=$chapterUrl - $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'mark_read', 'failed'],
+    );
   }
 
   /// 获取已缓存的章节数量（实际有内容的章节）
@@ -585,12 +578,14 @@ class ChapterRepository extends BaseRepository
   Future<List<ChapterSearchResult>> searchInCachedContent(
     String keyword, {
     String? novelUrl,
-  }) async {
-    try {
-      final db = await database;
+  }) {
+    return guard(
+      'chapter.searchInCachedContent',
+      () async {
+        final db = await database;
 
-      // 构建 SQL 查询
-      String sql = '''
+        // 构建 SQL 查询
+        String sql = '''
         SELECT
           cc.novelUrl,
           b.title as novelTitle,
@@ -605,77 +600,73 @@ class ChapterRepository extends BaseRepository
         WHERE cc.content LIKE ?
       ''';
 
-      List<dynamic> args = ['%$keyword%'];
+        List<dynamic> args = ['%$keyword%'];
 
-      // 如果提供了小说URL，添加过滤条件
-      if (novelUrl != null && novelUrl.isNotEmpty) {
-        sql += ' AND cc.novelUrl = ?';
-        args.add(novelUrl);
-      }
-
-      sql += ' ORDER BY cc.novelUrl, cc.chapterIndex ASC';
-
-      final results = await db.rawQuery(sql, args);
-
-      // 构建搜索结果列表
-      final searchResults = <ChapterSearchResult>[];
-
-      for (final row in results) {
-        final content = row['content'] as String;
-        final keywordLower = keyword.toLowerCase();
-        final contentLower = content.toLowerCase();
-
-        // 查找所有匹配位置
-        final matchPositions = <MatchPosition>[];
-        int index = 0;
-
-        while (true) {
-          final pos = contentLower.indexOf(keywordLower, index);
-          if (pos == -1) break;
-
-          matchPositions.add(MatchPosition(
-            start: pos,
-            end: pos + keyword.length,
-            matchedText: content.substring(pos, pos + keyword.length),
-          ));
-
-          index = pos + keyword.length;
+        // 如果提供了小说URL，添加过滤条件
+        if (novelUrl != null && novelUrl.isNotEmpty) {
+          sql += ' AND cc.novelUrl = ?';
+          args.add(novelUrl);
         }
 
-        if (matchPositions.isNotEmpty) {
-          searchResults.add(ChapterSearchResult(
-            novelUrl: row['novelUrl'] as String,
-            novelTitle: row['novelTitle'] as String? ?? '未知小说',
-            novelAuthor: row['novelAuthor'] as String? ?? '未知作者',
-            chapterUrl: row['chapterUrl'] as String,
-            chapterTitle: row['chapterTitle'] as String,
-            chapterIndex: row['chapterIndex'] as int? ?? -1,
-            content: content,
-            searchKeywords: [keyword],
-            matchPositions: matchPositions,
-            cachedAt: DateTime.fromMillisecondsSinceEpoch(
-              row['cachedAt'] as int,
-            ),
-          ));
+        sql += ' ORDER BY cc.novelUrl, cc.chapterIndex ASC';
+
+        final results = await db.rawQuery(sql, args);
+
+        // 构建搜索结果列表
+        final searchResults = <ChapterSearchResult>[];
+
+        for (final row in results) {
+          final content = row['content'] as String;
+          final keywordLower = keyword.toLowerCase();
+          final contentLower = content.toLowerCase();
+
+          // 查找所有匹配位置
+          final matchPositions = <MatchPosition>[];
+          int index = 0;
+
+          while (true) {
+            final pos = contentLower.indexOf(keywordLower, index);
+            if (pos == -1) break;
+
+            matchPositions.add(MatchPosition(
+              start: pos,
+              end: pos + keyword.length,
+              matchedText: content.substring(pos, pos + keyword.length),
+            ));
+
+            index = pos + keyword.length;
+          }
+
+          if (matchPositions.isNotEmpty) {
+            searchResults.add(ChapterSearchResult(
+              novelUrl: row['novelUrl'] as String,
+              novelTitle: row['novelTitle'] as String? ?? '未知小说',
+              novelAuthor: row['novelAuthor'] as String? ?? '未知作者',
+              chapterUrl: row['chapterUrl'] as String,
+              chapterTitle: row['chapterTitle'] as String,
+              chapterIndex: row['chapterIndex'] as int? ?? -1,
+              content: content,
+              searchKeywords: [keyword],
+              matchPositions: matchPositions,
+              cachedAt: DateTime.fromMillisecondsSinceEpoch(
+                row['cachedAt'] as int,
+              ),
+            ));
+          }
         }
-      }
 
-      LoggerService.instance.i(
-        '搜索缓存内容完成: 关键词="$keyword", 结果数=${searchResults.length}',
-        category: LogCategory.database,
-        tags: ['search', 'chapter_content'],
-      );
+        LoggerService.instance.i(
+          '搜索缓存内容完成: 关键词="$keyword", 结果数=${searchResults.length}',
+          category: LogCategory.database,
+          tags: ['search', 'chapter_content'],
+        );
 
-      return searchResults;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '搜索缓存内容失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['search', 'failed'],
-      );
-      rethrow;
-    }
+        return searchResults;
+      },
+      message: (e) => '搜索缓存内容失败: $e',
+      category: LogCategory.database,
+      tags: ['search', 'failed'],
+    );
   }
 
   /// 事务：shift 后续索引 + insert 两表。
@@ -709,57 +700,56 @@ class ChapterRepository extends BaseRepository
         'custom://chapter/${DateTime.now().millisecondsSinceEpoch}';
 
     late final int ncId;
-    try {
-      await db.transaction((txn) async {
-        if (insertIndex != null) {
-          // 仅显式插入位置时需要腾位（追加到末尾 MAX+1 不与任何现有 index 冲突）
-          await txn.rawUpdate(
-            'UPDATE novel_chapters SET chapterIndex = chapterIndex + 1 '
-            'WHERE novelUrl = ? AND chapterIndex >= ?',
-            [novelUrl, insertIndex],
-          );
-          await txn.rawUpdate(
-            'UPDATE chapter_cache SET chapterIndex = chapterIndex + 1 '
-            'WHERE novelUrl = ? AND chapterIndex >= ?',
-            [novelUrl, insertIndex],
-          );
-        }
+    await guard(
+      'chapter.createCustomChapterWithShift',
+      () async {
+        await db.transaction((txn) async {
+          if (insertIndex != null) {
+            // 仅显式插入位置时需要腾位（追加到末尾 MAX+1 不与任何现有 index 冲突）
+            await txn.rawUpdate(
+              'UPDATE novel_chapters SET chapterIndex = chapterIndex + 1 '
+              'WHERE novelUrl = ? AND chapterIndex >= ?',
+              [novelUrl, insertIndex],
+            );
+            await txn.rawUpdate(
+              'UPDATE chapter_cache SET chapterIndex = chapterIndex + 1 '
+              'WHERE novelUrl = ? AND chapterIndex >= ?',
+              [novelUrl, insertIndex],
+            );
+          }
 
-        ncId = await txn.insert(
-          'novel_chapters',
-          {
-            'novelUrl': novelUrl,
-            'chapterUrl': chapterUrl,
-            'title': title,
-            'chapterIndex': chapterIndex,
-            'isUserInserted': 1,
-            'insertedAt': DateTime.now().millisecondsSinceEpoch,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+          ncId = await txn.insert(
+            'novel_chapters',
+            {
+              'novelUrl': novelUrl,
+              'chapterUrl': chapterUrl,
+              'title': title,
+              'chapterIndex': chapterIndex,
+              'isUserInserted': 1,
+              'insertedAt': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
 
-        await txn.insert(
-          'chapter_cache',
-          {
-            'novelUrl': novelUrl,
-            'chapterUrl': chapterUrl,
-            'title': title,
-            'content': content,
-            'chapterIndex': chapterIndex,
-            'cachedAt': DateTime.now().millisecondsSinceEpoch,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '事务创建自定义章节失败: novelUrl=$novelUrl title=$title - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'custom', 'create_with_shift', 'failed'],
-      );
-      rethrow;
-    }
+          await txn.insert(
+            'chapter_cache',
+            {
+              'novelUrl': novelUrl,
+              'chapterUrl': chapterUrl,
+              'title': title,
+              'content': content,
+              'chapterIndex': chapterIndex,
+              'cachedAt': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        });
+      },
+      message: (e) =>
+          '事务创建自定义章节失败: novelUrl=$novelUrl title=$title - $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'custom', 'create_with_shift', 'failed'],
+    );
 
     _addCachedInMemory(chapterUrl);
     LoggerService.instance.i(
@@ -778,56 +768,55 @@ class ChapterRepository extends BaseRepository
   /// 三步非原子的缺陷。
   @override
   Future<void> deleteChapterAndReindex(
-      String novelUrl, String chapterUrl) async {
-    final db = await database;
-    try {
-      await db.transaction((txn) async {
-        await txn.delete(
-          'novel_chapters',
-          where: 'chapterUrl = ?',
-          whereArgs: [chapterUrl],
-        );
-        await txn.delete(
-          'chapter_cache',
-          where: 'chapterUrl = ?',
-          whereArgs: [chapterUrl],
-        );
-
-        // 重排必须在 delete 之后查，避免包含已删行
-        final chapters = await txn.query(
-          'novel_chapters',
-          columns: ['id'],
-          where: 'novelUrl = ?',
-          whereArgs: [novelUrl],
-          orderBy: 'chapterIndex ASC',
-        );
-
-        final batch = txn.batch();
-        for (var i = 0; i < chapters.length; i++) {
-          batch.update(
+      String novelUrl, String chapterUrl) {
+    return guard(
+      'chapter.deleteChapterAndReindex',
+      () async {
+        final db = await database;
+        await db.transaction((txn) async {
+          await txn.delete(
             'novel_chapters',
-            {'chapterIndex': i},
-            where: 'id = ?',
-            whereArgs: [chapters[i]['id']],
+            where: 'chapterUrl = ?',
+            whereArgs: [chapterUrl],
           );
-        }
-        await batch.commit(noResult: true);
-      });
+          await txn.delete(
+            'chapter_cache',
+            where: 'chapterUrl = ?',
+            whereArgs: [chapterUrl],
+          );
 
-      _removeFromMemoryCache(chapterUrl);
-      LoggerService.instance.i(
-        '事务删除章节+重排: novelUrl=$novelUrl chapterUrl=$chapterUrl',
-        category: LogCategory.database,
-        tags: ['chapter', 'custom', 'delete_reindex', 'success'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '事务删除章节+重排失败: novelUrl=$novelUrl chapterUrl=$chapterUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter', 'custom', 'delete_reindex', 'failed'],
-      );
-      rethrow;
-    }
+          // 重排必须在 delete 之后查，避免包含已删行
+          final chapters = await txn.query(
+            'novel_chapters',
+            columns: ['id'],
+            where: 'novelUrl = ?',
+            whereArgs: [novelUrl],
+            orderBy: 'chapterIndex ASC',
+          );
+
+          final batch = txn.batch();
+          for (var i = 0; i < chapters.length; i++) {
+            batch.update(
+              'novel_chapters',
+              {'chapterIndex': i},
+              where: 'id = ?',
+              whereArgs: [chapters[i]['id']],
+            );
+          }
+          await batch.commit(noResult: true);
+        });
+
+        _removeFromMemoryCache(chapterUrl);
+        LoggerService.instance.i(
+          '事务删除章节+重排: novelUrl=$novelUrl chapterUrl=$chapterUrl',
+          category: LogCategory.database,
+          tags: ['chapter', 'custom', 'delete_reindex', 'success'],
+        );
+      },
+      message: (e) =>
+          '事务删除章节+重排失败: novelUrl=$novelUrl chapterUrl=$chapterUrl - $e',
+      category: LogCategory.database,
+      tags: ['chapter', 'custom', 'delete_reindex', 'failed'],
+    );
   }
 }

@@ -23,7 +23,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
-import 'poc/ocr_predictor.dart';
+import 'services/ocr/ocr_predictor.dart';
 
 bool isCjk(String ch) {
   if (ch.isEmpty) return false;

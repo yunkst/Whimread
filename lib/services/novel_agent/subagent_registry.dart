@@ -7,6 +7,10 @@ library;
 import 'subagent_run.dart';
 
 class SubagentRegistry {
+  /// spec §5.3：每个 parentSession 保留最近 20 个 run 供回看
+  /// （[pruneForSession] 的默认/生产上限）。
+  static const int historyKeepLimit = 20;
+
   final Map<String, Map<String, SubagentRun>> _runsBySession = {};
   final Map<String, Map<String, SubagentRun>> _toolCallIndex = {};
 
@@ -84,16 +88,24 @@ class SubagentRegistry {
     _toolCallIndex.clear();
   }
 
-  /// 保留最近 keep 个 run（不限终态），清掉更早的——控制内存
-  /// 用于「保留最近 N 个供回看」（spec §5.3 N=20）
+  /// 保留最近 [keep] 个 run，清掉更早的**终态** run——控制内存
+  /// （spec §5.3 N=20，生产接线点：[SubagentRunner.dispatch] 每注册新 run 后调用）。
+  ///
+  /// 非终态（pending/running）一律保留，原因：
+  /// - [countActiveBySession] 用它们做 4 并发 / 30 排队上限计数，
+  ///   清掉会让计数低估、绕过 maxQueue 上限；
+  /// - [SubagentRunner.cancelAllForSession]（主 Agent cancel 级联）按注册表
+  ///   找活跃 run，清掉会导致取消漏杀。
+  /// （终态 run 按 createdAt 新→旧保留最近 keep 个，与既有单测
+  /// 「保留最近 N 个终态 run，清掉更早的」一致。）
   void pruneForSession(String parentSessionId, {required int keep}) {
     final m = _runsBySession[parentSessionId];
     if (m == null) return;
     if (m.length <= keep) return;
     final sorted = m.values.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt)); // 新→旧
-    final toRemove = sorted.skip(keep);
-    for (final r in toRemove) {
+    for (final r in sorted.skip(keep)) {
+      if (!r.isTerminal) continue; // 非终态保留（见方法注释）
       m.remove(r.runId);
       if (r.toolCallId.isNotEmpty) {
         _toolCallIndex[parentSessionId]?.remove(r.toolCallId);

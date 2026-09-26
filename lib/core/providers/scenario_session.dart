@@ -23,7 +23,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/agent_chat_message.dart';
 import '../../models/chat_session.dart';
-import '../../models/chat_message_record.dart';
 import '../../models/paragraph_annotation.dart';
 import '../../repositories/chat_session_repository.dart';
 import '../../services/logger_service.dart';
@@ -39,6 +38,7 @@ import 'chat_session_providers.dart';
 import 'current_novel_provider.dart';
 import 'database_providers.dart';
 import 'agent_chat_state.dart';
+import 'agent_session_persistence.dart';
 import 'reading_context_providers.dart';
 import 'subagent_providers.dart';
 import 'webview_providers.dart';
@@ -142,6 +142,17 @@ class ScenarioSession {
   // ===== 会话状态 =====
   late AgentChatState _state;
   SessionLifecycle _lifecycle = SessionLifecycle.fresh;
+
+  /// DB 持久化协作类（从本类拆出，见 agent_session_persistence.dart）。
+  /// 通过闭包直接读本类的活状态（sessionId / _currentNovel / _agentMessages），
+  /// 不复制列表，保证重写 DB 时看到的与内存真理源一致。
+  late final AgentSessionPersistence _persistence = AgentSessionPersistence(
+    ref: _ref,
+    scenarioId: scenarioId,
+    sessionId: () => _sessionId,
+    currentNovel: () => _currentNovel,
+    agentMessages: () => _agentMessages,
+  );
 
   // ===== 当前小说（按 Session 隔离）=====
   CurrentNovel? _currentNovel;
@@ -515,13 +526,13 @@ class ScenarioSession {
       supplementaryCount: isRunningNow ? null : 0,
     );
     _notifyStateChanged();
-    await _persistAgentMessage(userMsg);
+    await _persistence.persistAgentMessage(userMsg);
 
     // 运行中：把 user 消息投到 service 队列，由 loop 下一轮 drain。
     // 不调 _beginAgentRun（已有 loop 在跑）。queue 立即返回 + emit 反馈事件，
     // 用户在 UI 上看到"已补充"的 supplementaryCount +1。
     //
-    // 此处直接读 _isRunning（不缓存 _persistAgentMessage 之前的快照），
+    // 此处直接读 _isRunning（不缓存 persistAgentMessage 之前的快照），
     // 避免 AgentDoneEvent 在异步落库期间翻转标志导致的窄窗口竞态。
     if (_isRunning) {
       _ref.read(novelAgentServiceProvider).injectUserMessage(
@@ -566,7 +577,7 @@ class ScenarioSession {
   /// 失败轮的 partial 已通过 [_failedRoundStartIndex] 标记：
   /// - 砍除 [_failedRoundStartIndex, _agentMessages.length) 区间（失败轮残留）
   /// - 保留 [0, _failedRoundStartIndex) 即之前所有成功轮 + 失败轮的 user 消息
-  /// - 同步删 DB（[_deleteAgentMessagesFromDb]）
+  /// - 同步删 DB（[AgentSessionPersistence.rewriteAgentMessagesInDb]，logTag=db_rewrite）
   /// - 调用 [_resumeAgentRun] 走 [NovelAgentService.resumeFromMessages] 续跑，
   ///   不 append user、不注入阅读上下文前缀（user 已经是 history 的一部分）。
   ///
@@ -609,7 +620,7 @@ class ScenarioSession {
     _notifyStateChanged();
 
     // 同步删 DB：删掉 failedAt 之后的所有消息
-    await _deleteAgentMessagesFromDb(failedAt);
+    await _persistence.rewriteAgentMessagesInDb(failedAt, logTag: 'db_rewrite');
 
     // 在触发新一轮前清空失败标记，避免 resume 失败时 finalize 再次覆盖到已被砍掉的位置
     _failedRoundStartIndex = null;
@@ -633,8 +644,8 @@ class ScenarioSession {
   /// - dispatch_subagent 不走本路径（UI 渲染 SubagentToolCard，根本不显示重试按钮）
   /// - webview_extract 场景工具不支持重试（页面 DOM 状态已不可知，重试无意义）
   Future<void> retryToolCall(String toolCallId) async {
-    // 1. retry 入口此时 _isRunning 必然为 false（工具卡片重试按钮仅在非 loading
-    //    完成态显示）。防御：若有残留 pending，落 partial 后再操作。
+    // 阶段一：防御取消。retry 入口此时 _isRunning 必然为 false（工具卡片重试
+    // 按钮仅在非 loading 完成态显示）；若有残留 pending，落 partial 后再操作。
     if (_pendingSegments.isNotEmpty) {
       await cancel();
     }
@@ -650,31 +661,9 @@ class ScenarioSession {
       return;
     }
 
-    // 2. 找 assistant（含该 toolCallId）+ 紧随其后的 tool 消息
-    String? toolName;
-    Map<String, dynamic>? toolArgs;
-    int? toolIdx;
-    for (var i = _agentMessages.length - 1; i >= 0; i--) {
-      final m = _agentMessages[i];
-      final calls = m.toolCalls ?? const <ToolCall>[];
-      final hit = calls.where((c) => c.id == toolCallId).firstOrNull;
-      if (hit != null) {
-        toolName = hit.name;
-        toolArgs = hit.arguments;
-        // tool 消息紧跟在 assistant 之后，找第一个 role='tool' && toolCallId 匹配
-        for (var j = i + 1; j < _agentMessages.length; j++) {
-          final tm = _agentMessages[j];
-          if (tm.role == 'tool' && tm.toolCallId == toolCallId) {
-            toolIdx = j;
-            break;
-          }
-          if (tm.role == 'assistant' || tm.role == 'user') break;
-        }
-        break;
-      }
-    }
-
-    if (toolName == null || toolArgs == null) {
+    // 阶段二：倒查目标（assistant 上的 toolCall + 紧随其后的 tool 消息）
+    final located = _locateRetryToolCall(toolCallId);
+    if (located == null) {
       LoggerService.instance.w(
         'ScenarioSession [$scenarioId] 重试失败：找不到 toolCallId=$toolCallId',
         category: LogCategory.ai,
@@ -683,6 +672,8 @@ class ScenarioSession {
       _notifyStateError('找不到该工具调用');
       return;
     }
+    final toolName = located.toolName;
+    final toolIdx = located.toolIdx;
     if (toolIdx == null) {
       LoggerService.instance.w(
         'ScenarioSession [$scenarioId] 重试失败：toolCallId=$toolCallId 无对应 tool 消息',
@@ -692,8 +683,7 @@ class ScenarioSession {
       _notifyStateError('该工具调用没有结果可替换');
       return;
     }
-
-    // 3. 防御：dispatch_subagent 不走本路径
+    // 防御：dispatch_subagent 不走本路径
     if (toolName == 'dispatch_subagent') {
       LoggerService.instance.w(
         'ScenarioSession [$scenarioId] 拒绝重试 dispatch_subagent',
@@ -702,7 +692,7 @@ class ScenarioSession {
       );
       return;
     }
-    // 4. 防御：webview_extract 场景工具不支持重试
+    // 防御：webview_extract 场景工具不支持重试
     if (scenarioId == ScenarioIds.webviewExtract) {
       LoggerService.instance.w(
         'ScenarioSession [$scenarioId] 拒绝重试 webview_extract 工具 $toolName',
@@ -713,25 +703,88 @@ class ScenarioSession {
       return;
     }
 
-    // 5. 从 DB 取该 tool 消息的主键 id（内存 ChatMessage 不带 id）
+    // 从 DB 取该 tool 消息的主键 id（内存 ChatMessage 不带 id）
+    final persisted = await _resolveRetryMessageId(sid, toolIdx);
+    if (persisted == null) return;
+
+    // 阶段三：重建执行（含"重试工具"日志 + 重跑 + 截断 + 同步 _currentNovel）
+    final newResultStr =
+        await _reexecuteRetryTool(toolName, located.toolArgs, toolCallId, toolIdx);
+    if (newResultStr == null) return;
+
+    // 阶段四：三处更新（内存真理源 / UI / DB）
+    _applyRetryResult(
+      toolIdx: toolIdx,
+      toolCallId: toolCallId,
+      newResultStr: newResultStr,
+      repo: persisted.repo,
+      messageId: persisted.messageId,
+    );
+  }
+
+  /// retryToolCall 阶段二：从 _agentMessages 倒查目标工具调用。
+  ///
+  /// 返回 assistant（含该 toolCallId）上的 name/arguments + 紧随其后第一个
+  /// role='tool' 且 toolCallId 匹配的消息索引。找不到 assistant → null；
+  /// 找到 assistant 但没有 tool 结果消息 → toolIdx 为 null（与原内联逻辑一致）。
+  ({String toolName, Map<String, dynamic> toolArgs, int? toolIdx})?
+      _locateRetryToolCall(String toolCallId) {
+    for (var i = _agentMessages.length - 1; i >= 0; i--) {
+      final m = _agentMessages[i];
+      final calls = m.toolCalls ?? const <ToolCall>[];
+      final hit = calls.where((c) => c.id == toolCallId).firstOrNull;
+      if (hit != null) {
+        // tool 消息紧跟在 assistant 之后，找第一个 role='tool' && toolCallId 匹配
+        int? toolIdx;
+        for (var j = i + 1; j < _agentMessages.length; j++) {
+          final tm = _agentMessages[j];
+          if (tm.role == 'tool' && tm.toolCallId == toolCallId) {
+            toolIdx = j;
+            break;
+          }
+          if (tm.role == 'assistant' || tm.role == 'user') break;
+        }
+        return (toolName: hit.name, toolArgs: hit.arguments, toolIdx: toolIdx);
+      }
+    }
+    return null;
+  }
+
+  /// retryToolCall 阶段二收尾：取该 tool 消息的 DB 主键 id。
+  ///
+  /// 返回 repo（阶段四落库复用同一实例）+ messageId；会话记录与内存不一致
+  /// （toolIdx 越界）时提示并返回 null。
+  Future<({ChatSessionRepository repo, int? messageId})?> _resolveRetryMessageId(
+    int sid,
+    int toolIdx,
+  ) async {
     final repo = _ref.read(chatSessionRepositoryProvider);
     final records = await repo.listMessages(sid);
     if (toolIdx >= records.length) {
       _notifyStateError('会话记录与内存不一致，无法重试');
-      return;
+      return null;
     }
-    final messageId = records[toolIdx].id;
+    return (repo: repo, messageId: records[toolIdx].id);
+  }
 
+  /// retryToolCall 阶段三：重建执行。
+  ///
+  /// 仅支持 writing 场景：直接构造 WritingScenario（构造零成本、无 WebView 池
+  /// 副作用），复用 select_novel / create_novel / patch_memory 的后置 hook。
+  /// 结果经 [ToolResultFormatter] 截断为 formatted.llm（与 AgentLoop 的落库路径
+  /// 一致）；select_novel / create_novel 重试成功后同步 _currentNovel（与
+  /// ToolCallEndEvent 一致）。失败已记日志 + 提示 UI，返回 null。
+  Future<String?> _reexecuteRetryTool(
+    String toolName,
+    Map<String, dynamic> toolArgs,
+    String toolCallId,
+    int toolIdx,
+  ) async {
     LoggerService.instance.i(
       'ScenarioSession [$scenarioId] 重试工具: $toolName (toolCallId=$toolCallId, toolIdx=$toolIdx)',
       category: LogCategory.ai,
       tags: ['session', 'retry_tool', scenarioId, toolName],
     );
-
-    // 6. 重新执行工具
-    //    仅支持 writing 场景：直接构造 WritingScenario（构造零成本、无 WebView 池副作用），
-    //    复用 select_novel / create_novel / patch_memory 的后置 hook。
-    String newResultStr;
     try {
       final scenario = WritingScenario(_ref);
       String rawResult;
@@ -745,7 +798,7 @@ class ScenarioSession {
         await scenario.cleanup();
       }
 
-      // 7. 截断为 formatted.llm（与 AgentLoop._executeSingleTool 落库路径一致）
+      // 截断为 formatted.llm（与 AgentLoop._executeSingleTool 落库路径一致）
       Map<String, dynamic> result;
       try {
         result = jsonDecode(rawResult) as Map<String, dynamic>;
@@ -753,12 +806,11 @@ class ScenarioSession {
         result = {'raw': rawResult};
       }
       final formatted = ToolResultFormatter(maxChars: 50000).format(result);
-      newResultStr = formatted.llm;
 
-      // 8. select_novel / create_novel 重试成功后同步 _currentNovel（与 ToolCallEndEvent 一致）
       if (toolName == 'select_novel' || toolName == 'create_novel') {
         _handleSelectNovelFromResult(rawResult);
       }
+      return formatted.llm;
     } catch (e, st) {
       LoggerService.instance.e(
         'ScenarioSession [$scenarioId] 重试工具 $toolName 失败: $e',
@@ -767,26 +819,37 @@ class ScenarioSession {
         tags: ['session', 'retry_tool', 'exec_failed', scenarioId],
       );
       _notifyStateError('重试失败: $e');
-      return;
+      return null;
     }
+  }
 
-    // 9. 更新内存真理源
+  /// retryToolCall 阶段四：三处同步更新。
+  ///
+  /// 1) 内存真理源：原地覆盖旧 tool 消息（name/arguments/toolCallId 不变）
+  /// 2) UI：刷新消息投影（用户看到 = LLM 将看到的 content），并清空失败标记
+  ///    （避免后续 retryLastRound 误砍 retry 过的消息）
+  /// 3) DB：updateMessageContent（LLM 下次 hydrate 看到的 = 用户看到的），
+  ///    fire-and-forget，失败仅记日志、UI 已更新结果保持不变
+  void _applyRetryResult({
+    required int toolIdx,
+    required String toolCallId,
+    required String newResultStr,
+    required ChatSessionRepository repo,
+    required int? messageId,
+  }) {
     _agentMessages[toolIdx] = ChatMessage(
       role: 'tool',
       content: newResultStr,
       toolCallId: toolCallId,
     );
 
-    // 10. 刷新 UI（用户看到 = LLM 将看到的 content）
     _state = _state.copyWith(
       messages: _uiMessages,
       streamingSegments: const [],
     );
-    // retry 成功后清空失败标记，避免后续 retryLastRound 误砍 retry 过的消息
     _failedRoundStartIndex = null;
     _notifyStateChanged();
 
-    // 11. 落库（LLM 下次 hydrate 看到的 = 用户看到的）
     if (messageId != null) {
       // 落库失败抛异常会被 fire-and-forget 吞掉变成 unhandled async error；
       // 这里显式 catch 仅记录日志，UI 已更新结果保持不变。
@@ -824,17 +887,7 @@ class ScenarioSession {
     _notifyStateChanged();
 
     try {
-      final agentService = _ref.read(novelAgentServiceProvider);
-      await _agentSub?.cancel();
-      _agentSub = agentService.events.listen(_handleAgentEvent);
-
-      final scenarioContext = _buildScenarioContext();
-
-      await agentService.resumeFromMessages(
-        scenarioId: scenarioId,
-        initialMessages: List<ChatMessage>.from(_agentMessages),
-        scenarioContext: scenarioContext,
-      );
+      await _launchAgentRun(resume: true);
     } catch (e, st) {
       LoggerService.instance.e(
         'ScenarioSession [$scenarioId] 续跑 Agent 启动失败: $e',
@@ -916,7 +969,7 @@ class ScenarioSession {
       _notifyStateChanged();
       // await 而非 fire-and-forget：返回时保证 DB（含自动命名）与内存一致，
       // 内部已 try/catch，持久化失败不影响本次选择结果。
-      await _persistCurrentNovel();
+      await _persistence.persistCurrentNovel();
     }
     return novel;
   }
@@ -945,12 +998,12 @@ class ScenarioSession {
     _notifyStateChanged();
 
     // 后台 cancel：因 _pendingSegments 已空，cancel 走 else 分支仅做状态重置，
-    // 不会落库残缺 partial。放在 _clearMessagesFromDb 之前保证最终 DB 状态 = 清空。
+    // 不会落库残缺 partial。放在 clearMessagesFromDb 之前保证最终 DB 状态 = 清空。
     if (wasRunning) {
       await cancel();
     }
 
-    unawaited(_clearMessagesFromDb());
+    unawaited(_persistence.clearMessagesFromDb());
   }
 
   /// 启动按标注重写章节（仅 annotation_rewrite 场景使用）。
@@ -992,7 +1045,7 @@ class ScenarioSession {
     // 3) 最后清内存（兜底掉与 get() 冷启动 hydrateFromRecentIfNeeded
     //    并发竞态时 hydrate 带回的旧消息——其赋值必然发生在本次清空之前）
     // 不走 clearConversation()：它对 DB 清理是 fire-and-forget，无法保证先于 hydrate。
-    await _clearMessagesFromDb();
+    await _persistence.clearMessagesFromDb();
     await _ensureSessionId();
     _pendingSegments.clear();
     _agentMessages.clear();
@@ -1034,7 +1087,7 @@ class ScenarioSession {
       error: null,
     );
     _notifyStateChanged();
-    await _persistAgentMessage(userMsg);
+    await _persistence.persistAgentMessage(userMsg);
 
     final completer = Completer<AnnotationRewriteOutcome>();
     _rewriteCompleter = completer;
@@ -1052,23 +1105,12 @@ class ScenarioSession {
     );
 
     try {
-      await _agentSub?.cancel();
-      _agentSub = _ref.read(novelAgentServiceProvider).events.listen(_handleAgentEvent);
-
-      // history = _agentMessages 去掉末尾的 user（service 会 append 一份）
-      final history = List<ChatMessage>.from(_agentMessages);
-      if (history.isNotEmpty && history.last.role == 'user') {
-        history.removeLast();
-      }
-      final scenarioContext = _buildScenarioContext();
-
-      await _ref.read(novelAgentServiceProvider).sendMessage(
-            userInput: userContent,
-            history: history,
-            scenarioId: scenarioId,
-            scenarioContext: scenarioContext,
-            runId: _sessionId?.toString(),
-          );
+      // runId 传 sessionId.toString()：本 run 的事件只被本 session（id 一致）接收
+      await _launchAgentRun(
+        resume: false,
+        userInput: userContent,
+        runId: _sessionId?.toString(),
+      );
     } catch (e, st) {
       LoggerService.instance.e(
         'ScenarioSession [$scenarioId] 标注重写异常: $e',
@@ -1216,7 +1258,8 @@ class ScenarioSession {
     );
     _notifyStateChanged();
 
-    unawaited(_deleteAgentMessagesFromDb(agentIdx));
+    unawaited(_persistence.rewriteAgentMessagesInDb(agentIdx,
+        logTag: 'db_rewrite'));
     // rollback 砍掉了 user 消息及其后所有内容，失败轮标记必然失效 → 清空避免 retry 误用
     _failedRoundStartIndex = null;
     contentCallback(userContent);
@@ -1249,26 +1292,54 @@ class ScenarioSession {
 
   // ===== 内部实现 =====
 
-  /// 运行 Agent — 订阅全局 AgentService 的事件流
-  Future<void> _runAgent(String userInput) async {
+  /// 启动一轮 agent run — 三处样板（[_beginAgentRun] / [_resumeAgentRun] /
+  /// [startAnnotationRewrite]）的收敛点。
+  ///
+  /// 统一处理：cancel 老 [_agentSub] → 重新订阅全局事件流 → 组装 history →
+  /// [_buildScenarioContext] → 调 service 启动 run。
+  ///
+  /// - [resume]=true：走 resumeFromMessages 续跑，_agentMessages 原样全量传给
+  ///   loop（不 append user、不注入阅读上下文前缀，user 已是 history 的一部分）。
+  /// - [resume]=false：走 sendMessage 新建 run，history 去掉末尾的 user
+  ///   （service 会 append 一份）；[userInput] 必填；[runId] 可选
+  ///   （标注重写传 sessionId 打标做事件过滤，主路径不传走旧路径事件）。
+  Future<void> _launchAgentRun({
+    required bool resume,
+    String? userInput,
+    String? runId,
+  }) async {
     final agentService = _ref.read(novelAgentServiceProvider);
     await _agentSub?.cancel();
     _agentSub = agentService.events.listen(_handleAgentEvent);
 
-    // history = _agentMessages（去掉末尾的 user，由 service append）
+    // history 组装：resume 原样传全量；新建 run 去掉末尾的 user（由 service append）
     final history = List<ChatMessage>.from(_agentMessages);
-    if (history.isNotEmpty && history.last.role == 'user') {
+    if (!resume && history.isNotEmpty && history.last.role == 'user') {
       history.removeLast();
     }
 
     final scenarioContext = _buildScenarioContext();
 
-    await agentService.sendMessage(
-      userInput: userInput,
-      history: history,
-      scenarioId: scenarioId,
-      scenarioContext: scenarioContext,
-    );
+    if (resume) {
+      await agentService.resumeFromMessages(
+        scenarioId: scenarioId,
+        initialMessages: history,
+        scenarioContext: scenarioContext,
+      );
+    } else {
+      await agentService.sendMessage(
+        userInput: userInput!,
+        history: history,
+        scenarioId: scenarioId,
+        scenarioContext: scenarioContext,
+        runId: runId,
+      );
+    }
+  }
+
+  /// 运行 Agent — 订阅全局 AgentService 的事件流
+  Future<void> _runAgent(String userInput) async {
+    await _launchAgentRun(resume: false, userInput: userInput);
   }
 
   /// 处理 Agent 事件 — 只更新本 session 的 _pendingSegments
@@ -1476,7 +1547,7 @@ class ScenarioSession {
     _notifyStateChanged();
 
     if (newMessages.isNotEmpty) {
-      unawaited(_persistAgentMessages(newMessages, partial: partial));
+      unawaited(_persistence.persistAgentMessages(newMessages, partial: partial));
     }
   }
 
@@ -1568,10 +1639,10 @@ class ScenarioSession {
       category: LogCategory.ai,
       tags: ['session', 'compaction', 'trim', scenarioId],
     );
-    // 4) 重写 DB：_deleteAgentMessagesBeforeDb 用 replaceMessages 单事务整段
-    //    重写 _agentMessages（已含 marker 头部 + 改写后的 content），故
-    //    marker 自然落到 agentMsgIndex = 0。
-    unawaited(_deleteAgentMessagesBeforeDb(cut));
+    // 4) 重写 DB：AgentSessionPersistence.rewriteAgentMessagesInDb 用
+    //    replaceMessages 单事务整段重写 _agentMessages（已含 marker 头部 +
+    //    改写后的 content），故 marker 自然落到 agentMsgIndex = 0。
+    unawaited(_persistence.rewriteAgentMessagesInDb(cut, logTag: 'compaction_db'));
   }
 
   void _notifyStateChanged() {
@@ -1584,210 +1655,14 @@ class ScenarioSession {
   }
 
   // ===== 持久化 =====
-
-  /// 落库单条 agent 消息（user 消息即时落库用）
-  Future<void> _persistAgentMessage(ChatMessage m) async {
-    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider(scenarioId));
-    if (sid == null) return;
-    try {
-      final repo = _ref.read(chatSessionRepositoryProvider);
-      final idx = _agentMessages.indexOf(m);
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-        sid,
-        idx >= 0 ? idx : _agentMessages.length - 1,
-        m,
-      ));
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 落库 agent 消息失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'persist_msg', 'failed', scenarioId],
-      );
-    }
-  }
-
-  /// 批量落库多条 agent 消息（回合结束 finalize 用）
-  ///
-  /// agentMsgIndex 基于 _agentMessages 的最终位置计算（消息已 addAll 进去）。
-  /// 整批单事务提交：中途失败全部回滚，不会留下断裂的 ReAct 链。
-  Future<void> _persistAgentMessages(List<ChatMessage> msgs,
-      {bool partial = false}) async {
-    final sid = _sessionId ?? _ref.read(currentChatSessionIdProvider(scenarioId));
-    if (sid == null) return;
-    try {
-      final repo = _ref.read(chatSessionRepositoryProvider);
-      final startIdx = _agentMessages.length - msgs.length;
-      final records = [
-        for (var i = 0; i < msgs.length; i++)
-          ChatMessageRecord.fromAgentMessage(sid, startIdx + i, msgs[i]),
-      ];
-      await repo.appendMessages(records);
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-      LoggerService.instance.d(
-        'ScenarioSession [$scenarioId] 落库 ${msgs.length} 条 agent 消息 '
-        'partial=$partial sessionId=$sid startIdx=$startIdx',
-        category: LogCategory.ai,
-        tags: [
-          'session',
-          'persist_turn',
-          partial ? 'partial' : 'ok',
-          scenarioId
-        ],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 批量落库失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'persist_turn', 'failed', scenarioId],
-      );
-    }
-  }
-
-  Future<void> _persistCurrentNovel() async {
-    final sid = _sessionId;
-    if (sid == null) return;
-    try {
-      final repo = _ref.read(chatSessionRepositoryProvider);
-      // 先读旧行：标题自动同步策略需要参照旧的 currentNovelTitle，
-      // 区分「自动命名（=旧小说标题）」与「用户手动重命名」。
-      final oldRow = await repo.getSession(sid);
-      await repo.updateCurrentNovel(
-        sid,
-        novelId: _currentNovel?.id,
-        novelTitle: _currentNovel?.title,
-      );
-      await _maybeSyncSessionTitle(repo, sid, oldRow);
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 同步 currentNovel 失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'persist_novel', 'failed', scenarioId],
-      );
-    }
-  }
-
-  /// 会话标题自动同步：跟随当前小说变化，但尊重用户手动重命名。
-  ///
-  /// 判定规则（用旧行做参照，无状态、无需额外字段）：
-  /// - 旧标题为空 或 旧标题 == 旧 currentNovelTitle → 视为自动命名 → 改写
-  /// - 否则视为用户手动改过名 → 保留
-  ///
-  /// 改写后失效 sessions 列表缓存，让历史面板刷新显示新标题。
-  Future<void> _maybeSyncSessionTitle(
-    ChatSessionRepository repo,
-    int sid,
-    ChatSession? oldRow,
-  ) async {
-    final newTitle = _currentNovel?.title.trim();
-    if (newTitle == null || newTitle.isEmpty) return;
-    if (oldRow == null) return;
-    final current = oldRow.title.trim();
-    final prevAutoTitle = oldRow.currentNovelTitle?.trim();
-    final wasAutoNamed = current.isEmpty || current == prevAutoTitle;
-    if (!wasAutoNamed) return;
-    if (newTitle == current) return;
-    try {
-      await repo.renameSession(sid, newTitle);
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-      LoggerService.instance.d(
-        'ScenarioSession [$scenarioId] 会话标题自动同步 → "$newTitle" '
-        '(sessionId=$sid)',
-        category: LogCategory.ai,
-        tags: ['session', 'auto_rename', scenarioId],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 自动同步会话标题失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'auto_rename', 'failed', scenarioId],
-      );
-    }
-  }
-
-  /// 以内存为基准原子重写 DB（retry/rollback 用）
-  ///
-  /// 内存 [_agentMessages] 是事实来源：调用方先截断内存，这里把 DB 重写成
-  /// 与内存一致（replaceMessages 单事务：清空 + 按序整批写入）。
-  /// [fromIndex] 不参与删除范围计算，仅用于日志定位触发点。
-  /// 中途崩溃/失败由事务保证回滚到重写前的完整状态，不会留下断裂会话。
-  Future<void> _deleteAgentMessagesFromDb(int fromIndex) async {
-    final sid = _sessionId;
-    if (sid == null) return;
-    try {
-      final repo = _ref.read(chatSessionRepositoryProvider);
-      final records = [
-        for (var i = 0; i < _agentMessages.length; i++)
-          ChatMessageRecord.fromAgentMessage(sid, i, _agentMessages[i]),
-      ];
-      await repo.replaceMessages(sid, records);
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-      LoggerService.instance.i(
-        'ScenarioSession [$scenarioId] DB 重写: 保留 ${records.length} 条 (fromIndex=$fromIndex)',
-        category: LogCategory.ai,
-        tags: ['session', 'db_rewrite', scenarioId],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] DB 重写失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'db_rewrite', 'failed', scenarioId],
-      );
-    }
-  }
-
-  /// 压缩后以内存为基准原子重写 DB
-  ///
-  /// 压缩会截断内存前段，agentMsgIndex 由此产生空洞；重写让索引重新紧凑。
-  /// replaceMessages 单事务完成"清空 + 按序写入"，替代原先
-  /// deleteMessagesBefore → clearMessages → 逐条 append 的三步非原子路径
-  /// （原先第一步纯属白做，且中途崩溃会留下索引断裂的会话）。
-  Future<void> _deleteAgentMessagesBeforeDb(int beforeIndex) async {
-    final sid = _sessionId;
-    if (sid == null) return;
-    try {
-      final repo = _ref.read(chatSessionRepositoryProvider);
-      final records = [
-        for (var i = 0; i < _agentMessages.length; i++)
-          ChatMessageRecord.fromAgentMessage(sid, i, _agentMessages[i]),
-      ];
-      await repo.replaceMessages(sid, records);
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-      LoggerService.instance.i(
-        'ScenarioSession [$scenarioId] 压缩后 DB 重写: 保留 ${records.length} 条 (beforeIndex=$beforeIndex)',
-        category: LogCategory.ai,
-        tags: ['session', 'compaction_db', scenarioId],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 压缩 DB 清理失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'compaction_db', 'failed', scenarioId],
-      );
-    }
-  }
-
-  Future<void> _clearMessagesFromDb() async {
-    final sid = _sessionId;
-    if (sid == null) return;
-    try {
-      await _ref.read(chatSessionRepositoryProvider).clearMessages(sid);
-      _ref.invalidate(chatSessionsByScenarioProvider(scenarioId));
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 清库 messages 失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'clear_db', 'failed', scenarioId],
-      );
-    }
-  }
+  //
+  // DB 写入已拆分到 AgentSessionPersistence（agent_session_persistence.dart）：
+  // - persistAgentMessage        ← 原 _persistAgentMessage（含索引定位修复）
+  // - persistAgentMessages       ← 原 _persistAgentMessages
+  // - persistCurrentNovel        ← 原 _persistCurrentNovel（含标题自动同步）
+  // - rewriteAgentMessagesInDb   ← 原 _deleteAgentMessagesFromDb /
+  //                                _deleteAgentMessagesBeforeDb（合并参数化）
+  // - clearMessagesFromDb        ← 原 _clearMessagesFromDb
 
   /// 构造当前场景上下文
   AgentScenarioContext _buildScenarioContext() {

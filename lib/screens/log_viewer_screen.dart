@@ -210,350 +210,409 @@ class _LogViewerScreenState extends ConsumerState<LogViewerScreen> {
     return Scaffold(
       appBar: LibraryAppBar(
         title: '应用日志',
-        actions: [
-          // 搜索按钮
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: _showSearchDialog,
-            tooltip: '搜索日志',
-          ),
-          // 分类过滤按钮
-          PopupMenuButton<Object?>(
-            icon: const Icon(Icons.category_outlined),
-            tooltip: '按分类过滤',
-            onSelected: (value) {
-              setState(() {
-                _selectedCategory = _decodeNoFilter<LogCategory>(value);
-                _loadLogs();
-              });
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem<Object?>(
-                value: _kNoFilterSentinel,
-                child: Text('全部分类'),
-              ),
-              const PopupMenuDivider(),
-              ...LogCategory.values.map(
-                (category) => PopupMenuItem<Object?>(
-                  value: category,
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: _getCategoryColor(category),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(category.label),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // 级别过滤按钮
-          PopupMenuButton<Object?>(
-            icon: const Icon(Icons.filter_list),
-            tooltip: '按级别过滤',
-            onSelected: (value) {
-              setState(() {
-                _selectedLevel = _decodeNoFilter<LogLevel>(value);
-                _loadLogs();
-              });
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem<Object?>(
-                value: _kNoFilterSentinel,
-                child: Text('全部级别'),
-              ),
-              const PopupMenuDivider(),
-              ...LogLevel.values.map(
-                (level) => PopupMenuItem<Object?>(
-                  value: level,
-                  child: Row(
-                    children: [
-                      Icon(level.icon, size: 18, color: _getLevelColor(level)),
-                      const SizedBox(width: 8),
-                      Text(level.label),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // 导出按钮
-          IconButton(
-            icon: _isExporting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.file_download),
-            onPressed: _isExporting ? null : _exportLogs,
-            tooltip: '导出日志文件',
-          ),
-          // 复制按钮
-          IconButton(
-            icon: const Icon(Icons.copy),
-            onPressed: _copyAllLogs,
-            tooltip: '复制全部日志',
-          ),
-          // 上报按钮
-          IconButton(
-            icon: const Icon(Icons.cloud_upload_outlined),
-            onPressed: () async {
-              final reporter = ref.read(logReporterServiceProvider);
-              await reporter.flush();
-              if (mounted) {
-                ToastUtils.showSuccess('日志已上报');
-              }
-            },
-            tooltip: '上报日志',
-          ),
-          // 清空按钮
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: _clearLogs,
-            tooltip: '清空日志',
-          ),
-        ],
+        actions: _buildAppBarActions(),
       ),
       body: _displayedLogs.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.bug_report_outlined,
-                    size: 64,
-                    color: context.appColors.inkSoft.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _hasActiveFilter ? '没有匹配的日志' : '暂无日志',
-                    style: AppTypography.bodyProse.copyWith(
-                      fontSize: 16,
-                      color: context.appColors.inkSoft,
-                    ),
-                  ),
-                ],
-              ),
-            )
+          ? _buildEmptyView()
           : Column(
               children: [
                 // 过滤状态提示
-                if (_hasActiveFilter)
-                  Container(
-                    width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: Theme.of(context).colorScheme.secondaryContainer,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              if (_selectedLevel != null)
-                                Chip(
-                                  label: Text(
-                                    '级别: ${_selectedLevel!.label}',
-                                    style: const TextStyle(fontSize: 11),
-                                  ),
-                                  avatar: Icon(_selectedLevel!.icon,
-                                      size: 14,
-                                      color: _getLevelColor(_selectedLevel!)),
-                                  onDeleted: () {
-                                    setState(() {
-                                      _selectedLevel = null;
-                                      _loadLogs();
-                                    });
-                                  },
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              if (_selectedCategory != null)
-                                Chip(
-                                  label: Text(
-                                    '分类: ${_selectedCategory!.label}',
-                                    style: const TextStyle(fontSize: 11),
-                                  ),
-                                  avatar: Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color:
-                                          _getCategoryColor(_selectedCategory!),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  onDeleted: () {
-                                    setState(() {
-                                      _selectedCategory = null;
-                                      _loadLogs();
-                                    });
-                                  },
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              if (_searchQuery.isNotEmpty)
-                                Chip(
-                                  label: Text(
-                                    '搜索: $_searchQuery',
-                                    style: const TextStyle(fontSize: 11),
-                                  ),
-                                  avatar: const Icon(Icons.search, size: 14),
-                                  onDeleted: () {
-                                    setState(() {
-                                      _searchQuery = '';
-                                      _loadLogs();
-                                    });
-                                  },
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              TextButton(
-                                onPressed: _clearFilters,
-                                child: const Text('清除全部'),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_displayedLogs.length} 条',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSecondaryContainer,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                if (_hasActiveFilter) _buildFilterBar(),
                 // 日志列表
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _displayedLogs.length,
-                    reverse: true,
-                    itemBuilder: (context, index) {
-                      final log =
-                          _displayedLogs[_displayedLogs.length - 1 - index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(
-                            log.level.icon,
-                            size: 18,
-                            color: _getLevelColor(log.level),
-                          ),
-                          title: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 消息内容
-                              Text(
-                                log.message,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                              // 分类标签
-                              Wrap(
-                                spacing: 4,
-                                children: [
-                                  Chip(
-                                    label: Text(
-                                      log.category.label,
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                    backgroundColor:
-                                        _getCategoryColor(log.category)
-                                            .withValues(alpha: 0.2),
-                                    padding: EdgeInsets.zero,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  ...log.tags.map((tag) => Chip(
-                                        label: Text(
-                                          tag,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                        backgroundColor: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface
-                                            .withValues(alpha: 0.1),
-                                        padding: EdgeInsets.zero,
-                                        materialTapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                        visualDensity: VisualDensity.compact,
-                                      )),
-                                ],
-                              ),
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                LoggerService.formatTimestamp(log.timestamp),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall!
-                                    .copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.6),
-                                    ),
-                              ),
-                              if (log.stackTrace != null &&
-                                  log.stackTrace!.isNotEmpty)
-                                InkWell(
-                                  onTap: () {
-                                    _showStackTraceDialog(log);
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      '查看堆栈信息',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall!
-                                          .copyWith(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                            decoration:
-                                                TextDecoration.underline,
-                                          ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          onTap: () => _showLogDetailDialog(log),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+                Expanded(child: _buildLogList()),
               ],
             ),
     );
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // AppBar 动作按钮
+  // ═══════════════════════════════════════════════════════════════
+
+  /// AppBar 右侧动作按钮组：搜索 / 分类过滤 / 级别过滤 / 导出 / 复制 / 上报 / 清空。
+  List<Widget> _buildAppBarActions() {
+    return [
+      // 搜索按钮
+      IconButton(
+        icon: const Icon(Icons.search),
+        onPressed: _showSearchDialog,
+        tooltip: '搜索日志',
+      ),
+      // 分类过滤按钮
+      _buildCategoryFilterButton(),
+      // 级别过滤按钮
+      _buildLevelFilterButton(),
+      // 导出按钮
+      IconButton(
+        icon: _isExporting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.file_download),
+        onPressed: _isExporting ? null : _exportLogs,
+        tooltip: '导出日志文件',
+      ),
+      // 复制按钮
+      IconButton(
+        icon: const Icon(Icons.copy),
+        onPressed: _copyAllLogs,
+        tooltip: '复制全部日志',
+      ),
+      // 上报按钮
+      IconButton(
+        icon: const Icon(Icons.cloud_upload_outlined),
+        onPressed: () async {
+          final reporter = ref.read(logReporterServiceProvider);
+          await reporter.flush();
+          if (mounted) {
+            ToastUtils.showSuccess('日志已上报');
+          }
+        },
+        tooltip: '上报日志',
+      ),
+      // 清空按钮
+      IconButton(
+        icon: const Icon(Icons.delete_outline),
+        onPressed: _clearLogs,
+        tooltip: '清空日志',
+      ),
+    ];
+  }
+
+  /// 分类过滤按钮：弹出「全部分类 + 各分类」菜单。
+  Widget _buildCategoryFilterButton() {
+    return PopupMenuButton<Object?>(
+      icon: const Icon(Icons.category_outlined),
+      tooltip: '按分类过滤',
+      onSelected: (value) {
+        setState(() {
+          _selectedCategory = _decodeNoFilter<LogCategory>(value);
+          _loadLogs();
+        });
+      },
+      itemBuilder: (context) => _buildCategoryMenuItems(),
+    );
+  }
+
+  /// 级别过滤按钮：弹出「全部级别 + 各级别」菜单。
+  Widget _buildLevelFilterButton() {
+    return PopupMenuButton<Object?>(
+      icon: const Icon(Icons.filter_list),
+      tooltip: '按级别过滤',
+      onSelected: (value) {
+        setState(() {
+          _selectedLevel = _decodeNoFilter<LogLevel>(value);
+          _loadLogs();
+        });
+      },
+      itemBuilder: (context) => _buildLevelMenuItems(),
+    );
+  }
+
+  /// 分类过滤菜单项（数据驱动构造）：「全部分类」sentinel 项 + 分隔线 +
+  /// 各分类（色点 + 名称）。
+  List<PopupMenuEntry<Object?>> _buildCategoryMenuItems() {
+    return [
+      const PopupMenuItem<Object?>(
+        value: _kNoFilterSentinel,
+        child: Text('全部分类'),
+      ),
+      const PopupMenuDivider(),
+      ...LogCategory.values.map(
+        (category) => PopupMenuItem<Object?>(
+          value: category,
+          child: Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: _getCategoryColor(category),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(category.label),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
+  /// 级别过滤菜单项（数据驱动构造）：「全部级别」sentinel 项 + 分隔线 +
+  /// 各级别（彩色图标 + 名称）。
+  List<PopupMenuEntry<Object?>> _buildLevelMenuItems() {
+    return [
+      const PopupMenuItem<Object?>(
+        value: _kNoFilterSentinel,
+        child: Text('全部级别'),
+      ),
+      const PopupMenuDivider(),
+      ...LogLevel.values.map(
+        (level) => PopupMenuItem<Object?>(
+          value: level,
+          child: Row(
+            children: [
+              Icon(level.icon, size: 18, color: _getLevelColor(level)),
+              const SizedBox(width: 8),
+              Text(level.label),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 主体区域
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 空日志占位视图
+  Widget _buildEmptyView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.bug_report_outlined,
+            size: 64,
+            color: context.appColors.inkSoft.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _hasActiveFilter ? '没有匹配的日志' : '暂无日志',
+            style: AppTypography.bodyProse.copyWith(
+              fontSize: 16,
+              color: context.appColors.inkSoft,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 过滤状态提示栏：当前生效的过滤 Chip + 结果计数。
+  Widget _buildFilterBar() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (_selectedLevel != null) _buildLevelFilterChip(),
+                if (_selectedCategory != null) _buildCategoryFilterChip(),
+                if (_searchQuery.isNotEmpty) _buildSearchFilterChip(),
+                TextButton(
+                  onPressed: _clearFilters,
+                  child: const Text('清除全部'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${_displayedLogs.length} 条',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSecondaryContainer,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 「级别」过滤 Chip：点删除清掉级别过滤。
+  Widget _buildLevelFilterChip() {
+    return Chip(
+      label: Text(
+        '级别: ${_selectedLevel!.label}',
+        style: const TextStyle(fontSize: 11),
+      ),
+      avatar: Icon(_selectedLevel!.icon,
+          size: 14, color: _getLevelColor(_selectedLevel!)),
+      onDeleted: () {
+        setState(() {
+          _selectedLevel = null;
+          _loadLogs();
+        });
+      },
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  /// 「分类」过滤 Chip：点删除清掉分类过滤。
+  Widget _buildCategoryFilterChip() {
+    return Chip(
+      label: Text(
+        '分类: ${_selectedCategory!.label}',
+        style: const TextStyle(fontSize: 11),
+      ),
+      avatar: Container(
+        width: 10,
+        height: 10,
+        decoration: BoxDecoration(
+          color: _getCategoryColor(_selectedCategory!),
+          shape: BoxShape.circle,
+        ),
+      ),
+      onDeleted: () {
+        setState(() {
+          _selectedCategory = null;
+          _loadLogs();
+        });
+      },
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  /// 「搜索」过滤 Chip：点删除清掉关键词。
+  Widget _buildSearchFilterChip() {
+    return Chip(
+      label: Text(
+        '搜索: $_searchQuery',
+        style: const TextStyle(fontSize: 11),
+      ),
+      avatar: const Icon(Icons.search, size: 14),
+      onDeleted: () {
+        setState(() {
+          _searchQuery = '';
+          _loadLogs();
+        });
+      },
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  /// 日志列表：按时间倒序（最新在最上方）。
+  Widget _buildLogList() {
+    return ListView.builder(
+      itemCount: _displayedLogs.length,
+      reverse: true,
+      itemBuilder: (context, index) {
+        final log = _displayedLogs[_displayedLogs.length - 1 - index];
+        return _buildLogCard(log);
+      },
+    );
+  }
+
+  /// 单条日志卡片
+  Widget _buildLogCard(LogEntry log) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          log.level.icon,
+          size: 18,
+          color: _getLevelColor(log.level),
+        ),
+        title: _buildLogItemTitle(log),
+        subtitle: _buildLogItemSubtitle(log),
+        onTap: () => _showLogDetailDialog(log),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+      ),
+    );
+  }
+
+  /// 日志条目标题：消息内容 + 分类/标签 Chip 行。
+  Widget _buildLogItemTitle(LogEntry log) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 消息内容
+        Text(
+          log.message,
+          style: const TextStyle(
+            fontSize: 12,
+            fontFamily: 'monospace',
+          ),
+        ),
+        // 分类标签
+        Wrap(
+          spacing: 4,
+          children: [
+            Chip(
+              label: Text(
+                log.category.label,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              backgroundColor:
+                  _getCategoryColor(log.category).withValues(alpha: 0.2),
+              padding: EdgeInsets.zero,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+            ),
+            ...log.tags.map((tag) => Chip(
+                  label: Text(
+                    tag,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  backgroundColor: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.1),
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                )),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 日志条目副标题：时间戳 + 可选的「查看堆栈信息」链接。
+  Widget _buildLogItemSubtitle(LogEntry log) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          LoggerService.formatTimestamp(log.timestamp),
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall!
+              .copyWith(
+                color:
+                    Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+        ),
+        if (log.stackTrace != null && log.stackTrace!.isNotEmpty)
+          InkWell(
+            onTap: () {
+              _showStackTraceDialog(log);
+            },
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '查看堆栈信息',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall!
+                    .copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      decoration: TextDecoration.underline,
+                    ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 对话框
+  // ═══════════════════════════════════════════════════════════════
 
   /// 显示搜索对话框
   void _showSearchDialog() {

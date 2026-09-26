@@ -55,47 +55,45 @@ class NovelRepository extends BaseRepository
   /// 只刷新内容元数据；coverUrl/coverMediaId 仅在新值非空时覆盖；
   /// 返回既有行的 id，调用方（Agent create_novel 等）拿到的 id 语义不变。
   @override
-  Future<int> addToBookshelf(Novel novel) async {
-    try {
-      final db = await database;
-      final existingUrl = await findExistingBookshelfUrl(novel.url);
-      if (existingUrl != null) {
-        return await _refreshExistingRow(db, existingUrl, novel);
-      }
-      final inserted = await db.insert(
-        'bookshelf',
-        {
-          'title': novel.title,
-          'author': novel.author,
-          'url': novel.url,
-          'coverUrl': novel.coverUrl,
-          'coverMediaId': novel.coverMediaId,
-          'description': novel.description,
-          'backgroundSetting': novel.backgroundSetting,
-          'addedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
-
-      if (inserted != 0) {
-        LoggerService.instance.i(
-          '添加小说到书架: ${novel.title}',
-          category: LogCategory.database,
-          tags: ['novel', 'add', 'success'],
+  Future<int> addToBookshelf(Novel novel) {
+    return guard(
+      'novel.addToBookshelf',
+      () async {
+        final db = await database;
+        final existingUrl = await findExistingBookshelfUrl(novel.url);
+        if (existingUrl != null) {
+          return await _refreshExistingRow(db, existingUrl, novel);
+        }
+        final inserted = await db.insert(
+          'bookshelf',
+          {
+            'title': novel.title,
+            'author': novel.author,
+            'url': novel.url,
+            'coverUrl': novel.coverUrl,
+            'coverMediaId': novel.coverMediaId,
+            'description': novel.description,
+            'backgroundSetting': novel.backgroundSetting,
+            'addedAt': DateTime.now().millisecondsSinceEpoch,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
         );
-        return inserted;
-      }
 
-      return await _refreshExistingRow(db, novel.url, novel);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '添加小说到书架失败: ${novel.title} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'add', 'failed'],
-      );
-      rethrow;
-    }
+        if (inserted != 0) {
+          LoggerService.instance.i(
+            '添加小说到书架: ${novel.title}',
+            category: LogCategory.database,
+            tags: ['novel', 'add', 'success'],
+          );
+          return inserted;
+        }
+
+        return await _refreshExistingRow(db, novel.url, novel);
+      },
+      message: (e) => '添加小说到书架失败: ${novel.title} - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'add', 'failed'],
+    );
   }
 
   /// 已存在行的元数据刷新（阅读进度字段 lastReadChapter/lastReadTime 不触碰）
@@ -145,31 +143,29 @@ class NovelRepository extends BaseRepository
 
   /// 从书架移除小说
   @override
-  Future<int> removeFromBookshelf(String novelUrl) async {
-    try {
-      final db = await database;
-      final result = await db.delete(
-        'bookshelf',
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
+  Future<int> removeFromBookshelf(String novelUrl) {
+    return guard(
+      'novel.removeFromBookshelf',
+      () async {
+        final db = await database;
+        final result = await db.delete(
+          'bookshelf',
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
 
-      LoggerService.instance.i(
-        '从书架移除小说: $novelUrl',
-        category: LogCategory.database,
-        tags: ['novel', 'remove', 'success'],
-      );
+        LoggerService.instance.i(
+          '从书架移除小说: $novelUrl',
+          category: LogCategory.database,
+          tags: ['novel', 'remove', 'success'],
+        );
 
-      return result;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '从书架移除小说失败: $novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'remove', 'failed'],
-      );
-      rethrow;
-    }
+        return result;
+      },
+      message: (e) => '从书架移除小说失败: $novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'remove', 'failed'],
+    );
   }
 
   /// 获取所有小说
@@ -239,31 +235,33 @@ class NovelRepository extends BaseRepository
 
   /// 更新最后阅读章节
   @override
-  Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) async {
-    try {
-      final db = await database;
-      return await db.update(
-        'bookshelf',
-        {
-          'lastReadChapter': chapterIndex,
-          'lastReadTime': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
-    } catch (e, stackTrace) {
-      // 高频操作（每次翻页都触发），失败必须可见
-      LoggerService.instance.e(
-        '更新最后阅读章节失败: novelUrl=$novelUrl chapterIndex=$chapterIndex - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'last_read', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> updateLastReadChapter(String novelUrl, int chapterIndex) {
+    // 高频操作（每次翻页都触发），失败必须可见
+    return guard(
+      'novel.updateLastReadChapter',
+      () async {
+        final db = await database;
+        return await db.update(
+          'bookshelf',
+          {
+            'lastReadChapter': chapterIndex,
+            'lastReadTime': DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
+      },
+      message: (e) =>
+          '更新最后阅读章节失败: novelUrl=$novelUrl chapterIndex=$chapterIndex - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'last_read', 'failed'],
+    );
   }
 
   /// 获取章内阅读位置锚点
+  ///
+  /// 刻意不走 guard：失败属可降级场景——记 warning 日志后返回 null，
+  /// 不上抛（业务逻辑而非统一错误守护）。
   @override
   Future<ReadingAnchor?> getLastReadAnchor(String novelUrl) async {
     try {
@@ -321,31 +319,29 @@ class NovelRepository extends BaseRepository
       return 0;
     }
 
-    try {
-      final db = await database;
-      final result = await db.update(
-        'bookshelf',
-        {'title': newTitle},
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
+    return guard(
+      'novel.updateTitle',
+      () async {
+        final db = await database;
+        final result = await db.update(
+          'bookshelf',
+          {'title': newTitle},
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
 
-      LoggerService.instance.i(
-        '更新小说书名: $novelUrl -> $newTitle',
-        category: LogCategory.database,
-        tags: ['novel', 'update_title', 'success'],
-      );
+        LoggerService.instance.i(
+          '更新小说书名: $novelUrl -> $newTitle',
+          category: LogCategory.database,
+          tags: ['novel', 'update_title', 'success'],
+        );
 
-      return result;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新小说书名失败: $novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'update_title', 'failed'],
-      );
-      rethrow;
-    }
+        return result;
+      },
+      message: (e) => '更新小说书名失败: $novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'update_title', 'failed'],
+    );
   }
 
   /// 更新小说背景设定
@@ -356,23 +352,21 @@ class NovelRepository extends BaseRepository
       return 0;
     }
 
-    try {
-      final db = await database;
-      return await db.update(
-        'bookshelf',
-        {'backgroundSetting': backgroundSetting},
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新背景设定失败: novelUrl=$novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'background', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'novel.updateBackgroundSetting',
+      () async {
+        final db = await database;
+        return await db.update(
+          'bookshelf',
+          {'backgroundSetting': backgroundSetting},
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
+      },
+      message: (e) => '更新背景设定失败: novelUrl=$novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'background', 'failed'],
+    );
   }
 
   /// 获取小说背景设定
@@ -520,23 +514,21 @@ class NovelRepository extends BaseRepository
       return 0;
     }
 
-    try {
-      final db = await database;
-      return await db.update(
-        'bookshelf',
-        {'coverMediaId': mediaId},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新封面失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'cover', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'novel.updateCoverMediaIdById',
+      () async {
+        final db = await database;
+        return await db.update(
+          'bookshelf',
+          {'coverMediaId': mediaId},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      message: (e) => '更新封面失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'cover', 'failed'],
+    );
   }
 
   /// 根据 URL 更新小说封面媒体 ID
@@ -549,23 +541,21 @@ class NovelRepository extends BaseRepository
       return 0;
     }
 
-    try {
-      final db = await database;
-      return await db.update(
-        'bookshelf',
-        {'coverMediaId': mediaId},
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新封面失败: url=$novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'cover', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'novel.updateCoverMediaIdByUrl',
+      () async {
+        final db = await database;
+        return await db.update(
+          'bookshelf',
+          {'coverMediaId': mediaId},
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
+      },
+      message: (e) => '更新封面失败: url=$novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'cover', 'failed'],
+    );
   }
 
   /// 根据 URL 更新小说封面图 URL（chapter_list_js 抓取回填用）
@@ -581,22 +571,20 @@ class NovelRepository extends BaseRepository
     if (cleaned == null || cleaned.isEmpty) {
       return 0;
     }
-    try {
-      final db = await database;
-      return await db.update(
-        'bookshelf',
-        {'coverUrl': cleaned},
-        where: 'url = ?',
-        whereArgs: [novelUrl],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新封面URL失败: url=$novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['novel', 'cover-url', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'novel.updateCoverUrlByUrl',
+      () async {
+        final db = await database;
+        return await db.update(
+          'bookshelf',
+          {'coverUrl': cleaned},
+          where: 'url = ?',
+          whereArgs: [novelUrl],
+        );
+      },
+      message: (e) => '更新封面URL失败: url=$novelUrl - $e',
+      category: LogCategory.database,
+      tags: ['novel', 'cover-url', 'failed'],
+    );
   }
 }

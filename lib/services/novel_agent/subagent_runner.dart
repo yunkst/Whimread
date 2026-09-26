@@ -121,6 +121,12 @@ class SubagentRunner {
       toolCallId: parentToolCallId,
     );
 
+    // 内存上限接线（spec §5.3）：每注册一个新 run 就清理该 session 超额的
+    // 终态 run，保留最近 20 个供回看，长会话内存不随 run 数无限增长。
+    // 新建 run 的 createdAt 最新，必然在保留集内；非终态 run 由
+    // pruneForSession 自身保护（并发计数 / 级联取消依赖它们）。
+    registry.pruneForSession(parentSessionId, keep: SubagentRegistry.historyKeepLimit);
+
     if (task.trim().isEmpty) {
       run.state = SubagentRunState.failed;
       run.errorMessage = 'task 不能为空';

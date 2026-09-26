@@ -15,25 +15,23 @@ class ChapterVersionRepository extends BaseRepository
 
   @override
   Future<int> saveVersion(ChapterVersion version,
-      {DatabaseExecutor? executor}) async {
-    try {
-      final db = executor ?? await database;
-      final id = await db.insert(_table, version.toMap());
-      LoggerService.instance.i(
-        '保存版本: chapterUrl=${version.chapterUrl} source=${version.source} id=$id',
-        category: LogCategory.database,
-        tags: ['chapter_version', 'save'],
-      );
-      return id;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '保存版本失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chapter_version', 'save', 'failed'],
-      );
-      rethrow;
-    }
+      {DatabaseExecutor? executor}) {
+    return guard(
+      'chapter_version.saveVersion',
+      () async {
+        final db = executor ?? await database;
+        final id = await db.insert(_table, version.toMap());
+        LoggerService.instance.i(
+          '保存版本: chapterUrl=${version.chapterUrl} source=${version.source} id=$id',
+          category: LogCategory.database,
+          tags: ['chapter_version', 'save'],
+        );
+        return id;
+      },
+      message: (e) => '保存版本失败: $e',
+      category: LogCategory.database,
+      tags: ['chapter_version', 'save', 'failed'],
+    );
   }
 
   @override

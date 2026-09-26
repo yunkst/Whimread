@@ -8,7 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 
-import '../services/logger_service.dart';
+import '../logger_service.dart';
 
 /// PP-OCRv6 rec 离线识别器。
 ///

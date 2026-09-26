@@ -6,7 +6,8 @@
 ///
 /// ## 资源隔离
 ///
-/// 本服务**自管一个独立的 HeadlessInAppWebView 实例**，与
+/// 本服务**自管一个独立的 HeadlessInAppWebView 实例**（通过共享运行时
+/// [HeadlessWebViewRuntime] 组合持有），与
 /// `HeadlessWebViewContentService`（章节内容）、`HeadlessWebViewPool`
 /// （Agent 提取场景）各自独立，互不干扰。这样可避免章节列表加载过程中
 /// URL 被其它场景的 loadUrl 覆盖导致内容错乱。
@@ -28,63 +29,45 @@
 ///
 /// ## 复用
 ///
-/// - [WebViewPageLoader] — onLoadStop 事件驱动的页面加载等待
-/// - [WebViewJsExecutor] — 脚本校验、IIFE 提取、结果解析
-/// - [SiteScriptRepository] — 域名脚本查询
+/// - [HeadlessWebViewRuntime] — WebView 初始化 / 页面加载 / 脚本执行
+///   （统一 120s 超时）/ 脚本健康度的共享实现
+/// - [SiteScriptRepository] — 域名脚本查询（经运行时用于健康度落库）
 library;
 
-import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chapter.dart';
 import '../repositories/site_script_repository.dart';
-import '../services/crawler/browser_mode.dart';
 import '../services/crawler/crawl_request.dart';
 import '../services/crawler/crawl_request_resolver.dart';
 import '../services/logger_service.dart';
-import '../services/novel_agent/scenarios/webview_js_executor.dart';
 import '../services/ocr_restore_service.dart';
-import 'browser_settings_service.dart';
 import 'headless_webview_errors.dart';
-import 'ocr_pua_renderer.dart';
-import 'webview_page_loader.dart';
+import 'headless_webview_runtime.dart';
 
 class HeadlessWebViewChapterListService {
-  final SiteScriptRepository _scriptRepo;
   final CrawlRequestResolver _resolver;
   final Ref? _ref;
+
+  /// 共享 WebView 运行时（初始化/加载/脚本执行/健康度），本服务独占一个实例
+  final HeadlessWebViewRuntime _runtime;
 
   HeadlessWebViewChapterListService({
     required SiteScriptRepository scriptRepo,
     required CrawlRequestResolver resolver,
     Ref? ref,
-  })  : _scriptRepo = scriptRepo,
-        _resolver = resolver,
-        _ref = ref;
+  })  : _resolver = resolver,
+        _ref = ref,
+        _runtime = HeadlessWebViewRuntime(
+          scriptRepo: scriptRepo,
+          logPrefix: 'HeadlessWebViewChapterList',
+          logTags: const ['headless-webview', 'chapter-list'],
+        );
 
-  // ===== 自管 Headless WebView 单例 =====
-
-  HeadlessInAppWebView? _headlessWebView;
-  InAppWebViewController? _controller;
-  bool _isInitializing = false;
   bool _isFetching = false;
-
-  /// 创建当前 WebView 实例时的桌面模式快照；与最新设置不一致时销毁重建，
-  /// 使 UA/尺寸跟随用户内置浏览器的展示模式（见 BrowserSettingsService）。
-  bool _desktopModeAtCreation = BrowserSettingsService.desktopModeSync;
-
-  /// 共用页面加载工具（onLoadStop 事件驱动）
-  final WebViewPageLoader _pageLoader = WebViewPageLoader();
-
-  // ===== 脚本健康度追踪 =====
-
-  final Map<String, int> _scriptFailureCount = {};
-  static const int _maxConsecutiveFailures = 3;
 
   // ===== 公开 API =====
 
@@ -136,19 +119,18 @@ class HeadlessWebViewChapterListService {
       );
 
       // 2. 确保 WebView 就绪（模式已由 resolver 对齐）
-      await _ensureWebView(mode: request.mode);
+      await _runtime.ensureWebView(mode: request.mode);
 
       // 3. 加载对齐后的 URL
-      await _loadPage(canonicalUrl.toString());
+      await _runtime.loadPage(canonicalUrl.toString());
 
       // 4. 执行提取脚本（返回 title + coverUrl + chapters + 可选 fontFamily）
       final result = await _executeChapterListScript(
-        _controller!,
         script.chapterListJs,
         canonicalUrl.toString(),
       );
       if (result == null) {
-        _recordFailure(scriptId);
+        _runtime.recordFailure(scriptId);
         return FetchChapterListResult.noScript();
       }
 
@@ -183,7 +165,7 @@ class HeadlessWebViewChapterListService {
 
       // 6. 校验结果
       if (chapters.isEmpty) {
-        _recordFailure(scriptId);
+        _runtime.recordFailure(scriptId);
         LoggerService.instance.w(
           'HeadlessWebViewChapterList: 脚本返回空章节列表 domain=$logDomain',
           category: LogCategory.crawler,
@@ -193,7 +175,7 @@ class HeadlessWebViewChapterListService {
       }
 
       // 7. 成功 → 清除失败计数，标记已使用
-      _recordSuccess(scriptId);
+      _runtime.recordSuccess(scriptId);
 
       LoggerService.instance.i(
         'HeadlessWebViewChapterList: 获取成功 domain=$logDomain scriptId=$scriptId '
@@ -204,7 +186,7 @@ class HeadlessWebViewChapterListService {
 
       return FetchChapterListResult.success(chapters, coverUrl: coverUrl);
     } on PageLoadFailedException {
-      if (scriptId != null) _recordFailure(scriptId);
+      if (scriptId != null) _runtime.recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 页面加载失败 url=$novelUrl domain=$logDomain',
         category: LogCategory.crawler,
@@ -212,7 +194,7 @@ class HeadlessWebViewChapterListService {
       );
       return FetchChapterListResult.loadFailed();
     } catch (e) {
-      if (scriptId != null) _recordFailure(scriptId);
+      if (scriptId != null) _runtime.recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebViewChapterList: 获取失败 domain=$logDomain url=$novelUrl error=$e',
         category: LogCategory.crawler,
@@ -226,119 +208,17 @@ class HeadlessWebViewChapterListService {
 
   /// 释放 WebView 资源
   void dispose() {
-    _headlessWebView?.dispose();
-    _headlessWebView = null;
-    _controller = null;
-    _pageLoader.reset();
-    _scriptFailureCount.clear();
+    _runtime.dispose();
   }
 
   // ===== 内部实现 =====
 
   /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
-  static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
-
-  /// 确保 HeadlessInAppWebView 已初始化
-  ///
-  /// [mode] 是 Resolver 对齐后的目标模式（已是「脚本模式优先 / 全局兜底」结果）。
-  /// 实例模式与目标不一致则销毁重建（一次 fetch 内部应自洽，不中途切 UA）。
-  Future<void> _ensureWebView({required BrowserMode mode}) async {
-    final targetDesktop = mode == BrowserMode.desktop;
-    if (_controller != null) {
-      if (_desktopModeAtCreation == targetDesktop) return;
-      LoggerService.instance.i(
-        'HeadlessWebViewChapterList: 模式切换 '
-        '(${_modeLabelBool(_desktopModeAtCreation)} → ${_modeLabelBool(targetDesktop)})，重建 WebView',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'recreate', 'mode-change'],
-      );
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      _controller = null;
-    }
-    _desktopModeAtCreation = targetDesktop;
-    if (_isInitializing) {
-      // 等待初始化完成（简单轮询）
-      for (var i = 0; i < 60; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (_controller != null) return;
-      }
-      LoggerService.instance.w(
-        'HeadlessWebViewChapterList: 初始化超时（30s 轮询）',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'init', 'timeout'],
-      );
-      throw Exception('HeadlessWebViewChapterList 初始化超时');
-    }
-
-    _isInitializing = true;
-    try {
-      final completer = Completer<InAppWebViewController>();
-
-      _headlessWebView = HeadlessInAppWebView(
-        initialSize: targetDesktop
-            ? BrowserSettingsService.headlessDesktopSize
-            : const Size(-1, -1),
-        onWebViewCreated: (controller) {
-          if (!completer.isCompleted) {
-            completer.complete(controller);
-          }
-        },
-        // 关键：创建时注册常驻 onLoadStop 回调，供 WebViewPageLoader 协调
-        onLoadStop: _pageLoader.onLoadStopCallback,
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          // UA 跟随用户内置浏览器的桌面模式：站点按 UA 分流电脑版/手机版
-          userAgent: targetDesktop
-              ? BrowserSettingsService.headlessUserAgent
-              : '',
-          // 不加载图片，节省流量和时间
-          loadsImagesAutomatically: false,
-          // 禁用不需要的功能
-          mediaPlaybackRequiresUserGesture: true,
-        ),
-      );
-
-      await _headlessWebView!.run();
-      _controller = await completer.future.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw Exception('WebView 创建超时'),
-      );
-
-      LoggerService.instance.i(
-        'HeadlessWebViewChapterList: 初始化完成',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'init'],
-      );
-    } catch (e, stackTrace) {
-      _isInitializing = false;
-      // 初始化失败时清理
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      LoggerService.instance.e(
-        'HeadlessWebViewChapterList: 初始化失败 $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'init', 'failed'],
-      );
-      rethrow;
-    }
-    _isInitializing = false;
-  }
-
-  /// 加载页面并等待 onLoadStop（超时抛 PageLoadFailedException）
-  Future<void> _loadPage(String url) async {
-    final outcome = await _pageLoader.loadPage(
-      controller: _controller!,
-      url: url,
-      throwOnTimeout: true,
-    );
-    // throwOnTimeout=true 时 outcome 只可能是 loaded（timeout 已抛异常）
-    assert(outcome == PageLoadOutcome.loaded);
-  }
-
   /// 执行 chapter_list_js 提取脚本
+  ///
+  /// 脚本校验/执行/超时（120s 上限）统一由 [_runtime.executeScript] 承担，
+  /// 本方法只负责章节列表结果的解析。
   ///
   /// 返回 record `(title, chapters, fontFamily, coverUrl)`：
   /// - title：脚本返回的顶层标题（可空，缺失时为空串；目前 service 出口不外传，
@@ -354,56 +234,13 @@ class HeadlessWebViewChapterListService {
             String? coverUrl
           })?>
       _executeChapterListScript(
-    InAppWebViewController controller,
     String scriptTemplate,
     String pageUrl,
   ) async {
-    // 校验脚本
-    final validationError = WebViewJsExecutor.validateScript(scriptTemplate);
-    if (validationError != null) {
-      LoggerService.instance.w(
-        'HeadlessWebViewChapterList: 脚本校验失败 $validationError',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'validation'],
-      );
-      return null;
-    }
-
-    // 替换 {{URL}} → 实际 URL
-    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
-
-    // 提取 IIFE 函数体
-    final functionBody =
-        WebViewJsExecutor.extractAsyncFunctionBody(resolvedScript);
-
-    // 执行（超时 120s，与 agent execute_js/save_script 对齐）
-    dynamic result;
-    try {
-      result = await controller
-          .callAsyncJavaScript(functionBody: functionBody)
-          .timeout(const Duration(seconds: 120));
-    } on TimeoutException {
-      LoggerService.instance.w(
-        'HeadlessWebViewChapterList: 脚本执行超时（120s） pageUrl=$pageUrl',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'execute_timeout'],
-      );
-      return null;
-    }
-
-    if (result == null) return null;
-
-    if (result.error != null) {
-      LoggerService.instance.w(
-        'HeadlessWebViewChapterList: JS执行错误 ${result.error}',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'js-error'],
-      );
-      return null;
-    }
+    final jsonStr = await _runtime.executeScript(scriptTemplate, pageUrl);
+    if (jsonStr == null) return null;
 
     // 解析返回值
-    final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
     final data = jsonDecode(jsonStr) as Map<String, dynamic>;
 
     final chaptersRaw = data['chapters'] as List<dynamic>?;
@@ -457,7 +294,7 @@ class HeadlessWebViewChapterListService {
   /// 返回原 record。
   ///
   /// 抽成 static `@visibleForTesting` 便于在纯 Dart 环境单测编排逻辑，
-  /// 绕开 WebView 平台实现限制（fetchChapterList 走到 _ensureWebView 会抛异常）。
+  /// 绕开 WebView 平台实现限制（fetchChapterList 走到 WebView 初始化会抛异常）。
   /// 产品路径由 [fetchChapterList] 在 `script.needsOcr` 时调用。
   ///
   /// 注：目前 service 出口 [FetchChapterListResult.success] 仅携带 chapters，
@@ -515,33 +352,7 @@ class HeadlessWebViewChapterListService {
 
   /// 渲染单个 PUA 码点为 base64 PNG（供 [OcrRestoreService] 用）。
   ///
-  /// 委托给共享实现 [renderPuaViaController]，消除跨服务重复。
-  /// 返回值是 base64 字符串（非 JSON），故不走 stringifyJsResult + jsonDecode。
-  Future<String> _renderPua(int codepoint, String fontFamily) async {
-    if (_controller == null) {
-      throw StateError('WebView 未就绪，无法渲染 PUA');
-    }
-    return renderPuaViaController(_controller!, codepoint, fontFamily);
-  }
-
-  // ===== 脚本健康度 =====
-
-  void _recordFailure(String scriptId) {
-    final count = (_scriptFailureCount[scriptId] ?? 0) + 1;
-    _scriptFailureCount[scriptId] = count;
-
-    if (count >= _maxConsecutiveFailures) {
-      LoggerService.instance.w(
-        'HeadlessWebViewChapterList: 脚本连续失败$count次，自动标记 unverified id=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'chapter-list', 'auto-disable'],
-      );
-      _scriptRepo.setVerified(scriptId, false);
-    }
-  }
-
-  void _recordSuccess(String scriptId) {
-    _scriptFailureCount.remove(scriptId);
-    _scriptRepo.markUsed(scriptId);
-  }
+  /// 委托给共享运行时 [_runtime.renderPua]。
+  Future<String> _renderPua(int codepoint, String fontFamily) =>
+      _runtime.renderPua(codepoint, fontFamily);
 }

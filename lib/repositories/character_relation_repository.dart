@@ -29,6 +29,8 @@ class CharacterRelationRepository extends BaseRepository
           relationship.endChapter, 'endChapter', 'endChapter 不能小于 startChapter');
     }
 
+    // 刻意不走 guard：on ArgumentError 分支要求参数异常不记 error 日志、
+    // 静默上抛，guard 无法表达按异常类型区分的日志语义。
     try {
       final db = await database;
 
@@ -84,59 +86,55 @@ class CharacterRelationRepository extends BaseRepository
   }
 
   @override
-  Future<int> updateRelationship(CharacterRelationship relationship) async {
+  Future<int> updateRelationship(CharacterRelationship relationship) {
     if (relationship.id == null) {
       throw ArgumentError('关系 ID 不能为空');
     }
-    try {
-      final db = await database;
-      final count = await db.update(
-        'character_relationships',
-        relationship.toMap(),
-        where: 'id = ?',
-        whereArgs: [relationship.id],
-      );
-      LoggerService.instance.i(
-        '更新关系成功: ${relationship.id}',
-        category: LogCategory.character,
-        tags: ['relationship', 'update', 'success'],
-      );
-      return count;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新关系失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['relationship', 'update', 'error'],
-      );
-      rethrow;
-    }
+    return guard(
+      'character_relationship.updateRelationship',
+      () async {
+        final db = await database;
+        final count = await db.update(
+          'character_relationships',
+          relationship.toMap(),
+          where: 'id = ?',
+          whereArgs: [relationship.id],
+        );
+        LoggerService.instance.i(
+          '更新关系成功: ${relationship.id}',
+          category: LogCategory.character,
+          tags: ['relationship', 'update', 'success'],
+        );
+        return count;
+      },
+      message: (e) => '更新关系失败: $e',
+      category: LogCategory.character,
+      tags: ['relationship', 'update', 'error'],
+    );
   }
 
   @override
-  Future<int> deleteRelationship(int relationshipId) async {
-    try {
-      final db = await database;
-      final count = await db.delete(
-        'character_relationships',
-        where: 'id = ?',
-        whereArgs: [relationshipId],
-      );
-      LoggerService.instance.i(
-        '删除关系成功: $relationshipId',
-        category: LogCategory.character,
-        tags: ['relationship', 'delete', 'success'],
-      );
-      return count;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除关系失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['relationship', 'delete', 'error'],
-      );
-      rethrow;
-    }
+  Future<int> deleteRelationship(int relationshipId) {
+    return guard(
+      'character_relationship.deleteRelationship',
+      () async {
+        final db = await database;
+        final count = await db.delete(
+          'character_relationships',
+          where: 'id = ?',
+          whereArgs: [relationshipId],
+        );
+        LoggerService.instance.i(
+          '删除关系成功: $relationshipId',
+          category: LogCategory.character,
+          tags: ['relationship', 'delete', 'success'],
+        );
+        return count;
+      },
+      message: (e) => '删除关系失败: $e',
+      category: LogCategory.character,
+      tags: ['relationship', 'delete', 'error'],
+    );
   }
 
   // ========== 图快照查询 ==========

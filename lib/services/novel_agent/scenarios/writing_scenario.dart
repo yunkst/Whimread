@@ -62,9 +62,9 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
       category: LogCategory.ai,
       tags: ['agent', 'scenario', 'writing', name],
     );
-    // patch_memory 由场景自行处理（需要 AgentMemoryRepository + 记忆缓存）
+    // patch_memory 由场景自行处理（复用 mixin 的统一工具执行器）
     if (name == 'patch_memory') {
-      return await _executePatchMemory(args);
+      return executePatchMemoryTool(args, logTag: 'writing');
     }
     // dispatch_subagent：委托给 SubagentRunner（任务 7）
     // 事件回流通过 SubagentRunner 内部 agentService.events.add 发到全局流，
@@ -146,36 +146,6 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
         tags: ['agent', 'writing', 'sync_context', 'parse_failed'],
       );
     }
-  }
-
-  /// 执行 patch_memory 工具，序列化 MemoryPatchResult
-  Future<String> _executePatchMemory(Map<String, dynamic> args) async {
-    final index = args['index'] as int?;
-    final newText = args['newText'] as String? ?? '';
-    final result = await patchMemory(index, newText);
-    if (result.success) {
-      LoggerService.instance.i(
-        'patchMemory 成功: ${result.message}',
-        category: LogCategory.ai,
-        tags: ['agent', 'writing', 'patch_memory', 'success'],
-      );
-      return jsonEncode({'success': true, 'message': result.message});
-    }
-    LoggerService.instance.w(
-      'patchMemory 失败: ${result.message}',
-      category: LogCategory.ai,
-      tags: ['agent', 'writing', 'patch_memory', 'failed'],
-    );
-    // 失败：返回 [N] 格式的编号列表，与 system prompt 展示一致，供 AI 用正确编号重试
-    return jsonEncode({
-      'error': 'memory_index_invalid',
-      'message': result.message,
-      'allMemories': result.allMemories
-          .asMap()
-          .entries
-          .map((e) => '[${e.key + 1}] ${e.value}')
-          .toList(),
-    });
   }
 
   /// 记忆缓存（由 AgentMemoryPatchMixin 提供，本类复用 mixin 的实现）

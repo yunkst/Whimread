@@ -14,6 +14,7 @@ import '../widgets/chapter_list/reorderable_chapter_item.dart';
 import '../widgets/chapter_list/empty_chapters_view.dart';
 import '../constants/chapter_constants.dart';
 import '../utils/toast_utils.dart';
+import '../widgets/common/confirm_dialog.dart';
 import '../widgets/common/library_app_bar.dart';
 import 'reader_screen.dart';
 import 'chapter_search_screen.dart';
@@ -579,37 +580,31 @@ class _ChapterListScreenRiverpodState
   }
 
   /// 显示清除缓存对话框
+  ///
+  /// 与项目其它确认弹窗统一走共享组件 [ConfirmDialog]；
+  /// barrierDismissible: false 保持原「点外部不可关闭」语义。
   Future<void> _showClearCacheDialog(ChapterList notifier) async {
-    showDialog(
-      context: context,
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: '清除缓存',
+      message: '确定要清除该小说的所有缓存吗？',
+      confirmText: '确定',
+      cancelText: '取消',
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('清除缓存'),
-        content: const Text('确定要清除该小说的所有缓存吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await notifier.clearCache();
-                if (mounted) {
-                  ToastUtils.show('缓存已清除');
-                }
-              } catch (e) {
-                if (mounted) {
-                  ToastUtils.showError('清除缓存失败: $e');
-                }
-              }
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
     );
+
+    if (confirmed == true) {
+      try {
+        await notifier.clearCache();
+        if (mounted) {
+          ToastUtils.show('缓存已清除');
+        }
+      } catch (e) {
+        if (mounted) {
+          ToastUtils.showError('清除缓存失败: $e');
+        }
+      }
+    }
   }
 
   /// 导航到阅读页面
@@ -756,38 +751,28 @@ class _ChapterListScreenRiverpodState
   }
 
   /// 显示删除章节确认对话框
+  ///
+  /// 删除不可恢复，属危险操作：isDangerous: true 使确认按钮走
+  /// colorScheme.error（与原 error 色按钮语义一致）。
   Future<void> _showDeleteChapterDialog(
     Chapter chapter,
     int index,
   ) async {
     final state = ref.read(chapterListProvider(widget.novel));
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除章节'),
-        content: Text(
-          '确定要删除章节"${chapter.title}"吗？\n\n'
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: '删除章节',
+      message: '确定要删除章节"${chapter.title}"吗？\n\n'
           '共有 ${state.chapters.length} 个章节，删除后无法恢复。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _deleteChapter(chapter);
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+      confirmText: '删除',
+      cancelText: '取消',
+      isDangerous: true,
     );
+
+    if (confirmed == true) {
+      await _deleteChapter(chapter);
+    }
   }
 
   /// 删除章节

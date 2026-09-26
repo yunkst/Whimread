@@ -13,7 +13,8 @@
 ///
 /// ## 资源隔离
 ///
-/// 自管一个独立 HeadlessInAppWebView，与 HeadlessWebViewChapterListService
+/// 自管一个独立 HeadlessInAppWebView（通过共享运行时
+/// [HeadlessWebViewRuntime] 组合持有），与 HeadlessWebViewChapterListService
 /// （章节列表）、HeadlessWebViewContentService（章节内容）各自独立，
 /// 避免互相覆盖 URL 导致抓取错乱。
 ///
@@ -31,50 +32,35 @@
 ///     → 页面加载超时 → return FetchSiteBookshelfResult.loadFailed()
 library;
 
-import 'dart:async';
 import 'dart:convert' show jsonDecode;
-import 'dart:ui' show Size;
-
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../repositories/site_script_repository.dart';
-import '../services/crawler/browser_mode.dart';
-import '../services/crawler/crawl_request.dart';
-import '../services/crawler/crawl_request_resolver.dart';
-import '../services/logger_service.dart';
-import '../services/novel_agent/scenarios/webview_js_executor.dart';
-import '../services/site_bookshelf_parser.dart';
-import 'browser_settings_service.dart';
+import 'crawler/crawl_request.dart';
+import 'crawler/crawl_request_resolver.dart';
 import 'headless_webview_errors.dart';
-import 'webview_page_loader.dart';
+import 'headless_webview_runtime.dart';
+import 'logger_service.dart';
+import 'site_bookshelf_parser.dart';
 
 class HeadlessWebViewBookshelfService {
-  final SiteScriptRepository _scriptRepo;
   final CrawlRequestResolver _resolver;
+
+  /// 共享 WebView 运行时（初始化/加载/脚本执行/健康度），本服务独占一个实例
+  final HeadlessWebViewRuntime _runtime;
 
   HeadlessWebViewBookshelfService({
     required SiteScriptRepository scriptRepo,
     required CrawlRequestResolver resolver,
-  })  : _scriptRepo = scriptRepo,
-        _resolver = resolver;
+  })  : _resolver = resolver,
+        _runtime = HeadlessWebViewRuntime(
+          scriptRepo: scriptRepo,
+          logPrefix: 'HeadlessWebViewBookshelf',
+          logTags: const ['headless-webview', 'site-bookshelf'],
+          // 历史异常文案标识（原实现为 Service 后缀）
+          initTimeoutLabel: 'HeadlessWebViewBookshelfService',
+        );
 
-  // ===== 自管 Headless WebView 单例 =====
-
-  HeadlessInAppWebView? _headlessWebView;
-  InAppWebViewController? _controller;
-  bool _isInitializing = false;
   bool _isFetching = false;
-
-  /// 创建当前 WebView 实例时的桌面模式快照；与最新设置不一致时销毁重建，
-  /// 使 UA/尺寸跟随用户内置浏览器的展示模式（见 BrowserSettingsService）。
-  bool _desktopModeAtCreation = BrowserSettingsService.desktopModeSync;
-
-  final WebViewPageLoader _pageLoader = WebViewPageLoader();
-
-  // ===== 脚本健康度追踪 =====
-
-  final Map<String, int> _scriptFailureCount = {};
-  static const int _maxConsecutiveFailures = 3;
 
   // ===== 公开 API =====
 
@@ -124,24 +110,23 @@ class HeadlessWebViewBookshelfService {
         tags: ['headless-webview', 'site-bookshelf', 'fetch'],
       );
 
-      await _ensureWebView(
+      // 确保 WebView 就绪（logContext 供初始化等待/完成/失败日志定位）
+      await _runtime.ensureWebView(
         mode: request.mode,
-        domain: logDomain,
-        scriptId: scriptId,
+        logContext: 'domain=$logDomain scriptId=$scriptId',
       );
 
       // 加载对齐后的 URL（host 已与脚本验证环境自洽，理论上不再触发跳转）
-      await _loadPage(canonicalUrl.toString());
+      await _runtime.loadPage(canonicalUrl.toString());
 
       final result = await _executeBookshelfScript(
-        _controller!,
         request.script.bookshelfJs,
         canonicalUrl.toString(),
         domain: logDomain,
         scriptId: scriptId,
       );
       if (result == null) {
-        _recordFailure(scriptId, domain: logDomain);
+        _runtime.recordFailure(scriptId, logContext: 'domain=$logDomain');
         LoggerService.instance.w(
           'HeadlessWebViewBookshelf: outcome=failed reason=execute_null '
           'domain=$logDomain scriptId=$scriptId durationMs=${stopwatch.elapsedMilliseconds}',
@@ -153,7 +138,7 @@ class HeadlessWebViewBookshelfService {
 
       // 非空校验（SiteBookshelfParser 失败或空数组都返回 null）
       if (result.isEmpty) {
-        _recordFailure(scriptId, domain: logDomain);
+        _runtime.recordFailure(scriptId, logContext: 'domain=$logDomain');
         LoggerService.instance.w(
           'HeadlessWebViewBookshelf: outcome=failed reason=empty_result '
           'domain=$logDomain scriptId=$scriptId durationMs=${stopwatch.elapsedMilliseconds}',
@@ -163,7 +148,7 @@ class HeadlessWebViewBookshelfService {
         return FetchSiteBookshelfResult.failed();
       }
 
-      _recordSuccess(scriptId);
+      _runtime.recordSuccess(scriptId);
       LoggerService.instance.i(
         'HeadlessWebViewBookshelf: outcome=success '
         'domain=$logDomain scriptId=$scriptId count=${result.length} '
@@ -175,7 +160,9 @@ class HeadlessWebViewBookshelfService {
 
       return FetchSiteBookshelfResult.success(result);
     } on PageLoadFailedException {
-      if (scriptId != null) _recordFailure(scriptId, domain: logDomain);
+      if (scriptId != null) {
+        _runtime.recordFailure(scriptId, logContext: 'domain=$logDomain');
+      }
       LoggerService.instance.w(
         'HeadlessWebViewBookshelf: outcome=loadFailed '
         'domain=$logDomain scriptId=$scriptId url=$url '
@@ -185,7 +172,9 @@ class HeadlessWebViewBookshelfService {
       );
       return FetchSiteBookshelfResult.loadFailed();
     } catch (e) {
-      if (scriptId != null) _recordFailure(scriptId, domain: logDomain);
+      if (scriptId != null) {
+        _runtime.recordFailure(scriptId, logContext: 'domain=$logDomain');
+      }
       LoggerService.instance.w(
         'HeadlessWebViewBookshelf: outcome=failed reason=exception '
         'domain=$logDomain scriptId=$scriptId url=$url error=$e '
@@ -201,164 +190,32 @@ class HeadlessWebViewBookshelfService {
 
   /// 释放 WebView 资源
   void dispose() {
-    _headlessWebView?.dispose();
-    _headlessWebView = null;
-    _controller = null;
-    _pageLoader.reset();
-    _scriptFailureCount.clear();
+    _runtime.dispose();
   }
 
   // ===== 内部实现 =====
 
   /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
-  static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
-
-  Future<void> _ensureWebView({
-    required BrowserMode mode,
-    String? domain,
-    String? scriptId,
-  }) async {
-    final targetDesktop = mode == BrowserMode.desktop;
-    if (_controller != null) {
-      if (_desktopModeAtCreation == targetDesktop) return;
-      LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 模式切换 '
-        '(${_modeLabelBool(_desktopModeAtCreation)} → ${_modeLabelBool(targetDesktop)})，重建 WebView',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'recreate', 'mode-change'],
-      );
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      _controller = null;
-    }
-    _desktopModeAtCreation = targetDesktop;
-    if (_isInitializing) {
-      LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 等待其他初始化完成 domain=$domain scriptId=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'init', 'waiting'],
-      );
-      for (var i = 0; i < 60; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (_controller != null) return;
-      }
-      LoggerService.instance.w(
-        'HeadlessWebViewBookshelf: 初始化互斥等待超时(30s) domain=$domain scriptId=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'init', 'timeout'],
-      );
-      throw Exception('HeadlessWebViewBookshelfService 初始化超时');
-    }
-    _isInitializing = true;
-    try {
-      final completer = Completer<InAppWebViewController>();
-
-      _headlessWebView = HeadlessInAppWebView(
-        initialSize: targetDesktop
-            ? BrowserSettingsService.headlessDesktopSize
-            : const Size(-1, -1),
-        onWebViewCreated: (controller) {
-          if (!completer.isCompleted) completer.complete(controller);
-        },
-        onLoadStop: _pageLoader.onLoadStopCallback,
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          // UA 与已对齐的 target 模式一致（不再读全局，保证「创建即目标模式」）
-          userAgent: targetDesktop
-              ? BrowserSettingsService.headlessUserAgent
-              : '',
-          loadsImagesAutomatically: false,
-          mediaPlaybackRequiresUserGesture: true,
-        ),
-      );
-
-      await _headlessWebView!.run();
-      _controller = await completer.future.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw Exception('WebView 创建超时'),
-      );
-
-      LoggerService.instance.i(
-        'HeadlessWebViewBookshelf: 初始化完成 domain=$domain scriptId=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'init'],
-      );
-    } catch (e, stackTrace) {
-      _isInitializing = false;
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      LoggerService.instance.e(
-        'HeadlessWebViewBookshelf: 初始化失败 domain=$domain scriptId=$scriptId error=$e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'init', 'failed'],
-      );
-      rethrow;
-    }
-    _isInitializing = false;
-  }
-
-  Future<void> _loadPage(String url) async {
-    final outcome = await _pageLoader.loadPage(
-      controller: _controller!,
-      url: url,
-      throwOnTimeout: true,
-    );
-    assert(outcome == PageLoadOutcome.loaded);
-  }
-
   /// 执行 bookshelf_js：解析返回值并返回 entries；任何失败返回 null
+  ///
+  /// 脚本校验/执行/超时（120s 上限）统一由 [_runtime.executeScript] 承担，
+  /// 本方法只负责 SiteBookshelfParser 解析与形状诊断。
   ///
   /// [domain]/[scriptId] 仅用于日志定位，随每条失败日志输出。
   Future<List<SiteBookshelfEntry>?> _executeBookshelfScript(
-    InAppWebViewController controller,
     String scriptTemplate,
     String pageUrl, {
     String? domain,
     String? scriptId,
   }) async {
-    final validationError = WebViewJsExecutor.validateScript(scriptTemplate);
-    if (validationError != null) {
-      LoggerService.instance.w(
-        'HeadlessWebViewBookshelf: 脚本校验失败 '
-        'domain=$domain scriptId=$scriptId reason=$validationError',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'validation'],
-      );
-      return null;
-    }
-    final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
-    final functionBody =
-        WebViewJsExecutor.extractAsyncFunctionBody(resolved);
+    final jsonStr = await _runtime.executeScript(
+      scriptTemplate,
+      pageUrl,
+      logContext: 'domain=$domain scriptId=$scriptId',
+    );
+    if (jsonStr == null) return null;
 
-    dynamic result;
-    try {
-      result = await controller
-          .callAsyncJavaScript(functionBody: functionBody)
-          .timeout(const Duration(seconds: 120));
-    } on TimeoutException {
-      LoggerService.instance.w(
-        'HeadlessWebViewBookshelf: 脚本执行超时 '
-        'domain=$domain scriptId=$scriptId pageUrl=$pageUrl timeoutMs=120000',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'execute_timeout'],
-      );
-      return null;
-    }
-
-    if (result == null) return null;
-    if (result.error != null) {
-      LoggerService.instance.w(
-        'HeadlessWebViewBookshelf: JS执行错误 '
-        'domain=$domain scriptId=$scriptId error=${result.error}',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'js-error'],
-      );
-      return null;
-    }
-
-    final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
     final parsed = SiteBookshelfParser.parse(jsonStr);
     if (parsed == null) {
       // SiteBookshelfParser 对各类畸形返回都静默返回 null，
@@ -394,27 +251,5 @@ class HeadlessWebViewBookshelfService {
   String _jsonPreview(String jsonStr) {
     if (jsonStr.length <= 200) return jsonStr;
     return '${jsonStr.substring(0, 200)}...';
-  }
-
-  // ===== 脚本健康度 =====
-
-  void _recordFailure(String scriptId, {String? domain}) {
-    final count = (_scriptFailureCount[scriptId] ?? 0) + 1;
-    _scriptFailureCount[scriptId] = count;
-    if (count >= _maxConsecutiveFailures) {
-      LoggerService.instance.w(
-        'HeadlessWebViewBookshelf: 脚本连续失败'
-        '$count/$_maxConsecutiveFailures 次，自动标记 unverified '
-        'domain=$domain scriptId=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'site-bookshelf', 'auto-disable'],
-      );
-      _scriptRepo.setVerified(scriptId, false);
-    }
-  }
-
-  void _recordSuccess(String scriptId) {
-    _scriptFailureCount.remove(scriptId);
-    _scriptRepo.markUsed(scriptId);
   }
 }

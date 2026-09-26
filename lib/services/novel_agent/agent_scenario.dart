@@ -4,11 +4,14 @@
 /// 抽象为可插拔的场景接口，不同 UI 页面可使用不同场景。
 library;
 
+import 'dart:convert';
+
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../core/providers/reading_context_providers.dart';
 import '../../models/paragraph_annotation.dart';
 import '../../repositories/agent_memory_repository.dart';
 import '../dsl_engine/llm_provider.dart' show ChatMessage;
+import '../logger_service.dart';
 
 // 导出 ChatMessage：AgentScenario 接口方法签名依赖它，
 // 所有场景实现（implements AgentScenario）需可见。
@@ -293,6 +296,46 @@ mixin AgentMemoryPatchMixin on AgentScenario {
     await loadMemories(repo);
     return MemoryPatchResult.ok('第 $index 条记忆已更新');
   }
+
+  /// 执行 patch_memory 工具，序列化 MemoryPatchResult 为工具返回 JSON。
+  ///
+  /// 原各场景（writing / webview_extract）逐字重复的 `_executePatchMemory`
+  /// 统一下沉到此：调用场景自身的 [AgentScenario.patchMemory]（动态分派到
+  /// 子类覆写），成功返回 `{success, message}`；失败返回
+  /// `error=memory_index_invalid` + 全部记忆的 `[N]` 编号列表供 AI 重试。
+  ///
+  /// [logTag] 为场景日志标签（如 `'writing'` / `'webview_extract'`）。
+  Future<String> executePatchMemoryTool(
+    Map<String, dynamic> args, {
+    required String logTag,
+  }) async {
+    final index = args['index'] as int?;
+    final newText = args['newText'] as String? ?? '';
+    final result = await patchMemory(index, newText);
+    if (result.success) {
+      LoggerService.instance.i(
+        'patchMemory 成功: ${result.message}',
+        category: LogCategory.ai,
+        tags: ['agent', logTag, 'patch_memory', 'success'],
+      );
+      return jsonEncode({'success': true, 'message': result.message});
+    }
+    LoggerService.instance.w(
+      'patchMemory 失败: ${result.message}',
+      category: LogCategory.ai,
+      tags: ['agent', logTag, 'patch_memory', 'failed'],
+    );
+    // 失败：返回 [N] 格式的编号列表，与 system prompt 展示一致，供 AI 用正确编号重试
+    return jsonEncode({
+      'error': 'memory_index_invalid',
+      'message': result.message,
+      'allMemories': result.allMemories
+          .asMap()
+          .entries
+          .map((e) => '[${e.key + 1}] ${e.value}')
+          .toList(),
+    });
+  }
 }
 
 /// patch_memory 工具的执行结果
@@ -376,41 +419,4 @@ abstract final class ScenarioIds {
   /// 工具面被锁死（仅 read/update_chapter_content/list_chapters，且
   /// update_chapter_content 物理上只能改当前章节），改写过程进入对话窗口。
   static const annotationRewrite = 'annotation_rewrite';
-}
-
-/// 场景快速输入提示词
-///
-/// 在对话输入区上方展示为一行 chip，点击后追加到输入框，
-/// 让用户快速发起典型任务，避免重复打字。
-class ScenarioQuickPrompt {
-  /// chip 上显示的简短标签
-  final String label;
-
-  /// 追加到输入框的完整提示词
-  final String text;
-
-  const ScenarioQuickPrompt({
-    required this.label,
-    required this.text,
-  });
-}
-
-/// 各场景的快速输入提示词集合
-///
-/// 与场景的工具集 / system prompt 工作流同源维护，
-/// UI 通过 [forScenario] 按场景 ID 取数。未配置的场景返回空列表（不渲染 chip 行）。
-abstract final class ScenarioQuickPrompts {
-  static const _webviewExtract = <ScenarioQuickPrompt>[];
-
-  /// 获取指定场景的快速输入提示词
-  ///
-  /// 未配置的场景返回空列表。
-  static List<ScenarioQuickPrompt> forScenario(String scenarioId) {
-    switch (scenarioId) {
-      case ScenarioIds.webviewExtract:
-        return _webviewExtract;
-      default:
-        return const <ScenarioQuickPrompt>[];
-    }
-  }
 }

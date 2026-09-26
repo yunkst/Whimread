@@ -25,29 +25,27 @@ class CharacterRepository extends BaseRepository
   /// [character] 要创建的角色对象
   /// 返回新插入记录的ID
   @override
-  Future<int> createCharacter(Character character) async {
-    try {
-      final db = await database;
-      final id = await db.insert(
-        'characters',
-        character.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      LoggerService.instance.i(
-        '创建角色: ${character.name} (id=$id)',
-        category: LogCategory.character,
-        tags: ['character', 'create', 'success'],
-      );
-      return id;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '创建角色失败: ${character.name} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['character', 'create', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> createCharacter(Character character) {
+    return guard(
+      'character.createCharacter',
+      () async {
+        final db = await database;
+        final id = await db.insert(
+          'characters',
+          character.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        LoggerService.instance.i(
+          '创建角色: ${character.name} (id=$id)',
+          category: LogCategory.character,
+          tags: ['character', 'create', 'success'],
+        );
+        return id;
+      },
+      message: (e) => '创建角色失败: ${character.name} - $e',
+      category: LogCategory.character,
+      tags: ['character', 'create', 'failed'],
+    );
   }
 
   /// 获取小说的所有角色
@@ -93,34 +91,33 @@ class CharacterRepository extends BaseRepository
   /// [character] 要更新的角色对象（必须包含id）
   /// 返回受影响的行数
   @override
-  Future<int> updateCharacter(Character character) async {
-    try {
-      final db = await database;
-      final updatedCharacter = character.copyWith(
-        updatedAt: DateTime.now(),
-      );
+  Future<int> updateCharacter(Character character) {
+    return guard(
+      'character.updateCharacter',
+      () async {
+        final db = await database;
+        final updatedCharacter = character.copyWith(
+          updatedAt: DateTime.now(),
+        );
 
-      final affected = await db.update(
-        'characters',
-        updatedCharacter.toMap(),
-        where: 'id = ?',
-        whereArgs: [character.id],
-      );
-      LoggerService.instance.i(
-        '更新角色: ${character.name} (id=${character.id}, affected=$affected)',
-        category: LogCategory.character,
-        tags: ['character', 'update', 'success'],
-      );
-      return affected;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新角色失败: ${character.name} (id=${character.id}) - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['character', 'update', 'failed'],
-      );
-      rethrow;
-    }
+        final affected = await db.update(
+          'characters',
+          updatedCharacter.toMap(),
+          where: 'id = ?',
+          whereArgs: [character.id],
+        );
+        LoggerService.instance.i(
+          '更新角色: ${character.name} (id=${character.id}, affected=$affected)',
+          category: LogCategory.character,
+          tags: ['character', 'update', 'success'],
+        );
+        return affected;
+      },
+      message: (e) =>
+          '更新角色失败: ${character.name} (id=${character.id}) - $e',
+      category: LogCategory.character,
+      tags: ['character', 'update', 'failed'],
+    );
   }
 
   /// 删除角色
@@ -128,35 +125,33 @@ class CharacterRepository extends BaseRepository
   /// [id] 角色ID
   /// 返回受影响的行数
   @override
-  Future<int> deleteCharacter(int id) async {
-    try {
-      final db = await database;
-      // 先清图集关联行，再删角色主行（图集表无外键，靠 repository 联动）
-      await db.delete(
-        'character_images',
-        where: 'characterId = ?',
-        whereArgs: [id],
-      );
-      final affected = await db.delete(
-        'characters',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        '删除角色: id=$id (affected=$affected)',
-        category: LogCategory.character,
-        tags: ['character', 'delete', 'success'],
-      );
-      return affected;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除角色失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['character', 'delete', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> deleteCharacter(int id) {
+    return guard(
+      'character.deleteCharacter',
+      () async {
+        final db = await database;
+        // 先清图集关联行，再删角色主行（图集表无外键，靠 repository 联动）
+        await db.delete(
+          'character_images',
+          where: 'characterId = ?',
+          whereArgs: [id],
+        );
+        final affected = await db.delete(
+          'characters',
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          '删除角色: id=$id (affected=$affected)',
+          category: LogCategory.character,
+          tags: ['character', 'delete', 'success'],
+        );
+        return affected;
+      },
+      message: (e) => '删除角色失败: id=$id - $e',
+      category: LogCategory.character,
+      tags: ['character', 'delete', 'failed'],
+    );
   }
 
   /// 根据名称查找角色
@@ -184,35 +179,33 @@ class CharacterRepository extends BaseRepository
   /// [novelUrl] 小说URL
   /// 返回受影响的行数
   @override
-  Future<int> deleteAllCharacters(String novelUrl) async {
-    try {
-      final db = await database;
-      // 先按子查询清掉该小说全部角色的图集关联行（须在删角色前执行）
-      await db.execute(
-        'DELETE FROM character_images WHERE characterId IN '
-        '(SELECT id FROM characters WHERE novelUrl = ?)',
-        [novelUrl],
-      );
-      final affected = await db.delete(
-        'characters',
-        where: 'novelUrl = ?',
-        whereArgs: [novelUrl],
-      );
-      LoggerService.instance.i(
-        '删除小说所有角色: novelUrl=$novelUrl (affected=$affected)',
-        category: LogCategory.character,
-        tags: ['character', 'delete_all', 'success'],
-      );
-      return affected;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除小说所有角色失败: novelUrl=$novelUrl - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.character,
-        tags: ['character', 'delete_all', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> deleteAllCharacters(String novelUrl) {
+    return guard(
+      'character.deleteAllCharacters',
+      () async {
+        final db = await database;
+        // 先按子查询清掉该小说全部角色的图集关联行（须在删角色前执行）
+        await db.execute(
+          'DELETE FROM character_images WHERE characterId IN '
+          '(SELECT id FROM characters WHERE novelUrl = ?)',
+          [novelUrl],
+        );
+        final affected = await db.delete(
+          'characters',
+          where: 'novelUrl = ?',
+          whereArgs: [novelUrl],
+        );
+        LoggerService.instance.i(
+          '删除小说所有角色: novelUrl=$novelUrl (affected=$affected)',
+          category: LogCategory.character,
+          tags: ['character', 'delete_all', 'success'],
+        );
+        return affected;
+      },
+      message: (e) => '删除小说所有角色失败: novelUrl=$novelUrl - $e',
+      category: LogCategory.character,
+      tags: ['character', 'delete_all', 'failed'],
+    );
   }
 
   // ========== 角色图片管理 ==========

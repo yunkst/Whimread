@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/theme/app_colors.dart';
-import '../../services/novel_agent/agent_scenario.dart';
 import '../../widgets/media/media_view.dart';
 import 'agent_icons.dart';
 
@@ -82,7 +81,6 @@ class _AgentChatComposerState extends ConsumerState<AgentChatComposer> {
   Widget build(BuildContext context) {
     final chatState = ref.watch(currentChatStateProvider);
     final colors = context.appColors;
-    final prompts = ScenarioQuickPrompts.forScenario(chatState.scenarioId);
     final isSupp = chatState.isLoading && chatState.supplementaryCount > 0;
 
     return Container(
@@ -94,29 +92,6 @@ class _AgentChatComposerState extends ConsumerState<AgentChatComposer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (prompts.isNotEmpty && !chatState.isLoading)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 7),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  for (final p in prompts)
-                    ActionChip(
-                      avatar: Icon(AgentIcons.wand, size: 14),
-                      label: Text(p.label, style: const TextStyle(fontSize: 11)),
-                      backgroundColor: colors.chatInputBackground,
-                      side: BorderSide(color: colors.divider),
-                      onPressed: () {
-                        _controller.text = p.text;
-                        _controller.selection = TextSelection(
-                            baseOffset: p.text.length, extentOffset: p.text.length);
-                        if (_focus.canRequestFocus) _focus.requestFocus();
-                      },
-                    ),
-                ],
-              ),
-            ),
           if (widget.attachedMediaId != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 7),

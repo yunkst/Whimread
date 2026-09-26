@@ -128,7 +128,8 @@ dependencies:
   yaml: ^3.1.2
   jinja: ^0.6.6
 
-  # OCR PoC：PP-OCRv6 离线识别（仅 main_ppocr_demo.dart 使用）
+  # OCR：PP-OCRv6 离线识别（lib/services/ocr/ocr_predictor.dart，生产 OCR 还原
+  # 与 main_ppocr_demo.dart 调试入口共用；原 lib/poc/ 已并入 services）
   # 2026-07-28 升级 ^1.6.0 → ^1.8.3：底层 ORT 1.22.0 → 1.23.0，排查 vivo Android 16
   # 真机 SIGABRT（libonnxruntime.so 内 ORT native abort）。changelog 无针对该 bug
   # 的直接修复，升级属版本试探，非定向补丁。

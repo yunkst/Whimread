@@ -198,7 +198,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     // 监听主题提供者
     final themeAsync = ref.watch(themeNotifierProvider);
-    final appColors = context.appColors;
 
     return Scaffold(
       appBar: LibraryAppBar(title: '设置'),
@@ -206,338 +205,364 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
           // ── AI 组 ─────────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.auto_awesome_outlined,
-            title: 'AI',
-            accentColor: appColors.agentAccent,
-            subtitle: '智能助手 · 主题偏好',
-            children: [
-              ListTile(
-                leading: Icon(Icons.label_outline, color: appColors.agentAccent),
-                title: const Text('写作技巧管理'),
-                subtitle: const Text('管理 AI 写作的技巧分类和 Prompt 文本'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const PromptTagManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.image_outlined, color: appColors.agentAccent),
-                title: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text('生图模型管理'),
-                    SizedBox(width: 6),
-                    _BetaTag(),
-                  ],
-                ),
-                subtitle: const Text('导入本地 SD 模型供 Agent 出图（Beta）'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ImageModelManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.memory_outlined, color: appColors.agentAccent),
-                title: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text('Local Dream 引擎'),
-                    SizedBox(width: 6),
-                    _BetaTag(),
-                  ],
-                ),
-                subtitle: const Text('本机 NPU 生图引擎自检与测试（骁龙）'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LocalDreamEngineScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.psychology_outlined, color: appColors.agentAccent),
-                title: const Text('Agent 记忆管理'),
-                subtitle: const Text('查看和管理 Agent 各场景的经验记忆'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          const AgentMemoryManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-              if (kHasBundledBackend)
-                ListTile(
-                  leading: Icon(Icons.tune, color: appColors.agentAccent),
-                  title: const Text('AI 模型选择'),
-                  subtitle: Text(_managedModelSubtitle(
-                      ref.watch(managedModelProvider))),
-                  trailing: const Icon(Icons.arrow_forward_ios),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            const ManagedModelPickerScreen(),
-                      ),
-                    ).then((_) {
-                      if (mounted) {
-                        ref.read(managedModelProvider.notifier).refresh();
-                      }
-                    });
-                  },
-                ),
-              ListTile(
-                leading: Icon(Icons.star_outline, color: appColors.agentAccent),
-                title: const Text('点 Star 补充 AI 额度'),
-                subtitle: Text(_quotaSubtitle(
-                    ref.watch(deviceQuotaProvider))),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: _openStarRedeemDialog,
-              ),
-              themeAsync.when(
-                data: (themeState) {
-                  return ListTile(
-                    leading:
-                        Icon(Icons.palette_outlined, color: appColors.agentAccent),
-                    title: const Text('主题模式'),
-                    subtitle: Text(_getThemeModeText(themeState.themeMode)),
-                    trailing: const Icon(Icons.arrow_forward_ios),
-                    onTap: () => _showThemeModeDialog(themeState),
-                  );
-                },
-                loading: () => ListTile(
-                  leading:
-                      Icon(Icons.palette_outlined, color: appColors.agentAccent),
-                  title: const Text('主题模式'),
-                  subtitle: const Text('加载中...'),
-                ),
-                error: (_, __) => ListTile(
-                  leading:
-                      Icon(Icons.palette_outlined, color: appColors.agentAccent),
-                  title: const Text('主题模式'),
-                  subtitle: const Text('加载失败'),
-                ),
-              ),
-            ],
-          ),
-
+          _buildAiSection(themeAsync),
           // ── 数据组 ────────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.storage_outlined,
-            title: '数据',
-            accentColor: appColors.success,
-            subtitle: '数据库 · 应用日志',
-            children: [
-              ListTile(
-                leading: _isRepairing
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(Icons.build_outlined, color: appColors.success),
-                title: const Text('修复数据库'),
-                subtitle: const Text('补全缺失的表和列（不影响现有数据）'),
-                trailing:
-                    _isRepairing ? null : const Icon(Icons.arrow_forward_ios),
-                onTap: _isRepairing ? null : _handleRepairDatabase,
-              ),
-              ListTile(
-                leading: Icon(Icons.bug_report_outlined, color: appColors.success),
-                title: const Text('应用日志'),
-                subtitle: const Text('查看、复制或清空应用日志'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LogViewerScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-
+          _buildDataSection(),
           // ── 诊断组 ────────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.health_and_safety_outlined,
-            title: '诊断',
-            accentColor: appColors.warning,
-            subtitle: '队列监控 · 媒体缓存',
-            children: [
-              ListTile(
-                leading: Icon(Icons.downloading, color: appColors.warning),
-                title: const Text('预加载队列'),
-                subtitle: const Text('查看和管理预加载任务'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const PreloadQueueDebugScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.photo_library_outlined,
-                    color: appColors.warning),
-                title: const Text('媒体缓存'),
-                subtitle: const Text('管理 AI 生成图/视频与上传图片缓存'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const MediaCacheScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-
+          _buildDiagnosticsSection(),
           // ── 新手组 ────────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.menu_book_outlined,
-            title: '新手',
-            accentColor: appColors.info,
-            subtitle: '快速入门',
-            children: [
-              ListTile(
-                leading: Icon(Icons.help_outline, color: appColors.info),
-                title: const Text('新手引导'),
-                subtitle: const Text('重新查看首次启动引导'),
-                trailing: const Icon(Icons.arrow_forward_ios),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          const OnboardingScreen(isReviewMode: true),
-                      fullscreenDialog: true,
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-
+          _buildOnboardingSection(),
           // ── 关于组 ────────────────────────────────────────────
-          _SettingsSection(
-            icon: Icons.info_outline,
-            title: '关于',
-            accentColor: appColors.neutral,
-            subtitle: '应用信息 · 版本更新',
-            children: [
-              ListTile(
-                leading: Icon(Icons.info_outline, color: appColors.neutral),
-                title: const Text('关于应用'),
-                subtitle: Text(
-                  _packageInfo != null
-                      ? '版本 ${_packageInfo!.version} (${_packageInfo!.buildNumber})'
-                      : '加载中...',
-                ),
-                // 7-tap 打开 attestation 诊断面板,供用户遇到安全相关问题时把
-                // 诊断文本发给开发者用(不显眼入口)
-                onTap: _handleVersionTap,
-              ),
-              ListTile(
-                leading: _isCheckingUpdate
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(Icons.system_update_alt, color: appColors.neutral),
-                title: const Text('检查更新'),
-                subtitle: Text(
-                  _isPreviewChannel ? '当前通道：预览版' : '查看是否有新版本可用',
-                ),
-                trailing:
-                    _isCheckingUpdate ? null : const Icon(Icons.arrow_forward_ios),
-                onTap: _isCheckingUpdate ? null : _checkForUpdate,
-              ),
-              SwitchListTile(
-                secondary: Icon(Icons.bug_report_outlined, color: appColors.neutral),
-                title: const Text('获取预览版'),
-                subtitle: const Text('开启后可收到最新的预览版本'),
-                value: _isPreviewChannel,
-                onChanged: (value) async {
-                  // 关闭预览版通道不需要确认，直接关闭
-                  if (!value) {
-                    await AppUpdateService.setPreviewChannelEnabled(false);
-                    if (!mounted) return;
-                    setState(() {
-                      _isPreviewChannel = false;
-                    });
-                    return;
-                  }
-
-                  // 开启预览版通道需要确认
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('⚠️ 开启预览版通道'),
-                      content: const Text(
-                        '预览版极不稳定，可能存在崩溃、数据丢失等问题，强烈不建议开启。\n\n'
-                        '仅建议开发者和测试人员在专用设备上使用。\n\n'
-                        '确定要继续开启吗？',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text('取消'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: const Text('确认开启', style: TextStyle(color: Colors.orange)),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (confirmed != true) return;
-
-                  await AppUpdateService.setPreviewChannelEnabled(true);
-                  if (!mounted) return;
-                  setState(() {
-                    _isPreviewChannel = true;
-                  });
-                },
-              ),
-              ListTile(
-                leading:
-                    Icon(Icons.feedback_outlined, color: appColors.neutral),
-                title: const Text('问题反馈'),
-                subtitle: const Text('报告 Bug 或提出功能建议'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: _openFeedback,
-              ),
-            ],
-          ),
+          _buildAboutSection(),
         ],
       ),
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 分组构建
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 「AI」分组：写作技巧 / 生图 / 本地引擎 / 记忆 / 模型选择 / 额度 / 主题
+  Widget _buildAiSection(AsyncValue<ThemeState> themeAsync) {
+    final appColors = context.appColors;
+    return _SettingsSection(
+      icon: Icons.auto_awesome_outlined,
+      title: 'AI',
+      accentColor: appColors.agentAccent,
+      subtitle: '智能助手 · 主题偏好',
+      children: [
+        _buildPromptTagTile(appColors),
+        _buildImageModelTile(appColors),
+        _buildLocalDreamTile(appColors),
+        _buildAgentMemoryTile(appColors),
+        if (kHasBundledBackend) _buildManagedModelTile(appColors),
+        _buildStarQuotaTile(appColors),
+        _buildThemeModeTile(appColors, themeAsync),
+      ],
+    );
+  }
+
+  /// 「数据」分组：数据库修复 / 应用日志
+  Widget _buildDataSection() {
+    final appColors = context.appColors;
+    return _SettingsSection(
+      icon: Icons.storage_outlined,
+      title: '数据',
+      accentColor: appColors.success,
+      subtitle: '数据库 · 应用日志',
+      children: [
+        _buildRepairDatabaseTile(appColors),
+        _buildLogTile(appColors),
+      ],
+    );
+  }
+
+  /// 「诊断」分组：预加载队列 / 媒体缓存
+  Widget _buildDiagnosticsSection() {
+    final appColors = context.appColors;
+    return _SettingsSection(
+      icon: Icons.health_and_safety_outlined,
+      title: '诊断',
+      accentColor: appColors.warning,
+      subtitle: '队列监控 · 媒体缓存',
+      children: [
+        _buildPreloadQueueTile(appColors),
+        _buildMediaCacheTile(appColors),
+      ],
+    );
+  }
+
+  /// 「新手」分组：新手引导
+  Widget _buildOnboardingSection() {
+    final appColors = context.appColors;
+    return _SettingsSection(
+      icon: Icons.menu_book_outlined,
+      title: '新手',
+      accentColor: appColors.info,
+      subtitle: '快速入门',
+      children: [
+        _buildOnboardingTile(appColors),
+      ],
+    );
+  }
+
+  /// 「关于」分组：版本信息 / 检查更新 / 预览版通道 / 问题反馈
+  Widget _buildAboutSection() {
+    final appColors = context.appColors;
+    return _SettingsSection(
+      icon: Icons.info_outline,
+      title: '关于',
+      accentColor: appColors.neutral,
+      subtitle: '应用信息 · 版本更新',
+      children: [
+        _buildAboutAppTile(appColors),
+        _buildCheckUpdateTile(appColors),
+        _buildPreviewChannelTile(appColors),
+        _buildFeedbackTile(appColors),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 设置项构建
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 「写作技巧管理」设置项
+  Widget _buildPromptTagTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.label_outline, color: appColors.agentAccent),
+      title: const Text('写作技巧管理'),
+      subtitle: const Text('管理 AI 写作的技巧分类和 Prompt 文本'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const PromptTagManagementScreen()),
+    );
+  }
+
+  /// 「生图模型管理」设置项（Beta）
+  Widget _buildImageModelTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.image_outlined, color: appColors.agentAccent),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text('生图模型管理'),
+          SizedBox(width: 6),
+          _BetaTag(),
+        ],
+      ),
+      subtitle: const Text('导入本地 SD 模型供 Agent 出图（Beta）'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const ImageModelManagementScreen()),
+    );
+  }
+
+  /// 「Local Dream 引擎」设置项（Beta）
+  Widget _buildLocalDreamTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.memory_outlined, color: appColors.agentAccent),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text('Local Dream 引擎'),
+          SizedBox(width: 6),
+          _BetaTag(),
+        ],
+      ),
+      subtitle: const Text('本机 NPU 生图引擎自检与测试（骁龙）'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const LocalDreamEngineScreen()),
+    );
+  }
+
+  /// 「Agent 记忆管理」设置项
+  Widget _buildAgentMemoryTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.psychology_outlined, color: appColors.agentAccent),
+      title: const Text('Agent 记忆管理'),
+      subtitle: const Text('查看和管理 Agent 各场景的经验记忆'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const AgentMemoryManagementScreen()),
+    );
+  }
+
+  /// 「AI 模型选择」设置项：返回后刷新模型目录（拾取页可能改过选择）。
+  Widget _buildManagedModelTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.tune, color: appColors.agentAccent),
+      title: const Text('AI 模型选择'),
+      subtitle: Text(_managedModelSubtitle(ref.watch(managedModelProvider))),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () {
+        _pushScreen(const ManagedModelPickerScreen()).then((_) {
+          if (mounted) {
+            ref.read(managedModelProvider.notifier).refresh();
+          }
+        });
+      },
+    );
+  }
+
+  /// 「点 Star 补充 AI 额度」设置项
+  Widget _buildStarQuotaTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.star_outline, color: appColors.agentAccent),
+      title: const Text('点 Star 补充 AI 额度'),
+      subtitle: Text(_quotaSubtitle(ref.watch(deviceQuotaProvider))),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: _openStarRedeemDialog,
+    );
+  }
+
+  /// 「主题模式」设置项：加载中 / 失败时仅展示对应副标题且不可点。
+  Widget _buildThemeModeTile(
+    AppColors appColors,
+    AsyncValue<ThemeState> themeAsync,
+  ) {
+    return themeAsync.when(
+      data: (themeState) {
+        return ListTile(
+          leading:
+              Icon(Icons.palette_outlined, color: appColors.agentAccent),
+          title: const Text('主题模式'),
+          subtitle: Text(_getThemeModeText(themeState.themeMode)),
+          trailing: const Icon(Icons.arrow_forward_ios),
+          onTap: () => _showThemeModeDialog(themeState),
+        );
+      },
+      loading: () => ListTile(
+        leading:
+            Icon(Icons.palette_outlined, color: appColors.agentAccent),
+        title: const Text('主题模式'),
+        subtitle: const Text('加载中...'),
+      ),
+      error: (_, __) => ListTile(
+        leading:
+            Icon(Icons.palette_outlined, color: appColors.agentAccent),
+        title: const Text('主题模式'),
+        subtitle: const Text('加载失败'),
+      ),
+    );
+  }
+
+  /// 「修复数据库」设置项：进行中时 leading 换小转圈并禁点。
+  Widget _buildRepairDatabaseTile(AppColors appColors) {
+    return ListTile(
+      leading: _busyLeading(_isRepairing, Icons.build_outlined, appColors.success),
+      title: const Text('修复数据库'),
+      subtitle: const Text('补全缺失的表和列（不影响现有数据）'),
+      trailing: _isRepairing ? null : const Icon(Icons.arrow_forward_ios),
+      onTap: _isRepairing ? null : _handleRepairDatabase,
+    );
+  }
+
+  /// 「应用日志」设置项
+  Widget _buildLogTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.bug_report_outlined, color: appColors.success),
+      title: const Text('应用日志'),
+      subtitle: const Text('查看、复制或清空应用日志'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const LogViewerScreen()),
+    );
+  }
+
+  /// 「预加载队列」设置项
+  Widget _buildPreloadQueueTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.downloading, color: appColors.warning),
+      title: const Text('预加载队列'),
+      subtitle: const Text('查看和管理预加载任务'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const PreloadQueueDebugScreen()),
+    );
+  }
+
+  /// 「媒体缓存」设置项
+  Widget _buildMediaCacheTile(AppColors appColors) {
+    return ListTile(
+      leading:
+          Icon(Icons.photo_library_outlined, color: appColors.warning),
+      title: const Text('媒体缓存'),
+      subtitle: const Text('管理 AI 生成图/视频与上传图片缓存'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(const MediaCacheScreen()),
+    );
+  }
+
+  /// 「新手引导」设置项：以 fullscreenDialog 形式重新进入引导。
+  Widget _buildOnboardingTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.help_outline, color: appColors.info),
+      title: const Text('新手引导'),
+      subtitle: const Text('重新查看首次启动引导'),
+      trailing: const Icon(Icons.arrow_forward_ios),
+      onTap: () => _pushScreen(
+        const OnboardingScreen(isReviewMode: true),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  /// 「关于应用」设置项：展示版本号；7-tap 打开 attestation 诊断面板,
+  /// 供用户遇到安全相关问题时把诊断文本发给开发者用(不显眼入口)。
+  Widget _buildAboutAppTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.info_outline, color: appColors.neutral),
+      title: const Text('关于应用'),
+      subtitle: Text(
+        _packageInfo != null
+            ? '版本 ${_packageInfo!.version} (${_packageInfo!.buildNumber})'
+            : '加载中...',
+      ),
+      onTap: _handleVersionTap,
+    );
+  }
+
+  /// 「检查更新」设置项：检查中时 leading 换小转圈并禁点。
+  Widget _buildCheckUpdateTile(AppColors appColors) {
+    return ListTile(
+      leading:
+          _busyLeading(_isCheckingUpdate, Icons.system_update_alt, appColors.neutral),
+      title: const Text('检查更新'),
+      subtitle: Text(
+        _isPreviewChannel ? '当前通道：预览版' : '查看是否有新版本可用',
+      ),
+      trailing: _isCheckingUpdate ? null : const Icon(Icons.arrow_forward_ios),
+      onTap: _isCheckingUpdate ? null : _checkForUpdate,
+    );
+  }
+
+  /// 「获取预览版」开关设置项
+  Widget _buildPreviewChannelTile(AppColors appColors) {
+    return SwitchListTile(
+      secondary: Icon(Icons.bug_report_outlined, color: appColors.neutral),
+      title: const Text('获取预览版'),
+      subtitle: const Text('开启后可收到最新的预览版本'),
+      value: _isPreviewChannel,
+      onChanged: _handlePreviewChannelChanged,
+    );
+  }
+
+  /// 「问题反馈」设置项
+  Widget _buildFeedbackTile(AppColors appColors) {
+    return ListTile(
+      leading: Icon(Icons.feedback_outlined, color: appColors.neutral),
+      title: const Text('问题反馈'),
+      subtitle: const Text('报告 Bug 或提出功能建议'),
+      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+      onTap: _openFeedback,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 通用辅助
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 统一处理「设置项 → 子页面」的页面跳转。
+  ///
+  /// 返回 push 的 Future，调用方（如「AI 模型选择」）可在返回后刷新数据。
+  Future<void> _pushScreen(Widget screen, {bool fullscreenDialog = false}) {
+    return Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => screen,
+        fullscreenDialog: fullscreenDialog,
+      ),
+    );
+  }
+
+  /// ListTile leading 的「忙碌转圈」样式：busy 时展示 24x24 小转圈，
+  /// 否则展示着色图标。「修复数据库」「检查更新」两处共用。
+  Widget _busyLeading(bool busy, IconData icon, Color color) {
+    if (busy) {
+      return const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    return Icon(icon, color: color);
   }
 
   /// 打开问题反馈表单页,提交到后端(不再跳 GitHub issues)。
@@ -562,67 +587,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  /// 显示主题模式选择对话框
-  void _showThemeModeDialog(ThemeState themeState) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('选择主题模式'),
-          content: StatefulBuilder(
-            builder: (BuildContext context, StateSetter setState) {
-              return RadioGroup<AppThemeMode>(
-                groupValue: themeState.themeMode,
-                onChanged: (AppThemeMode? value) {
-                  if (value != null) {
-                    ref
-                        .read(themeNotifierProvider.notifier)
-                        .setThemeMode(value);
-                    Navigator.pop(context);
-                  }
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    RadioListTile<AppThemeMode>(
-                      title: const Text('亮色模式'),
-                      subtitle: const Text('使用浅色主题'),
-                      value: AppThemeMode.light,
-                    ),
-                    RadioListTile<AppThemeMode>(
-                      title: const Text('暗色模式'),
-                      subtitle: const Text('使用深色主题'),
-                      value: AppThemeMode.dark,
-                    ),
-                    RadioListTile<AppThemeMode>(
-                      title: const Text('跟随系统'),
-                      subtitle: const Text('跟随系统设置自动切换'),
-                      value: AppThemeMode.system,
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-          ],
-        );
-      },
-    );
+  // ═══════════════════════════════════════════════════════════════
+  // 对话框
+  // ═══════════════════════════════════════════════════════════════
+
+  /// 预览版通道开关：关闭直接生效；开启前弹确认对话框。
+  Future<void> _handlePreviewChannelChanged(bool value) async {
+    // 关闭预览版通道不需要确认，直接关闭
+    if (!value) {
+      await AppUpdateService.setPreviewChannelEnabled(false);
+      if (!mounted) return;
+      setState(() {
+        _isPreviewChannel = false;
+      });
+      return;
+    }
+
+    // 开启预览版通道需要确认
+    final confirmed = await _showPreviewChannelConfirmDialog();
+
+    if (confirmed != true) return;
+
+    await AppUpdateService.setPreviewChannelEnabled(true);
+    if (!mounted) return;
+    setState(() {
+      _isPreviewChannel = true;
+    });
   }
 
-  /// 处理数据库修复
-  Future<void> _handleRepairDatabase() async {
-    final confirmed = await showDialog<bool>(
+  /// 「开启预览版通道」确认对话框（文案与橙色确认按钮保持原样）。
+  Future<bool?> _showPreviewChannelConfirmDialog() {
+    return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('修复数据库'),
+        title: const Text('⚠️ 开启预览版通道'),
         content: const Text(
-            '将重新执行所有数据库迁移，补全缺失的表和列。\n此操作不会删除现有数据。'),
+          '预览版极不稳定，可能存在崩溃、数据丢失等问题，强烈不建议开启。\n\n'
+          '仅建议开发者和测试人员在专用设备上使用。\n\n'
+          '确定要继续开启吗？',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -630,11 +633,72 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认修复'),
+            child: const Text('确认开启', style: TextStyle(color: Colors.orange)),
           ),
         ],
       ),
     );
+  }
+
+  /// 显示主题模式选择对话框
+  void _showThemeModeDialog(ThemeState themeState) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => _buildThemeModeDialog(themeState),
+    );
+  }
+
+  /// 主题模式选择对话框：选中即生效并关闭。
+  Widget _buildThemeModeDialog(ThemeState themeState) {
+    return AlertDialog(
+      title: const Text('选择主题模式'),
+      content: StatefulBuilder(
+        builder: (BuildContext context, StateSetter setState) {
+          return RadioGroup<AppThemeMode>(
+            groupValue: themeState.themeMode,
+            onChanged: (AppThemeMode? value) {
+              if (value != null) {
+                ref
+                    .read(themeNotifierProvider.notifier)
+                    .setThemeMode(value);
+                Navigator.pop(context);
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<AppThemeMode>(
+                  title: const Text('亮色模式'),
+                  subtitle: const Text('使用浅色主题'),
+                  value: AppThemeMode.light,
+                ),
+                RadioListTile<AppThemeMode>(
+                  title: const Text('暗色模式'),
+                  subtitle: const Text('使用深色主题'),
+                  value: AppThemeMode.dark,
+                ),
+                RadioListTile<AppThemeMode>(
+                  title: const Text('跟随系统'),
+                  subtitle: const Text('跟随系统设置自动切换'),
+                  value: AppThemeMode.system,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
+
+  /// 处理数据库修复
+  Future<void> _handleRepairDatabase() async {
+    final confirmed = await _showRepairDatabaseConfirmDialog();
 
     if (confirmed != true) return;
 
@@ -660,6 +724,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ToastUtils.showError('数据库修复失败: $e');
       }
     }
+  }
+
+  /// 「修复数据库」确认对话框（文案保持原样）。
+  Future<bool?> _showRepairDatabaseConfirmDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('修复数据库'),
+        content: const Text(
+            '将重新执行所有数据库迁移，补全缺失的表和列。\n此操作不会删除现有数据。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认修复'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

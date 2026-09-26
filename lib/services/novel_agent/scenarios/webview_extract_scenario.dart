@@ -25,6 +25,11 @@ import '../agent_scenario.dart';
 import '../tool_arg_parser.dart';
 import 'network_request_recorder.dart';
 import 'run_store.dart';
+import 'webview_extract_js_diagnostics.dart';
+import 'webview_extract_page_scripts.dart';
+import 'webview_extract_script_db.dart';
+import 'webview_extract_script_validator.dart';
+import 'webview_extract_tool_schemas.dart';
 import 'webview_js_executor.dart';
 
 class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
@@ -250,14 +255,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final domain = Uri.tryParse(_currentUrl)?.host ?? '';
     if (domain.isEmpty) return false;
     try {
-      final db = await _ref.read(databaseConnectionProvider).database;
-      final results = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [domain],
-        limit: 1,
-      );
-      return results.isNotEmpty;
+      return await WebViewExtractScriptDb.hasAnyScript(_ref, domain);
     } catch (e) {
       LoggerService.instance.w(
         '查询 site_scripts 失败: $e',
@@ -271,21 +269,21 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   @override
   List<Map<String, dynamic>> get tools {
     final base = <Map<String, dynamic>>[
-      _getPageInfoTool,
-      _executeJsTool,
-      _navigateToTool,
-      _getCurrentUrlTool,
-      _getCachedScriptTool,
-      _saveScriptTool,
-      _listCachedScriptsTool,
-      _inspectScriptTool,
-      _getScriptLogsTool,
+      WebViewExtractToolSchemas.getPageInfoTool,
+      WebViewExtractToolSchemas.executeJsTool,
+      WebViewExtractToolSchemas.navigateToTool,
+      WebViewExtractToolSchemas.getCurrentUrlTool,
+      WebViewExtractToolSchemas.getCachedScriptTool,
+      WebViewExtractToolSchemas.saveScriptTool,
+      WebViewExtractToolSchemas.listCachedScriptsTool,
+      WebViewExtractToolSchemas.inspectScriptTool,
+      WebViewExtractToolSchemas.getScriptLogsTool,
       patchMemoryToolDefinition,
     ];
     // 网络请求观察仅 Headless + Android 支持
     // （Headless 模式才挂 shouldInterceptRequest 回调；iOS 无 shouldInterceptRequest）
     if (_isHeadless && Platform.isAndroid) {
-      base.add(_listNetworkRequestsTool);
+      base.add(WebViewExtractToolSchemas.listNetworkRequestsTool);
     }
     return base;
   }
@@ -321,9 +319,9 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       tags: ['agent', 'scenario', 'webview-extract', name],
     );
 
-    // patch_memory 由场景自行处理
+    // patch_memory 由场景自行处理（复用 mixin 的统一工具执行器）
     if (name == 'patch_memory') {
-      return await _executePatchMemory(args);
+      return executePatchMemoryTool(args, logTag: 'webview-extract');
     }
 
     // Headless 模式：仅 WebView 类工具（get_page_info / execute_js / navigate_to）
@@ -431,12 +429,12 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       }
 
       final domResult = await _webviewController.evaluateJavascript(
-        source: _domSimplifyJs,
+        source: WebViewExtractPageScripts.domSimplifyJs,
       );
 
       // 推断页面类型
       final pageTypeResult = await _webviewController.evaluateJavascript(
-        source: _inferPageTypeJs,
+        source: WebViewExtractPageScripts.inferPageTypeJs,
       );
       String pageType = 'unknown';
       String? pageTitle;
@@ -544,14 +542,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   static const _domStabilizeDelay = Duration(milliseconds: 500);
   static const _headlessTrustDelay = Duration(seconds: 2);
 
-  /// OCR 还原后 CJK 占比通过阈值。
-  ///
-  /// readableRatio 分母含中文标点/数字/空白（只数 0x4E00-0x9FFF 基本区汉字），
-  /// 正常中文小说正文标点占 15-20%，"完美还原"的天花板约 0.80-0.85。原 0.85
-  /// 阈值卡在天花板上，导致番茄等标点密集站点反复卡在 save_script 校验。
-  /// 0.75 既能放行正常还原（实测 0.81-0.83），又能拦住识别真差（<0.7 乱码）。
-  static const _readableRatioThreshold = 0.75;
-
   /// 等待 WebView 加载完成（URL 匹配 targetUrl）
   ///
   /// 返回 `true` 表示成功等到 URL 匹配；`false` 表示超时。
@@ -611,62 +601,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// 无论执行成功/失败，返回值都包含 `run_id` 字段（成功时登记到 RunStore）；
   /// 成功时 script 字段返回前 200 字符（避免长脚本占上下文）。
   Future<String> _executeJs(Map<String, dynamic> args) async {
-    // ── 解析参数（run_id 优先）──
-    final runId = args['run_id'] as String?;
-    final script = args['script'] as String?;
+    // ── 阶段一：解析参数与脚本来源（run_id 优先）──
+    final source = _resolveExecuteJsSource(args);
+    if (source.error != null) return source.error!;
+    final runId = source.runId;
+    final effectiveScript = source.script!;
 
-    if (runId == null && (script == null || script.isEmpty)) {
-      return jsonEncode({
-        'error': 'missing_param',
-        'message': '需要 script 或 run_id 参数',
-        'missing': ['script 或 run_id'],
-        'suggestion': script != null && script.isEmpty
-            ? 'script 参数为空字符串，请传入有效的 JS 代码，或使用 run_id 引用之前执行的脚本'
-            : '请传入 script（探测/新写脚本）或 run_id（重跑已有脚本）',
-      });
-    }
-
-    // ── 解析脚本来源 ──
-    final String effectiveScript;
-
-    if (runId != null) {
-      // run_id 模式：从 RunStore 加载
-      final entry = _runStore.get(runId);
-      if (entry == null) {
-        return jsonEncode({
-          'error': 'RUN_ID_NOT_FOUND',
-          'message': '未找到 $runId（可能已被淘汰或未注册）',
-          'suggestion': 'RunStore 有容量限制（50 条 LRU 淘汰）。请重新执行 script 模式注册新 run_id',
-        });
-      }
-      effectiveScript = entry.script;
-    } else {
-      // script 模式：校验 + 使用
-      final validationError = WebViewJsExecutor.validateScript(script!);
-      if (validationError != null) {
-        LoggerService.instance.w(
-          '脚本校验失败: $validationError',
-          category: LogCategory.ai,
-          tags: ['agent', 'webview-extract', 'execute_js', 'validation'],
-        );
-        return jsonEncode({
-          'error': 'SCRIPT_VALIDATION_FAILED',
-          'message': '脚本校验失败',
-          'validation_error': validationError,
-          'suggestion': validationError,
-        });
-      }
-      effectiveScript = script;
-    }
-
-    // ── 参数注入：将 {{URL}} 替换为 test_url 或当前页面 URL ──
+    // ── 阶段二：参数注入 + 提取 IIFE 函数体 ──
+    // 将 {{URL}} 替换为 test_url 或当前页面 URL
     final testUrl = (args['test_url'] as String?) ?? _currentUrl;
     final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(effectiveScript, testUrl);
-
-    // ── 提取 IIFE 函数体 ──
     final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolvedScript);
 
-    final modeLabel = runId != null ? 'run_id=$runId' : 'script(len=${script?.length ?? 0})';
+    final modeLabel = runId != null ? 'run_id=$runId' : 'script(len=${effectiveScript.length})';
     LoggerService.instance.i(
       '执行 JS ($modeLabel): {{URL}} → $testUrl (resolvedLen=${resolvedScript.length})',
       category: LogCategory.ai,
@@ -674,6 +621,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     );
 
     try {
+      // ── 阶段三：执行（callAsyncJavaScript，120s 超时）──
       final result = await _webviewController
           .callAsyncJavaScript(functionBody: functionBody)
           .timeout(const Duration(seconds: 120));
@@ -685,90 +633,20 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
       // JS Promise reject → 返回错误信息
       if (result.error != null) {
-        final errorStr = result.error.toString();
-        final errorInfo = _parseJsError(errorStr, effectiveScript);
-        LoggerService.instance.w(
-          'JS 执行错误: ${errorInfo.code} - ${errorInfo.message}',
-          category: LogCategory.ai,
-          tags: ['agent', 'webview-extract', 'execute_js', errorInfo.code],
-        );
-        return jsonEncode({
-          'error': errorInfo.code,
-          'message': errorInfo.message,
-          'raw': errorStr,
-          'suggestion': errorInfo.suggestion,
-        });
-      }
-
-      // ── JS Promise resolve → 成功，登记到 RunStore ──
-      // stringifyJsResult 总是返回 String（null → '{"result":null}'，对象 → jsonEncode）
-      final resultStr = WebViewJsExecutor.stringifyJsResult(result.value);
-
-      // 尝试解析为业务对象（Map），用于平铺到顶层（保持向后兼容）
-      Map<String, dynamic>? businessFields;
-      dynamic decoded;
-      try {
-        decoded = jsonDecode(resultStr);
-        if (decoded is Map<String, dynamic>) {
-          businessFields = decoded;
-        }
-      } catch (_) {
-        // 非 JSON 字符串，无法平铺，原样放在 result 字段
-        final preview = resultStr.length > 200
-            ? '${resultStr.substring(0, 200)}...'
-            : resultStr;
-        LoggerService.instance.i(
-          'JS 结果非 JSON: $preview',
-          category: LogCategory.ai,
-          tags: ['agent', 'webview-extract', 'execute_js', 'non_json'],
-        );
-      }
-
-      // 结果摘要（截断 300 字符）用于 RunStore 记录
-      final resultSummary = resultStr.toString().length > 300
-          ? '${resultStr.toString().substring(0, 300)}...'
-          : resultStr.toString();
-
-      // 仅在 script 模式（新脚本）下登记；run_id 模式是重跑已有记录，不重复登记
-      final String storedRunId;
-      if (runId != null) {
-        storedRunId = runId;
-      } else {
-        storedRunId = _runStore.put(
+        return _jsExecutionErrorJson(
+          logLabel: 'JS 执行错误',
+          raw: result.error.toString(),
           script: effectiveScript,
-          success: true,
-          source: RunEntrySource.execution,
-          testUrl: testUrl,
-          resultSummary: resultSummary,
         );
       }
 
-      LoggerService.instance.i(
-        '执行 JS 成功: $storedRunId (mode=${runId != null ? "replay" : "register"}), resultLen=${resultStr.toString().length}',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'execute_js'],
+      // ── 阶段四：成功 → 结果平铺 + RunStore 登记 + 组装响应 ──
+      return _buildExecuteJsSuccessResponse(
+        runId: runId,
+        effectiveScript: effectiveScript,
+        testUrl: testUrl,
+        value: result.value,
       );
-
-      // 返回值结构：业务字段平铺到顶层（向后兼容）+ __meta 元数据
-      //
-      // - 业务字段（title / chapters / pageUrl 等）平铺 → 现有测试和旧调用方零改动
-      // - __meta.run_id → save_script 引用此 id 即可，无需重传脚本内容
-      // - __meta.script_preview → 仅 register 模式返回（截断 200 字符），供 AI 确认
-      // - __meta.mode → register（新写脚本）/ replay（重跑 run_id）
-      final scriptPreview = effectiveScript.length > 200
-          ? '${effectiveScript.substring(0, 200)}...'
-          : effectiveScript;
-
-      final response = <String, dynamic>{
-        if (businessFields != null) ...businessFields else 'result': decoded ?? resultStr,
-        '__meta': <String, dynamic>{
-          'run_id': storedRunId,
-          'mode': runId != null ? 'replay' : 'register',
-          'store_size': _runStore.length,
-          if (runId == null) 'script_preview': scriptPreview,
-        },
-      };
-      return jsonEncode(response);
     } on TimeoutException {
       LoggerService.instance.w(
         '执行 JS 超时 (>120s)',
@@ -784,105 +662,174 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       });
     } catch (e) {
       // Dart 层异常（如 callAsyncJavaScript 方法本身不可用）
-      final errorInfo = _parseJsError(e.toString(), effectiveScript);
-      LoggerService.instance.w(
-        '执行 JS 失败: ${errorInfo.code} - ${errorInfo.message}',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'execute_js', errorInfo.code],
+      return _jsExecutionErrorJson(
+        logLabel: '执行 JS 失败',
+        raw: e.toString(),
+        script: effectiveScript,
       );
-      return jsonEncode({
-        'error': errorInfo.code,
-        'message': errorInfo.message,
-        'raw': e.toString(),
-        'suggestion': errorInfo.suggestion,
-      });
     }
   }
 
-  /// 解析 WebView 抛出的 JS 异常，按错误类型给出针对性修复建议
-  ({String code, String message, String suggestion}) _parseJsError(
-    String raw,
-    String script,
+  /// execute_js 的脚本来源解析结果
+  ///
+  /// [error] 非 null 表示参数/来源校验失败（错误 JSON 已构造好，直接返回）；
+  /// 否则 [script] 为生效脚本（保留 {{URL}} 占位符），[runId] 为 run_id 模式
+  /// 的句柄（script 模式为 null）。
+  ({String? error, String? script, String? runId}) _resolveExecuteJsSource(
+    Map<String, dynamic> args,
   ) {
-    final lowerRaw = raw.toLowerCase();
+    final runId = args['run_id'] as String?;
+    final script = args['script'] as String?;
 
-    // 语法错误
-    if (lowerRaw.contains('syntaxerror')) {
+    if (runId == null && (script == null || script.isEmpty)) {
       return (
-        code: 'JS_SYNTAX_ERROR',
-        message: '脚本有语法错误',
-        suggestion:
-            '检查括号/引号是否配对，async IIFE 格式是否正确: (async function(){...})()',
+        error: jsonEncode({
+          'error': 'missing_param',
+          'message': '需要 script 或 run_id 参数',
+          'missing': ['script 或 run_id'],
+          'suggestion': script != null && script.isEmpty
+              ? 'script 参数为空字符串，请传入有效的 JS 代码，或使用 run_id 引用之前执行的脚本'
+              : '请传入 script（探测/新写脚本）或 run_id（重跑已有脚本）',
+        }),
+        script: null,
+        runId: null,
       );
     }
 
-    // 引用错误（未定义变量 / 第三方库）
-    if (lowerRaw.contains('referenceerror')) {
-      // 提取出错的变量名
-      final match = RegExp(r"(\w+)\s+is\s+not\s+defined").firstMatch(raw);
-      final varName = match?.group(1);
-      final isLibHint = varName != null &&
-          (varName == r'$' ||
-              varName == 'jQuery' ||
-              varName == '_' ||
-              varName == 'Vue' ||
-              varName == 'React');
-      return (
-        code: 'JS_REFERENCE_ERROR',
-        message: varName != null
-            ? '引用了未定义的变量: $varName'
-            : '引用了未定义的变量',
-        suggestion: isLibHint
-            ? '目标网站没有加载 $varName 等第三方库，请改用原生 DOM API (document.querySelector, innerText, etc.)'
-            : '检查变量名拼写是否正确，注意 IIFE 内是独立作用域，外部 const/let 无法直接访问',
-      );
+    if (runId != null) {
+      // run_id 模式：从 RunStore 加载
+      final entry = _runStore.get(runId);
+      if (entry == null) {
+        return (
+          error: jsonEncode({
+            'error': 'RUN_ID_NOT_FOUND',
+            'message': '未找到 $runId（可能已被淘汰或未注册）',
+            'suggestion': 'RunStore 有容量限制（50 条 LRU 淘汰）。请重新执行 script 模式注册新 run_id',
+          }),
+          script: null,
+          runId: null,
+        );
+      }
+      return (error: null, script: entry.script, runId: runId);
     }
 
-    // 类型错误
-    if (lowerRaw.contains('typeerror')) {
-      // 提取"Cannot read properties of XXX (reading 'yyy')"
-      final nullMatch =
-          RegExp(r"Cannot read propert(?:y|ies) of (null|undefined)").firstMatch(raw);
-      final isNullAccess = nullMatch != null;
+    // script 模式：校验 + 使用
+    final validationError = WebViewJsExecutor.validateScript(script!);
+    if (validationError != null) {
+      LoggerService.instance.w(
+        '脚本校验失败: $validationError',
+        category: LogCategory.ai,
+        tags: ['agent', 'webview-extract', 'execute_js', 'validation'],
+      );
       return (
-        code: 'JS_TYPE_ERROR',
-        message: isNullAccess
-            ? '访问了 null/undefined 对象的属性'
-            : '类型错误',
-        suggestion: isNullAccess
-            ? 'querySelector 可能返回 null。访问前加判断: const el = document.querySelector("..."); if (el) { ... }'
-            : '检查对象/数组的访问方式是否正确，必要时加 typeof 或 instanceof 判断',
+        error: jsonEncode({
+          'error': 'SCRIPT_VALIDATION_FAILED',
+          'message': '脚本校验失败',
+          'validation_error': validationError,
+          'suggestion': validationError,
+        }),
+        script: null,
+        runId: null,
       );
     }
+    return (error: null, script: script, runId: null);
+  }
 
-    // Dart 侧类型转换错误：evaluateJavascript 返回了 Map 而非 String
-    // 典型错误: "type '_Map<String, dynamic>' is not a subtype of type 'FutureOr<String>'"
-    if (raw.contains('_Map<String, dynamic>') ||
-        raw.contains('FutureOr<String>')) {
-      return (
-        code: 'JS_TYPE_ERROR',
-        message: '脚本返回了 JSON 对象而非字符串',
-        suggestion:
-            '脚本必须返回字符串（用 JSON.stringify 包装返回值）。例如: return JSON.stringify({title: ..., content: ...})',
-      );
-    }
-
-    // 超时（被外层 catch 捕获前）
-    if (lowerRaw.contains('timeout')) {
-      return (
-        code: 'JS_TIMEOUT',
-        message: '脚本执行超时',
-        suggestion:
-            '在长循环中加 await new Promise(r => setTimeout(r, 100)) 让出主线程，避免阻塞 WebView',
-      );
-    }
-
-    return (
-      code: 'JS_RUNTIME_ERROR',
-      message: '脚本执行失败: $raw',
-      suggestion:
-          '根据错误信息修正后重试。如果连续失败 3 次，建议换一种思路（如换选择器、简化提取逻辑）',
+  /// JS 执行失败的统一出口：解析错误 → 记日志 → 组错误 JSON
+  String _jsExecutionErrorJson({
+    required String logLabel,
+    required String raw,
+    required String script,
+  }) {
+    final errorInfo = WebViewExtractJsDiagnostics.parseJsError(raw, script);
+    LoggerService.instance.w(
+      '$logLabel: ${errorInfo.code} - ${errorInfo.message}',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'execute_js', errorInfo.code],
     );
+    return jsonEncode({
+      'error': errorInfo.code,
+      'message': errorInfo.message,
+      'raw': raw,
+      'suggestion': errorInfo.suggestion,
+    });
+  }
+
+  /// execute_js 成功路径的收尾：业务字段平铺 + RunStore 登记 + __meta 组装
+  String _buildExecuteJsSuccessResponse({
+    required String? runId,
+    required String effectiveScript,
+    required String testUrl,
+    required dynamic value,
+  }) {
+    // stringifyJsResult 总是返回 String（null → '{"result":null}'，对象 → jsonEncode）
+    final resultStr = WebViewJsExecutor.stringifyJsResult(value);
+
+    // 尝试解析为业务对象（Map），用于平铺到顶层（保持向后兼容）
+    Map<String, dynamic>? businessFields;
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(resultStr);
+      if (decoded is Map<String, dynamic>) {
+        businessFields = decoded;
+      }
+    } catch (_) {
+      // 非 JSON 字符串，无法平铺，原样放在 result 字段
+      final preview = resultStr.length > 200
+          ? '${resultStr.substring(0, 200)}...'
+          : resultStr;
+      LoggerService.instance.i(
+        'JS 结果非 JSON: $preview',
+        category: LogCategory.ai,
+        tags: ['agent', 'webview-extract', 'execute_js', 'non_json'],
+      );
+    }
+
+    // 结果摘要（截断 300 字符）用于 RunStore 记录
+    final resultSummary = resultStr.length > 300
+        ? '${resultStr.substring(0, 300)}...'
+        : resultStr;
+
+    // 仅在 script 模式（新脚本）下登记；run_id 模式是重跑已有记录，不重复登记
+    final String storedRunId;
+    if (runId != null) {
+      storedRunId = runId;
+    } else {
+      storedRunId = _runStore.put(
+        script: effectiveScript,
+        success: true,
+        source: RunEntrySource.execution,
+        testUrl: testUrl,
+        resultSummary: resultSummary,
+      );
+    }
+
+    LoggerService.instance.i(
+      '执行 JS 成功: $storedRunId (mode=${runId != null ? "replay" : "register"}), resultLen=${resultStr.length}',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'execute_js'],
+    );
+
+    // 返回值结构：业务字段平铺到顶层（向后兼容）+ __meta 元数据
+    //
+    // - 业务字段（title / chapters / pageUrl 等）平铺 → 现有测试和旧调用方零改动
+    // - __meta.run_id → save_script 引用此 id 即可，无需重传脚本内容
+    // - __meta.script_preview → 仅 register 模式返回（截断 200 字符），供 AI 确认
+    // - __meta.mode → register（新写脚本）/ replay（重跑 run_id）
+    final scriptPreview = effectiveScript.length > 200
+        ? '${effectiveScript.substring(0, 200)}...'
+        : effectiveScript;
+
+    final response = <String, dynamic>{
+      if (businessFields != null) ...businessFields else 'result': decoded ?? resultStr,
+      '__meta': <String, dynamic>{
+        'run_id': storedRunId,
+        'mode': runId != null ? 'replay' : 'register',
+        'store_size': _runStore.length,
+        if (runId == null) 'script_preview': scriptPreview,
+      },
+    };
+    return jsonEncode(response);
   }
 
   /// 让 WebView 跳转到指定 URL
@@ -1091,17 +1038,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       });
     }
 
-    /// 查询数据库（通过 DatabaseConnection）
+    /// 查询数据库（SQL 细节见 webview_extract_script_db.dart）
     final List<Map<String, dynamic>> results;
     try {
-      final dbConnection = _ref.read(databaseConnectionProvider);
-      final db = await dbConnection.database;
-      results = await db.query(
-        'site_scripts',
-        where: 'domain = ?',
-        whereArgs: [effectiveDomain],
-        orderBy: 'last_used_at DESC',
-      );
+      results = await WebViewExtractScriptDb.queryByDomain(_ref, effectiveDomain);
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         '查询缓存脚本失败: domain=$effectiveDomain - $e',
@@ -1184,65 +1124,54 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final String? listRunId;
     final String? contentRunId;
     final String? bookshelfRunId;
-    if (scriptType == 'chapter_list') {
-      listRunId = _runStore.put(
-        script: listJs,
-        success: true,
-        source: RunEntrySource.database,
-        rawId: dbId,
-        domain: effectiveDomain,
-      );
-      contentRunId = null;
-      bookshelfRunId = null;
-    } else if (scriptType == 'chapter_content') {
-      contentRunId = _runStore.put(
-        script: contentJs,
-        success: true,
-        source: RunEntrySource.database,
-        rawId: dbId,
-        domain: effectiveDomain,
-      );
-      listRunId = null;
-      bookshelfRunId = null;
-    } else if (scriptType == 'bookshelf') {
-      bookshelfRunId = _runStore.put(
-        script: bookshelfJs,
-        success: true,
-        source: RunEntrySource.database,
-        rawId: dbId,
-        domain: effectiveDomain,
-      );
-      listRunId = null;
-      contentRunId = null;
-    } else {
-      // 全查模式：只注册非空项，空项保持 null
-      listRunId = hasList
-          ? _runStore.put(
-              script: listJs,
-              success: true,
-              source: RunEntrySource.database,
-              rawId: dbId,
-              domain: effectiveDomain,
-            )
-          : null;
-      contentRunId = hasContent
-          ? _runStore.put(
-              script: contentJs,
-              success: true,
-              source: RunEntrySource.database,
-              rawId: dbId,
-              domain: effectiveDomain,
-            )
-          : null;
-      bookshelfRunId = hasBookshelf
-          ? _runStore.put(
-              script: bookshelfJs,
-              success: true,
-              source: RunEntrySource.database,
-              rawId: dbId,
-              domain: effectiveDomain,
-            )
-          : null;
+    switch (scriptType) {
+      case 'chapter_list':
+        listRunId = _registerDbScript(
+          scriptJs: listJs,
+          hasScript: hasList,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
+        contentRunId = null;
+        bookshelfRunId = null;
+      case 'chapter_content':
+        contentRunId = _registerDbScript(
+          scriptJs: contentJs,
+          hasScript: hasContent,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
+        listRunId = null;
+        bookshelfRunId = null;
+      case 'bookshelf':
+        bookshelfRunId = _registerDbScript(
+          scriptJs: bookshelfJs,
+          hasScript: hasBookshelf,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
+        listRunId = null;
+        contentRunId = null;
+      default:
+        // 全查模式：只注册非空项，空项保持 null
+        listRunId = _registerDbScript(
+          scriptJs: listJs,
+          hasScript: hasList,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
+        contentRunId = _registerDbScript(
+          scriptJs: contentJs,
+          hasScript: hasContent,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
+        bookshelfRunId = _registerDbScript(
+          scriptJs: bookshelfJs,
+          hasScript: hasBookshelf,
+          dbId: dbId,
+          domain: effectiveDomain,
+        );
     }
 
     LoggerService.instance.i(
@@ -1297,7 +1226,34 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     });
   }
 
-  /// 保存提取脚本到数据库。
+  /// 将数据库脚本登记到 RunStore（`db_<rawId>` 句柄）。
+  ///
+  /// _getCachedScript 原有四份逐字重复的 _runStore.put 调用
+  /// （单查/全查 × list/content/bookshelf），收敛到此参数化辅助方法；
+  /// [hasScript] 为 false 时不注册、返回 null（全查模式下空项保持 null）。
+  String? _registerDbScript({
+    required String scriptJs,
+    required bool hasScript,
+    required String dbId,
+    required String domain,
+  }) {
+    if (!hasScript) return null;
+    return _runStore.put(
+      script: scriptJs,
+      success: true,
+      source: RunEntrySource.database,
+      rawId: dbId,
+      domain: domain,
+    );
+  }
+
+  /// 通知 UI 层脚本已落库（刷新脚本列表 + 失效当前站点脚本缓存）。
+  void _notifyScriptSaved() {
+    _ref.read(siteScriptListProvider.notifier).refresh();
+    _ref.invalidate(webviewCurrentSiteScriptProvider);
+  }
+
+  /// save_script：按 script_type 分次保存，落库前强制试运行验证。
   ///
   /// ## 设计（落库前强制验证）
   ///
@@ -1317,17 +1273,13 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   ///
   /// ## 测试入口
   ///
-  /// 核心验证流程已抽成 static [validateAndPersistScript]，
-  /// 单测通过 mock SiteScriptRepository / OcrRestoreService 注入 jsResult 覆盖。
+  /// 核心验证流程已抽成 static [validateAndPersistScript]（委托
+  /// WebViewExtractScriptValidator），单测通过 mock SiteScriptRepository /
+  /// OcrRestoreService 注入 jsResult 覆盖。
   /// executor 自身（涉及 HeadlessWebViewPool 平台依赖）只能走集成测试。
-  void _notifyScriptSaved() {
-    _ref.read(siteScriptListProvider.notifier).refresh();
-    _ref.invalidate(webviewCurrentSiteScriptProvider);
-  }
-
-  /// save_script：按 script_type 分次保存，落库前强制试运行验证。
   ///
-  /// 流程：
+  /// ## 执行流程（拆分为阶段方法）
+  ///
   /// 1. 解析参数（domain/run_id/script_type/test_url/ocr）
   /// 2. RunStore.get(run_id) 取脚本
   /// 3. 复用场景 _webviewController → loadPage(test_url) → callAsyncJavaScript(script)
@@ -1337,8 +1289,100 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// 6. 全通过 → updateScriptPart 落库；失败返回诊断 JSON
   ///
   /// 核心校验逻辑在 [validateAndPersistScript]（静态，可单测）；
-  /// 本方法负责参数解析 + WebView 执行 + 异常映射。
+  /// 本方法只负责参数解析 + WebView 执行 + 异常映射。
   Future<String> _saveScript(Map<String, dynamic> args) async {
+    // ── 阶段一：解析参数 + 目标安全性校验（错误 JSON 已构造好，直接返回）──
+    final parsed = _parseSaveScriptArgs(args);
+    final validationError = parsed.error ??
+        _validateSaveScriptTargets(
+          domain: parsed.domain,
+          scriptType: parsed.scriptType,
+          testUrl: parsed.testUrl,
+        );
+    if (validationError != null) return validationError;
+
+    // bookshelf（网站书架脚本）不适用 OCR：书架页提取的是标题+链接，
+    // 无字体反爬还原需求。强制按 ocr=false 走验证与落库。
+    final effectiveOcr = parsed.scriptType == 'bookshelf' ? false : parsed.ocr;
+
+    // ── 阶段二：RunStore 取脚本 ──
+    final entry = _runStore.get(parsed.runId);
+    if (entry == null) return _runIdNotFoundJson(parsed.runId);
+    final scriptJs = entry.script;
+
+    // 复用场景已持有的 _webviewController 跑脚本（Headless 模式下即
+    // HeadlessWebViewPool acquire 出的同一实例）。**不能**再次 pool.acquire()——
+    // 否则与场景已持有的排他锁互锁（30s 超时），表现为 save_script "120s 超时"。
+    // execute_js 同样直接用 _webviewController，故两者行为/计时一致。
+    // 注意也不在此处调 pool.release()——释放由场景 cleanup 钩子统一负责
+    // （见 AgentScenarioFactory.build），否则会把场景已持有的锁错误释放。
+    final controller = _webviewController;
+    try {
+      // ── 阶段三：加载 test_url 试运行脚本（loadUrl + 轮询等待 + 执行）──
+      final run = await _runScriptOnTestUrl(controller, scriptJs, parsed.testUrl);
+      if (run.error != null) return run.error!;
+
+      // ── 阶段四：结构校验 + OCR 验证 + 落库（委托可单测的静态方法）──
+      LoggerService.instance.i(
+        'save_script: 开始 validateAndPersistScript domain=${parsed.domain} scriptType=${parsed.scriptType} ocr=$effectiveOcr',
+        category: LogCategory.ai,
+        tags: ['agent', 'webview-extract', 'save_script', 'validate-begin'],
+      );
+      final outcome = await validateAndPersistScript(
+        domain: parsed.domain,
+        scriptType: parsed.scriptType,
+        ocr: effectiveOcr,
+        scriptJs: scriptJs,
+        jsResult: run.jsResult,
+        repo: _ref.read(siteScriptRepositoryProvider),
+        restoreService: _buildRestoreService(controller, effectiveOcr),
+        testUrl: parsed.testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
+        displayName: parsed.displayName,
+        preferredMode:
+            BrowserSettingsService.desktopModeSync ? 1 : 2, // v46 起记录创作模式
+      );
+
+      if (outcome['success'] == true) {
+        _scriptSavedThisSession = true;
+        _notifyScriptSaved();
+      }
+      return jsonEncode(outcome);
+    } on TimeoutException {
+      // 兜底主脚本 .timeout(120s)。OCR 渲染超时（30s）已被内部 try/catch
+      // 转为 ocr_verify_timeout，不会走到这里。
+      return jsonEncode({
+        'success': false,
+        'reason': 'test_timeout',
+        'message': '主脚本在 test_url 上执行超时(>120s)',
+        'suggestion': '脚本可能卡在翻页/等待，检查 setTimeout 和翻页逻辑',
+      });
+    } catch (e, stackTrace) {
+      LoggerService.instance.e(
+        'save_script 验证异常: domain=${parsed.domain} - $e',
+        stackTrace: stackTrace.toString(),
+        category: LogCategory.ai,
+        tags: ['agent', 'webview-extract', 'save_script', 'error'],
+      );
+      return jsonEncode({
+        'success': false,
+        'reason': 'internal_error',
+        'message': '$e',
+      });
+    }
+  }
+
+  /// save_script 参数解析（阶段一）
+  ///
+  /// [error] 非 null 表示参数错误（错误 JSON 已构造好，其余字段无意义）。
+  ({
+    String? error,
+    String domain,
+    String runId,
+    String scriptType,
+    String testUrl,
+    bool ocr,
+    String? displayName,
+  }) _parseSaveScriptArgs(Map<String, dynamic> args) {
     final parser = ToolArgParser(args);
     final (domain, e1) = parser.requireString('domain');
     final (runId, e2) = parser.requireString('run_id');
@@ -1349,15 +1393,44 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final (displayName, _) = parser.optionalString('display_name');
 
     for (final err in [e1, e2, e3, e4, e5]) {
-      if (err != null) return err; // 参数错误直接返回（错误 JSON 已构造好）
+      if (err != null) {
+        return (
+          error: err, // 参数错误直接返回（错误 JSON 已构造好）
+          domain: '',
+          runId: '',
+          scriptType: '',
+          testUrl: '',
+          ocr: false,
+          displayName: null,
+        );
+      }
     }
+    return (
+      error: null,
+      domain: domain,
+      runId: runId,
+      scriptType: scriptType,
+      testUrl: testUrl,
+      ocr: ocr,
+      displayName: displayName,
+    );
+  }
 
-    // 安全校验（2026-09 审查必修项）：
-    // 1) test_url 必须是 http(s) 绝对地址 — 与 _navigateTo 同强度，
-    //    防止 LLM 被提示注入后传 file:///、javascript: 等伪协议加载；
-    // 2) domain 必须是合法主机名 — 落库为 site_scripts.domain 主键，
-    //    后续 HeadlessWebView*Service 会在用户访问该域名时回放脚本，
-    //    恶意/伪造 domain 会把脚本注入到用户真实浏览的站点。
+  /// save_script 目标安全性校验（test_url / domain / script_type，阶段二）
+  ///
+  /// 返回 null 表示通过；否则返回错误 JSON（直接作为工具结果）。
+  ///
+  /// 安全校验（2026-09 审查必修项）：
+  /// 1) test_url 必须是 http(s) 绝对地址 — 与 _navigateTo 同强度，
+  ///    防止 LLM 被提示注入后传 file:///、javascript: 等伪协议加载；
+  /// 2) domain 必须是合法主机名 — 落库为 site_scripts.domain 主键，
+  ///    后续 HeadlessWebView*Service 会在用户访问该域名时回放脚本，
+  ///    恶意/伪造 domain 会把脚本注入到用户真实浏览的站点。
+  String? _validateSaveScriptTargets({
+    required String domain,
+    required String scriptType,
+    required String testUrl,
+  }) {
     final testUri = Uri.tryParse(testUrl);
     if (testUri == null ||
         !testUri.isAbsolute ||
@@ -1397,138 +1470,92 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         'received': scriptType,
       });
     }
+    return null;
+  }
 
-    // bookshelf（网站书架脚本）不适用 OCR：书架页提取的是标题+链接，
-    // 无字体反爬还原需求。强制按 ocr=false 走验证与落库。
-    final effectiveOcr = scriptType == 'bookshelf' ? false : ocr;
+  /// save_script 找不到 run_id 时的错误返回（阶段二失败出口）
+  String _runIdNotFoundJson(String runId) {
+    return jsonEncode({
+      'success': false,
+      'reason': 'run_id_not_found',
+      'message': 'RunStore 中未找到 run_id（可能已被淘汰）',
+      'run_id': runId,
+      'store_size': _runStore.length,
+      'suggestion': '用 execute_js(script=...) 重新执行脚本获取新 run_id',
+    });
+  }
 
-    // 取脚本
-    final entry = _runStore.get(runId);
-    if (entry == null) {
-      return jsonEncode({
-        'success': false,
-        'reason': 'run_id_not_found',
-        'message': 'RunStore 中未找到 run_id（可能已被淘汰）',
-        'run_id': runId,
-        'store_size': _runStore.length,
-        'suggestion': '用 execute_js(script=...) 重新执行脚本获取新 run_id',
-      });
-    }
-    final scriptJs = entry.script;
+  /// 构造 OCR 还原服务（ocr=true 时通过 controller 渲染 PUA；
+  /// bookshelf 已强制 effectiveOcr=false，不构造）。
+  OcrRestoreService? _buildRestoreService(
+    InAppWebViewController controller,
+    bool effectiveOcr,
+  ) {
+    if (!effectiveOcr) return null;
+    return OcrRestoreService(
+      _ref,
+      (cp, ff) => _renderPuaViaController(controller, cp, ff),
+    );
+  }
 
-    // 复用场景已持有的 _webviewController 跑脚本。
-    //
-    // Headless 模式下 _webviewController 就是场景构造时从 HeadlessWebViewPool
-    // acquire 出来的同一实例（见 AgentScenarioFactory.build），且场景会在整个
-    // Agent 循环结束后通过 cleanup 钩子统一 release。因此此处**不能**再次
-    // pool.acquire()——否则会与场景已持有的排他锁互锁（_waitForUseRight 30s
-    // 超时），表现为 save_script "120s 超时"（实为 acquire 死锁）。
-    // execute_js 同样直接用 _webviewController，故两者行为/计时一致。
-    final controller = _webviewController;
-    try {
-      // 加载 test_url（_webviewController 无 onLoadStop 注册，用 URL 轮询等待）
-      LoggerService.instance.i(
-        'save_script: loadUrl(test_url=$testUrl)',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'loadurl'],
-      );
-      final tLoad = DateTime.now();
-      await controller.loadUrl(urlRequest: URLRequest(url: WebUri(testUrl)));
-      await _waitControllerForUrl(controller, testUrl);
-      LoggerService.instance.i(
-        'save_script: loadUrl 完成 耗时=${DateTime.now().difference(tLoad).inMilliseconds}ms',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'loadurl-done'],
-      );
+  /// 在场景 controller 上加载 test_url 并试运行脚本（阶段三）
+  ///
+  /// HeadlessWebViewPool 的 WebView 构造时**未注册 onLoadStop**，沿用
+  /// [_waitControllerForUrl] 的 URL 字符串轮询等待。
+  ///
+  /// 返回 (error: null, jsResult: 已解码的脚本返回值)；执行失败时 error 为
+  /// js_execute_failed 诊断 JSON。TimeoutException 由调用方统一映射。
+  Future<({String? error, dynamic jsResult})> _runScriptOnTestUrl(
+    InAppWebViewController controller,
+    String scriptJs,
+    String testUrl,
+  ) async {
+    // 加载 test_url（_webviewController 无 onLoadStop 注册，用 URL 轮询等待）
+    LoggerService.instance.i(
+      'save_script: loadUrl(test_url=$testUrl)',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'save_script', 'loadurl'],
+    );
+    final tLoad = DateTime.now();
+    await controller.loadUrl(urlRequest: URLRequest(url: WebUri(testUrl)));
+    await _waitControllerForUrl(controller, testUrl);
+    LoggerService.instance.i(
+      'save_script: loadUrl 完成 耗时=${DateTime.now().difference(tLoad).inMilliseconds}ms',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'save_script', 'loadurl-done'],
+    );
 
-      // 替换 {{URL}} → test_url（提取脚本约定含 {{URL}}）
-      final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptJs, testUrl);
-      final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolved);
-      LoggerService.instance.i(
-        'save_script: 执行提取脚本 scriptLen=${resolved.length} bodyLen=${functionBody.length}',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'extract-begin'],
-      );
-      final tExtract = DateTime.now();
-      final result = await controller
-          .callAsyncJavaScript(functionBody: functionBody)
-          .timeout(const Duration(seconds: 120));
-      LoggerService.instance.i(
-        'save_script: 提取脚本完成 耗时=${DateTime.now().difference(tExtract).inMilliseconds}ms error=${result?.error}',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'extract-done'],
-      );
-      if (result == null || result.error != null) {
-        return jsonEncode({
+    // 替换 {{URL}} → test_url（提取脚本约定含 {{URL}}）
+    final resolved = WebViewJsExecutor.replaceUrlPlaceholder(scriptJs, testUrl);
+    final functionBody = WebViewJsExecutor.extractAsyncFunctionBody(resolved);
+    LoggerService.instance.i(
+      'save_script: 执行提取脚本 scriptLen=${resolved.length} bodyLen=${functionBody.length}',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'save_script', 'extract-begin'],
+    );
+    final tExtract = DateTime.now();
+    final result = await controller
+        .callAsyncJavaScript(functionBody: functionBody)
+        .timeout(const Duration(seconds: 120));
+    LoggerService.instance.i(
+      'save_script: 提取脚本完成 耗时=${DateTime.now().difference(tExtract).inMilliseconds}ms error=${result?.error}',
+      category: LogCategory.ai,
+      tags: ['agent', 'webview-extract', 'save_script', 'extract-done'],
+    );
+    if (result == null || result.error != null) {
+      return (
+        error: jsonEncode({
           'success': false,
           'reason': 'js_execute_failed',
           'diagnostic': '脚本在 test_url 上执行失败',
           'js_error': result?.error?.toString(),
           'suggestion': '检查脚本选择器是否匹配该页面，或页面是否需要等待加载',
-        });
-      }
-      final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
-      final jsResult = jsonDecode(jsonStr);
-
-      // 构造 OcrRestoreService（ocr=true 时通过 _webviewController 渲染 PUA；
-      // bookshelf 已强制 effectiveOcr=false）
-      final OcrRestoreService? restoreService = effectiveOcr
-          ? OcrRestoreService(
-              _ref,
-              (cp, ff) => _renderPuaViaController(controller, cp, ff),
-            )
-          : null;
-
-      // 委托静态校验 + 落库（可单测）
-      LoggerService.instance.i(
-        'save_script: 开始 validateAndPersistScript domain=$domain scriptType=$scriptType ocr=$effectiveOcr',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'validate-begin'],
+        }),
+        jsResult: null,
       );
-      final outcome = await validateAndPersistScript(
-        domain: domain,
-        scriptType: scriptType,
-        ocr: effectiveOcr,
-        scriptJs: scriptJs,
-        jsResult: jsResult,
-        repo: _ref.read(siteScriptRepositoryProvider),
-        restoreService: restoreService,
-        testUrl: testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
-        displayName: displayName,
-        preferredMode:
-            BrowserSettingsService.desktopModeSync ? 1 : 2, // v46 起记录创作模式
-      );
-
-      if (outcome['success'] == true) {
-        _scriptSavedThisSession = true;
-        _notifyScriptSaved();
-      }
-      return jsonEncode(outcome);
-    } on TimeoutException {
-      // 兜底主脚本 .timeout(120s)。OCR 渲染超时（30s）已被
-      // validateAndPersistScript 内部 try/catch 转为 ocr_verify_timeout，
-      // 不会走到这里。
-      return jsonEncode({
-        'success': false,
-        'reason': 'test_timeout',
-        'message': '主脚本在 test_url 上执行超时(>120s)',
-        'suggestion': '脚本可能卡在翻页/等待，检查 setTimeout 和翻页逻辑',
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'save_script 验证异常: domain=$domain - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'save_script', 'error'],
-      );
-      return jsonEncode({
-        'success': false,
-        'reason': 'internal_error',
-        'message': '$e',
-      });
     }
-    // 注意：此处**不**调 pool.release()，释放由场景 cleanup 钩子统一负责
-    // （见 AgentScenarioFactory.build），否则会把场景已持有的锁错误释放。
+    final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
+    return (error: null, jsResult: jsonDecode(jsonStr));
   }
 
   /// 在 pool controller 上轮询等待页面 URL 匹配 [targetUrl]。
@@ -1652,15 +1679,9 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
   /// 验证脚本结果并落库（可单测，绕开 WebView 平台依赖）。
   ///
-  /// 接收"已执行的 JS 结果"（jsResult，由 executor 通过 callAsyncJavaScript
-  /// 调用并 jsonDecode 后传入），完成：
-  /// 1. 结构校验（[_validateScriptResult]）
-  /// 2. ocr=true → OCR 验证（[_validateOcr]）
-  /// 3. 全通过 → [SiteScriptRepository.updateScriptPart] 落库
-  ///
-  /// 返回值（始终为 Map，executor 再 jsonEncode）：
-  /// - 失败：`{success: false, reason, diagnostic, suggestion, ...}`
-  /// - 成功：`{success: true, domain, script_type, ocr, [ocr_applied], ...}`
+  /// 静态转发入口：实现已抽到 [WebViewExtractScriptValidator.validateAndPersistScript]
+  /// （结构校验 → OCR 验证 → 落库编排，见 webview_extract_script_validator.dart）。
+  /// 保留原签名，单测（save_script_tool_test.dart）与既有调用方零改动。
   @visibleForTesting
   static Future<Map<String, dynamic>> validateAndPersistScript({
     required String domain,
@@ -1673,327 +1694,24 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     String? testUrl,
     String? displayName,
     int? preferredMode,
-  }) async {
-    // 1. 结构校验
-    final structErr = _validateScriptResult(jsResult, scriptType, ocr);
-    if (structErr != null) {
-      return {
-        'success': false,
-        ...structErr,
-        'returned_sample': _sample(jsResult),
-      };
-    }
-
-    // 2. OCR 验证（ocr=true 时强制走）
-    if (ocr) {
-      // 2.0 前置闸：ocr=true 必须见到 PUA 码点，否则直接拒绝（避免 agent 误传 true 走无谓 OCR 流程）
-      final ocrTargetText = _extractOcrTargetText(jsResult, scriptType);
-      if (!_containsPrivateUseArea(ocrTargetText)) {
-        return {
-          'success': false,
-          'reason': 'ocr_no_pua',
-          // TODO(ocr_applied 语义): 此字段在拒绝路径上返回 true 但 OCR 实际未执行（闸先于 OCR 运行）。
-          // 与本文件 font_family_missing 不返回 ocr_applied 的惯例不一致；无消费方从失败路径读取，待后续统一语义。
-          'ocr_applied': true,
-          'diagnostic': 'ocr=true 但脚本返回文本中未检测到 PUA 码点（U+E000-F8FF），不符合字体反爬判定条件',
-          'suggestion': '请重新确认该站点是否真的有字体反爬。若确认无 PUA，调用 save_script 时传 ocr=false；'
-              '若应该有 PUA 但检测失败，请检查脚本是否正确返回了带 PUA 的原始文本（不要在 JS 里替换）',
-        };
-      }
-
-      if (restoreService == null) {
-        return {
-          'success': false,
-          'reason': 'restore_service_missing',
-          'diagnostic': 'ocr=true 但 restoreService 未注入（实现错误）',
-        };
-      }
-      final fontFamily = _extractFontFamily(jsResult);
-      // OCR 验证内部 _renderPuaViaController 的 callAsyncJavaScript 带 30s 超时
-      // （ocr_render_js.dart 模板首行 await document.fonts.ready 在冷启动页面
-      // 上等字体下载，常 >30s）。这里单独捕获 TimeoutException 转 ocr_verify_timeout，
-      // 避免冒泡到 _saveScript 外层 on TimeoutException 被误报成 "主脚本 120s 超时"。
-      // 仅 catch TimeoutException：OCR 渲染失败抛的 Exception 仍冒泡走 internal_error。
-      Map<String, dynamic>? ocrErr;
-      try {
-        ocrErr = await _validateOcr(restoreService, fontFamily, jsResult, scriptType);
-      } on TimeoutException {
-        return {
-          'success': false,
-          'reason': 'ocr_verify_timeout',
-          'ocr_applied': true,
-          'message': 'OCR 验证阶段单字渲染超时(>30s)，通常因 save_script 冷启动页面后 @font-face 字体未下载完',
-          'diagnostic': 'document.fonts.ready 在 loadUrl(test_url) 之后未及时 resolve',
-          'suggestion': '这是字体冷加载耗时导致的误报，非提取脚本缺陷。'
-              '脚本本身已通过 execute_js 验证；若频繁出现，后续会在 loadUrl 后显式等 fonts.ready 再触发 OCR 验证',
-        };
-      }
-      if (ocrErr != null) {
-        return {'success': false, ...ocrErr};
-      }
-    }
-
-    // 3. 落库
-    final saveResult = await repo.updateScriptPart(
+  }) {
+    return WebViewExtractScriptValidator.validateAndPersistScript(
       domain: domain,
       scriptType: scriptType,
-      scriptJs: scriptJs,
       ocr: ocr,
+      scriptJs: scriptJs,
+      jsResult: jsResult,
+      repo: repo,
+      restoreService: restoreService,
       testUrl: testUrl,
       displayName: displayName,
       preferredMode: preferredMode,
     );
-    if (!saveResult.success) {
-      // 防御性兜底：updateScriptPart 现在不再返回 domain_not_found（domain 不存在
-      // 会自动 INSERT）。理论上 success 恒为 true（异常已在外层 _saveScript catch），
-      // 此分支仅留作 repo 未来引入新失败 reason 时的透传。
-      return {
-        'success': false,
-        'reason': saveResult.reason ?? 'unknown',
-        'domain': domain,
-        'suggestion': '脚本落库失败，请检查 domain 是否正确后重试',
-      };
-    }
-
-    return {
-      'success': true,
-      'domain': domain,
-      'script_type': scriptType,
-      'ocr': ocr,
-      'id': saveResult.id,
-      if (ocr) 'ocr_applied': true,
-    };
-  }
-
-  /// 结构校验：返回 null 表示通过，否则返回含 reason/diagnostic/suggestion 的 map。
-  ///
-  /// chapter_list 校验：`chapters` 必须是非空 List，每项 title/url 非空；
-  /// `cover_url`（或 coverUrl）字段必须存在（String，允许空串），缺失视为
-  /// 脚本未按要求提供封面图，拒绝落库（reason=cover_url_missing）。
-  /// chapter_content 校验：`content` 长度 >= 50；ocr=true 时 `font_family` 非空。
-  /// bookshelf 校验：`novels` 必须是非空 List，每项 title/url 非空。OCR 不适用。
-  static Map<String, dynamic>? _validateScriptResult(
-    dynamic data,
-    String scriptType,
-    bool ocr,
-  ) {
-    if (data is! Map) {
-      return {
-        'reason': 'invalid_structure',
-        'diagnostic': '脚本返回非对象（期望 {title, content/chapters}）',
-        'suggestion': '脚本最后应 return JSON.stringify({title:..., content:...})',
-      };
-    }
-
-    if (scriptType == 'chapter_list') {
-      final chapters = data['chapters'];
-      if (chapters is! List || chapters.isEmpty) {
-        return {
-          'reason': 'chapters_empty',
-          'diagnostic': 'chapters 为空或非数组',
-          'suggestion': '检查目录选择器是否匹配到章节列表',
-        };
-      }
-      for (final c in chapters) {
-        if (c is! Map ||
-            ((c['title'] as String?) ?? '').isEmpty ||
-            ((c['url'] as String?) ?? '').isEmpty) {
-          return {
-            'reason': 'chapter_missing_field',
-            'diagnostic': '某 chapter 缺少 title 或 url',
-            'suggestion': '每个 chapter 必须有非空 title 和 url',
-          };
-        }
-      }
-      // cover_url / coverUrl（snake/camel 兜底）。缺 key 直接拒（避免脚本忘记
-      // 提供封面图），空串允许（目录页确实无封面时返回 ''）。两种异常输入
-      // （null/非字符串）按缺 key 处理，确保返回 JSON 结构可控。
-      final coverRaw = data['cover_url'] ?? data['coverUrl'];
-      if (coverRaw is! String) {
-        return {
-          'reason': 'cover_url_missing',
-          'diagnostic': '脚本返回缺少 cover_url 字段（应返回封面图 URL 或空串）',
-          'suggestion': '在脚本末尾加 cover_url 提取：'
-              'const og = document.querySelector(\'meta[property="og:image"]\'); '
-              'const cover = og?.content || document.querySelector(\'.book-img, #bookImg, .cover img\')?.src || \'\'; '
-              'const coverUrl = cover ? new URL(cover, PAGE_URL).href : \'\'; '
-              '返回 {title, cover_url: coverUrl, chapters:[...]}',
-        };
-      }
-      return null;
-    }
-
-    if (scriptType == 'bookshelf') {
-      final novels = data['novels'];
-      if (novels is! List || novels.isEmpty) {
-        return {
-          'reason': 'novels_empty',
-          'diagnostic': 'novels 为空或非数组',
-          'suggestion': '确认当前页面是「我的书架/收藏」页，检查书架列表选择器是否匹配',
-        };
-      }
-      for (final n in novels) {
-        if (n is! Map ||
-            ((n['title'] as String?) ?? '').isEmpty ||
-            ((n['url'] as String?) ?? '').isEmpty) {
-          return {
-            'reason': 'novel_missing_field',
-            'diagnostic': '某 novel 缺少 title 或 url',
-            'suggestion': '每个 novel 必须有非空 title 和 url（小说目录页路径）',
-          };
-        }
-      }
-      // cover_url 封面槽位（可选能力、必填键）：与 chapter_list 同语义——
-      // 键必须存在且为字符串（空串允许，书架页确实无封面图时返回 ''），
-      // 防止脚本作者漏提取；解析/同步侧仍按可选处理，兼容旧脚本。
-      for (final n in novels) {
-        if (n is Map && (n['cover_url'] ?? n['coverUrl']) is! String) {
-          return {
-            'reason': 'novel_cover_url_missing',
-            'diagnostic': '某 novel 缺少 cover_url 字段（封面槽位，可为空串）',
-            'suggestion': '每本 novel 加 cover_url 提取：'
-                'const img = 条目元素.querySelector(\'img\'); '
-                'const coverUrl = img ? new URL(img.dataset.src || img.dataset.original || img.src, PAGE_URL).href : \'\'; '
-                '返回 {title, url, cover_url: coverUrl}',
-          };
-        }
-      }
-      return null;
-    }
-
-    // chapter_content
-    final content = ((data['content'] as String?) ?? '').trim();
-    if (content.length < 50) {
-      return {
-        'reason': 'content_too_short',
-        'diagnostic': 'content 长度 ${content.length} < 50，可能选择器没匹配正文',
-        'suggestion': '检查正文选择器，或等待页面加载完成再提取',
-      };
-    }
-    if (ocr) {
-      final ff = _extractFontFamily(data);
-      if (ff.isEmpty) {
-        return {
-          'reason': 'font_family_missing',
-          'diagnostic': 'OCR 模式下 chapter_content 脚本必须返回 font_family',
-          'suggestion': '在脚本里加 const ff = getComputedStyle(正文元素).fontFamily; '
-              '返回 {title, content, font_family: ff}',
-        };
-      }
-    }
-    return null;
-  }
-
-  /// OCR 验证：字体有效性 + PUA 还原 + 可读率/解码率达标。
-  ///
-  /// 返回 null 表示通过；否则返回含 reason 的诊断 map（均带 ocr_applied=true）。
-  ///
-  /// 1. `verifyFontFamily` 失败 → `font_family_invalid`
-  /// 2. `restorePuaInText` 后 `readableRatio < _readableRatioThreshold(0.75)` → `readable_ratio_below_threshold`
-  /// 3. 有 PUA 但 `decodedRatio < 0.8` → `decoded_ratio_below_threshold`
-  static Future<Map<String, dynamic>?> _validateOcr(
-    OcrRestoreService svc,
-    String fontFamily,
-    dynamic data,
-    String scriptType,
-  ) async {
-    if (!await svc.verifyFontFamily(fontFamily)) {
-      return {
-        'reason': 'font_family_invalid',
-        'ocr_applied': true,
-        'font_family': fontFamily,
-        'diagnostic': '该 font_family 渲染不同 PUA 产生相同占位框，字体族名无效或未加载',
-        'suggestion': '确认 getComputedStyle 取的是正文元素且字体已加载；检查 font-family 值',
-      };
-    }
-
-    // 拼接待还原文本：content 或 title+chapters[].title
-    final textToRestore = scriptType == 'chapter_content'
-        ? ((data['content'] as String?) ?? '')
-        : '${data['title'] ?? ''} ${(data['chapters'] as List?)?.map((c) => c['title'] ?? '').join(' ')}';
-
-    final restored = await svc.restorePuaInText(textToRestore, fontFamily);
-    final ratio = svc.readableRatio(restored.text);
-    if (ratio < _readableRatioThreshold) {
-      return {
-        'reason': 'readable_ratio_below_threshold',
-        'ocr_applied': true,
-        'readable_ratio': ratio,
-        'decoded_ratio': restored.decodedRatio,
-        'diagnostic': 'OCR 还原后 CJK 占比过低，font_family 可能无效或模型解码失败',
-        'suggestion': '检查 font_family 是否正确（用 getComputedStyle(正文元素).fontFamily）',
-      };
-    }
-    if (restored.totalPuaCount > 0 && restored.decodedRatio < 0.8) {
-      return {
-        'reason': 'decoded_ratio_below_threshold',
-        'ocr_applied': true,
-        'decoded_ratio': restored.decodedRatio,
-        'total_pua': restored.totalPuaCount,
-        'diagnostic': 'PUA 识别成功率 < 80%',
-        'suggestion': '模型对该字体解码效果差，可考虑 LLM 兜底（非本期）',
-      };
-    }
-    return null; // 通过
-  }
-
-  /// 从 jsResult 中取 font_family（snake/camel 兜底）。
-  static String _extractFontFamily(dynamic data) {
-    if (data is! Map) return '';
-    final v = data['font_family'] ?? data['fontFamily'];
-    if (v is! String) return '';
-    return v.trim();
-  }
-
-  /// 检查文本中是否含 PUA 私用区码点。阈值 ≥1 即视为存在字体反爬特征。
-  ///
-  /// 委托给 [isPua]（ocr_restore_service.dart），覆盖 PUA-A/B/C 三段，
-  /// 与运行时 OCR 管道对齐。避免本文件旧实现仅检查 PUA-A 导致 PUA-B/C 误判。
-  /// 用 text.runes 逐码点比较，避免在源码字面量里嵌入 PUA 字符（OCR 测试不友好）。
-  static bool _containsPrivateUseArea(String text) {
-    return text.runes.any(isPua);
-  }
-
-/// 从 jsResult 提取 OCR 模式需要扫描 PUA 的目标文本。
-  ///
-  /// - chapter_content: 直接取 content
-  /// - chapter_list: 拼接 title + 所有 chapters[].title（小说名 + 章名里也可能含 PUA）
-  /// - bookshelf: 无 PUA 需求，返回空串（bookshelf 在 _saveScript 已强制 ocr=false，
-  ///   此处仅为防御兜底：万一有人手动构造调用时返回空字符串，闸会拒落库）
-  static String _extractOcrTargetText(dynamic jsResult, String scriptType) {
-    if (jsResult is! Map) return '';
-    if (scriptType == 'chapter_content') {
-      return ((jsResult['content'] as String?) ?? '');
-    }
-    if (scriptType == 'bookshelf') {
-      return '';
-    }
-    final title = (jsResult['title'] as String?) ?? '';
-    final chapters = jsResult['chapters'];
-    final chapterTitles = chapters is List
-        ? chapters
-            .whereType<Map>()
-            .map((c) => (c['title'] as String?) ?? '')
-            .join(' ')
-        : '';
-    return '$title $chapterTitles';
-  }
-
-  /// 截取结果摘要（最多 200 字），用于诊断返回。
-  static String _sample(dynamic data) {
-    final s = data.toString();
-    return s.length > 200 ? '${s.substring(0, 200)}...' : s;
   }
 
   /// 列出所有已保存脚本
   Future<String> _listCachedScripts() async {
-    final dbConnection = _ref.read(databaseConnectionProvider);
-    final db = await dbConnection.database;
-    final results = await db.query(
-      'site_scripts',
-      orderBy: 'last_used_at DESC',
-      limit: 20,
-    );
+    final results = await WebViewExtractScriptDb.listRecent(_ref);
 
     final scripts = results.map((row) => {
           'id': row['id'],
@@ -2127,404 +1845,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           'tags': log.tags,
         };
       }).toList(),
-    });
-  }
-
-  // ===== DOM 精简脚本 =====
-
-  /// 在 WebView 中执行的 DOM 精简脚本
-  ///
-  /// 移除无关元素（script/style/nav 等），截断长文本，
-  /// 返回精简后的 HTML 结构供 LLM 分析。
-  static const _domSimplifyJs = '''
-(function() {
-  var clone = document.cloneNode(true);
-  // 移除不需要的元素
-  var removeTags = ['script','style','link','meta','noscript','svg','img','video','audio','iframe','nav','footer','header','aside'];
-  removeTags.forEach(function(tag) {
-    clone.querySelectorAll(tag).forEach(function(el) { el.remove(); });
-  });
-  // 移除广告类
-  clone.querySelectorAll('[class*="ad"],[id*="ad"],[class*="banner"],[class*="popup"],[class*="sidebar"]').forEach(function(el) { el.remove(); });
-  // 精简 class：只保留前3个
-  clone.querySelectorAll('[class]').forEach(function(el) {
-    var classes = el.className.split(' ').slice(0, 3).join(' ');
-    el.setAttribute('class', classes);
-  });
-  // 截断过长文本
-  var walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) {
-    if (walker.currentNode.textContent.length > 200) {
-      walker.currentNode.textContent = walker.currentNode.textContent.substring(0, 200) + '...';
-    }
-  }
-  // 截断整体 HTML 长度
-  var html = clone.documentElement.outerHTML;
-  if (html.length > 15000) {
-    html = html.substring(0, 15000) + '\\n... [DOM truncated]';
-  }
-  return html;
-})()
-''';
-
-  /// 页面类型推断脚本
-  ///
-  /// 通过 DOM 特征简单判断是目录页还是章节内容页：
-  /// - 大量相同结构链接 + 长列表 → chapter_list
-  /// - 少量链接 + 大量长段落 → chapter_content
-  /// - 其他 → unknown
-  ///
-  /// 返回 JSON: `{"pageType": "chapter_list|chapter_content|unknown", "title": "页面title"}`
-  static const _inferPageTypeJs = r'''
-(function() {
-  try {
-    var title = document.title || '';
-    // 统计链接数量
-    var links = document.querySelectorAll('a[href]');
-    var linkCount = links.length;
-    // 统计长段落（>200字符）
-    var paragraphs = document.querySelectorAll('p, div');
-    var longParaCount = 0;
-    var paraSample = [];
-    for (var i = 0; i < paragraphs.length && paraSample.length < 5; i++) {
-      var text = (paragraphs[i].innerText || '').trim();
-      if (text.length > 200) {
-        longParaCount++;
-        if (paraSample.length < 3) paraSample.push(text.length);
-      }
-    }
-    // 列表标签
-    var listItems = document.querySelectorAll('li').length;
-    // 简单启发式：
-    // 链接密度高 + 段落少 → 目录页
-    // 链接少 + 大量长段落 → 章节内容页
-    var pageType = 'unknown';
-    if (linkCount >= 20 && longParaCount <= 3) {
-      pageType = 'chapter_list';
-    } else if (longParaCount >= 3 && linkCount < 20) {
-      pageType = 'chapter_content';
-    } else if (listItems >= 10 && linkCount >= 10) {
-      pageType = 'chapter_list';
-    }
-    return JSON.stringify({pageType: pageType, title: title});
-  } catch (e) {
-    return JSON.stringify({pageType: 'unknown', title: '', error: e.toString()});
-  }
-})()
-''';
-
-  // ===== 工具定义（OpenAI Function Calling schema）=====
-
-  static const _getPageInfoTool = {
-    'type': 'function',
-    'function': {
-      'name': 'get_page_info',
-      'description':
-          '获取当前浏览器页面的 URL、页面标题、页面类型推断（chapter_list=目录页 / chapter_content=章节内容页 / unknown=未知）和精简后的 DOM 结构。注意：pageType 仅为参考，请结合 DOM 确认。若返回 PAGE_NOT_READY，请稍后重试。',
-      'parameters': {
-        'type': 'object',
-        'properties': <String, dynamic>{},
-      },
-    },
-  };
-
-  static const _executeJsTool = {
-    'type': 'function',
-    'function': {
-      'name': 'execute_js',
-      'description':
-          '在当前 WebView 页面中执行 JavaScript 脚本。'
-          '支持两种模式：\n'
-          '  1. **探测模式**（传 script）：传入 JS 代码探测 DOM 结构或执行新写的提取脚本。'
-          '脚本必须包含 {{URL}} 占位符。执行成功后自动注册到 RunStore 并在 __meta.run_id 返回。\n'
-          '  2. **重跑模式**（传 run_id）：从 RunStore 加载已注册的脚本执行，零重抄。'
-          'run_id 来源：execute_js 的 __meta.run_id、get_cached_script 的 list_run_id/content_run_id。\n'
-          '返回值：业务字段平铺到顶层（title/chapters/...），工具元数据在 __meta 内。\n'
-          '脚本超时 120 秒会被自动终止（返回 JS_TIMEOUT）。'
-          '常见错误码: JS_SYNTAX_ERROR / JS_REFERENCE_ERROR / JS_TYPE_ERROR / SCRIPT_VALIDATION_FAILED / RUN_ID_NOT_FOUND。'
-          '请根据返回的 suggestion 字段修正。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'script': {
-            'type': 'string',
-            'description':
-                '【探测模式】要执行的 JavaScript 代码。必须包含 {{URL}} 占位符。'
-                "格式: (async function(){ const PAGE_URL = '{{URL}}'; ... return JSON.stringify(result); })()",
-          },
-          'run_id': {
-            'type': 'string',
-            'description':
-                '【重跑模式】RunStore 中的 run_id（exec_xxx 或 db_xxx）。'
-                '从 RunStore 加载脚本执行，AI 无需在上下文中保留脚本内容。',
-          },
-          'test_url': {
-            'type': 'string',
-            'description':
-                '可选。测试用的 URL，会替换脚本中的 {{URL}}。'
-                '测试内容脚本时，建议从目录脚本返回的 chapters 数组中取一个 URL 传入。'
-                '不填则使用当前浏览器页面 URL。',
-          },
-        },
-      },
-    },
-  };
-
-  static const _getCachedScriptTool = {
-    'type': 'function',
-    'function': {
-      'name': 'get_cached_script',
-      'description':
-          '查询指定域名是否已有缓存的提取脚本。找到后自动注册到 RunStore 并返回 '
-          'list_run_id + content_run_id，**不返回完整脚本内容**（避免占上下文）。'
-          '后续可直接 execute_js(run_id=list_run_id) 重跑，零重抄。'
-          '若需查看完整内容（调试），用 inspect_script(run_id=...)。\n'
-          '返回 JSON 顶层带 `present` / `missing` 列表，列出当前域名哪些脚本类型已有、哪些缺失。'
-          'Agent 应按 missing 项精准调用 save_script(script_type=...) 补全，避免重复生成已有脚本。\n'
-          '传 `script_type` 可只查询某一种类型（节省 RunStore 槽位与返回体大小）。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'domain': {
-            'type': 'string',
-            'description':
-                '要查询的域名（如 www.example.com）。不填则使用当前页面域名。',
-          },
-          'script_type': {
-            'type': 'string',
-            'enum': ['chapter_list', 'chapter_content', 'bookshelf'],
-            'description':
-                '【可选】只查询并返回指定类型的脚本。'
-                '不传=按旧语义同时查询所有类型（一次性返回各自 run_id）。'
-                'Agent 补缺失时推荐传值：上次结果 missing 列表里的某一项。',
-          },
-        },
-      },
-    },
-  };
-
-  static const _saveScriptTool = {
-    'type': 'function',
-    'function': {
-      'name': 'save_script',
-      'description': '保存提取脚本到本地数据库（按脚本类型分次保存，落库前强制试运行验证）。'
-          '工作流程：headless WebView 打开 test_url -> 运行 run_id 指向的 JS -> '
-          '校验结果结构 -> 若 ocr=true 走 OCR 还原 -> 全部通过才落库。'
-          '验证失败时返回诊断信息指导你修改 JS，不落库。'
-          '完整提取器需调用两次：一次 script_type=chapter_list，一次 script_type=chapter_content。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'domain': {
-            'type': 'string',
-            'description': '网站域名',
-          },
-          'run_id': {
-            'type': 'string',
-            'description': '脚本在 RunStore 中的 run_id（exec_xxx），'
-                '从之前 execute_js 调用的 __meta.run_id 获取。'
-                '必须是你已测试通过的脚本，save_script 会用它做落库前验证。',
-          },
-          'script_type': {
-            'type': 'string',
-            'enum': ['chapter_list', 'chapter_content', 'bookshelf'],
-            'description': '保存的脚本类型。chapter_list 返回 {title, cover_url, chapters:[{title,url}]}'
-              '（cover_url 字段必填，缺失会被拒绝落库；允许空串表示确实无封面）；'
-              'chapter_content 返回 {title, content, font_family}（OCR 模式需 font_family）；'
-              'bookshelf 返回 {novels:[{title,url}]}，提取「我的书架/收藏」页的小说列表，'
-              'url 为该站小说目录页绝对路径（bookshelf 不适用 OCR，ocr 固定传 false）。',
-          },
-          'test_url': {
-            'type': 'string',
-            'description': '验证用页面 URL。chapter_list 用目录页 URL，'
-                'chapter_content 用章节内容页 URL。save_script 会真实加载该 URL 跑 JS 做验证。',
-          },
-          'ocr': {
-            'type': 'boolean',
-            'description': '该站点是否需要 OCR 后处理（字体反爬）的硬性开关。\n'
-                '传 true 的充要条件：脚本返回的文本中出现 PUA 私用区码点（U+E000–F8FF，页面表现是乱码方块）。\n'
-                '若页面文本正常可读，必须传 false。\n'
-                '传 true 时，save_script 会先扫描文本中是否存在 PUA 码点；若无则直接拒绝落库并返回 reason=ocr_no_pua。\n'
-                '判定方法：在脚本探测阶段留意 execute_js 返回值里是否含 PUA 或乱码方块；可用 JS 码点扫描 console.log([...text].some(c => c >= 0xE000 && c <= 0xF8FF))。\n'
-'对 chapter_content：还原 content 里的 PUA；'
-              '对 chapter_list：还原 title 字段里的 PUA（小说名 + 章名）。'
-              'chapter_list 与 chapter_content 的 ocr 各自独立判定，按各自页面是否真有 PUA 传值，'
-              '不必一致（典型如番茄小说：目录页 title/chapter.title 是正常汉字传 false，正文页 content 有 PUA 才传 true）。'
-              '落库后分别存为该 script_type 的 ocr 标记，互不覆盖。',
-          },
-          'display_name': {
-            'type': 'string',
-            'description': '站点自身的名字（用户书页看到的品牌名，如「起点中文网」「番茄小说」）。'
-                '从页面 logo / 顶部品牌文案 / title 提取；拿不准就传空串或省略，'
-                '前端会回退到 host。save_script 按 script_type 分次调用时，'
-                '仅在第一次调用时传本参数（后续分次调用会保留该值不覆盖）。',
-          },
-        },
-        'required': ['domain', 'run_id', 'script_type', 'test_url', 'ocr'],
-      },
-    },
-  };
-
-  static const _inspectScriptTool = {
-    'type': 'function',
-    'function': {
-      'name': 'inspect_script',
-      'description':
-          '查看 RunStore 中某条 run_id 的完整脚本内容。**调试用**，仅在需要时调用。'
-          '常见场景：(1) execute_js 失败需要看完整脚本 debug；(2) 想基于已注册脚本改写并重新执行。'
-          '注意：返回完整脚本会占用上下文，**非必要时不要调用**。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'run_id': {
-            'type': 'string',
-            'description':
-                'RunStore 中的 run_id。'
-                '来源：execute_js 的 __meta.run_id、get_cached_script 的 list_run_id/content_run_id。',
-          },
-        },
-        'required': ['run_id'],
-      },
-    },
-  };
-
-  static const _listNetworkRequestsTool = {
-    'type': 'function',
-    'function': {
-      'name': 'list_network_requests',
-      'description':
-          '列出当前页面自加载以来捕获的 AJAX 请求（XHR/fetch），'
-          '用于分析网页接口模式、辅助编写章节提取脚本。'
-          '返回每条请求的 URL / method / 请求参数（query_params）/ 请求头。'
-          '⚠️ 响应体与 POST body 均不采集：若需看返回内容，用 execute_js 读 DOM 或重发请求。'
-          '页面跳转后历史自动清空。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'url_contains': {
-            'type': 'string',
-            'description': 'URL 子串过滤（大小写敏感）。如 "chapter"、"/api/"。',
-          },
-          'method': {
-            'type': 'string',
-            'description': 'HTTP method 过滤（GET/POST，大小写不敏感）。',
-          },
-          'since_index': {
-            'type': 'integer',
-            'description': '只返回 index 大于此值的记录（用于翻页/查增量）。',
-          },
-          'limit': {
-            'type': 'integer',
-            'description': '最多返回条数，默认 50，上限 100。',
-          },
-        },
-        'required': <String>[],
-      },
-    },
-  };
-
-  static const _getScriptLogsTool = {
-    'type': 'function',
-    'function': {
-      'name': 'get_script_logs',
-      'description':
-          '查询爬虫运行日志的最近 30 条记录（按时间倒序）。'
-          '用于诊断"execute_js 能跑通但实际抓取失败"的问题——查看 HeadlessWebView '
-          '在阅读器/FAB添加小说/获取书架等真实场景中执行脚本时的错误、超时、空结果等记录。'
-          '每条含时间戳、级别、消息摘要（消息中含 domain= 可自行区分站点）。'
-          '注意：日志来自真实使用场景（非当前对话），用于定位脚本上线后的问题。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'outcome': {
-            'type': 'string',
-            'enum': ['all', 'success', 'failure'],
-            'description':
-                '结果筛选。all=全部（默认）；success=只看成功记录；'
-                'failure=只看失败/异常记录（warning 及以上级别）。',
-          },
-        },
-      },
-    },
-  };
-
-  static const _listCachedScriptsTool = {
-    'type': 'function',
-    'function': {
-      'name': 'list_cached_scripts',
-      'description': '列出所有已保存的提取脚本（按最近使用排序，最多20条）。',
-      'parameters': {
-        'type': 'object',
-        'properties': <String, dynamic>{},
-      },
-    },
-  };
-
-  static const _navigateToTool = {
-    'type': 'function',
-    'function': {
-      'name': 'navigate_to',
-      'description':
-          '让 WebView 跳转到指定 URL，等待页面加载完成后返回。'
-          '用于从目录页跳转到章节内容页提取正文。'
-          '跳转成功后可调用 get_page_info 查看新页面的 DOM 结构。',
-      'parameters': {
-        'type': 'object',
-        'properties': {
-          'url': {
-            'type': 'string',
-            'description': '目标 URL（必须是完整的 http/https 地址）',
-          },
-        },
-        'required': ['url'],
-      },
-    },
-  };
-
-  static const _getCurrentUrlTool = {
-    'type': 'function',
-    'function': {
-      'name': 'get_current_url',
-      'description':
-          '查询 WebView 当前实际加载的 URL（不是场景构造时传入的预期 URL）。'
-          '返回字段：url=WebView 实际 URL，expected_url=场景预期 URL，matched=两者是否一致。'
-          '典型用途：1) navigate_to 之后确认跳转是否生效；2) 排查 Headless WebView URL 不更新的问题；'
-          '3) 判断 execute_js 脚本中 {{URL}} 占位符实际会被替换成什么。'
-          'Headless 模式下首次调用会自动同步预期 URL 到 Headless WebView。',
-      'parameters': {
-        'type': 'object',
-        'properties': <String, dynamic>{},
-      },
-    },
-  };
-
-  /// 执行 patch_memory 工具，序列化 MemoryPatchResult
-  Future<String> _executePatchMemory(Map<String, dynamic> args) async {
-    final index = args['index'] as int?;
-    final newText = args['newText'] as String? ?? '';
-    final result = await patchMemory(index, newText);
-    if (result.success) {
-      LoggerService.instance.i(
-        'patchMemory 成功: ${result.message}',
-        category: LogCategory.ai,
-        tags: ['agent', 'webview-extract', 'patch_memory', 'success'],
-      );
-      return jsonEncode({'success': true, 'message': result.message});
-    }
-    LoggerService.instance.w(
-      'patchMemory 失败: ${result.message}',
-      category: LogCategory.ai,
-      tags: ['agent', 'webview-extract', 'patch_memory', 'failed'],
-    );
-    // 失败：返回 [N] 格式的编号列表，与 system prompt 展示一致，供 AI 用正确编号重试
-    return jsonEncode({
-      'error': 'memory_index_invalid',
-      'message': result.message,
-      'allMemories': result.allMemories
-          .asMap()
-          .entries
-          .map((e) => '[${e.key + 1}] ${e.value}')
-          .toList(),
     });
   }
 }

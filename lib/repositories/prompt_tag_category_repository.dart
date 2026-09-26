@@ -25,67 +25,64 @@ class PromptTagCategoryRepository extends BaseRepository
   Future<int> save(PromptTagCategory category) async {
     final db = await database;
     final now = DateTime.now().millisecondsSinceEpoch;
-    try {
-      if (category.id == null) {
-        final newId = await db.insert(_table, {
-          'name': category.name,
-          'sort_order': category.sortOrder,
-          'created_at': now,
-          'updated_at': now,
-        });
-        LoggerService.instance.i(
-          'save: 新增标签分类 (ID: $newId, name: ${category.name})',
-          category: LogCategory.database,
-          tags: ['prompt-tag-category', 'insert'],
+    return guard(
+      'prompt_tag_category.save',
+      () async {
+        if (category.id == null) {
+          final newId = await db.insert(_table, {
+            'name': category.name,
+            'sort_order': category.sortOrder,
+            'created_at': now,
+            'updated_at': now,
+          });
+          LoggerService.instance.i(
+            'save: 新增标签分类 (ID: $newId, name: ${category.name})',
+            category: LogCategory.database,
+            tags: ['prompt-tag-category', 'insert'],
+          );
+          return newId;
+        }
+        await db.update(
+          _table,
+          {
+            'name': category.name,
+            'sort_order': category.sortOrder,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [category.id],
         );
-        return newId;
-      }
-      await db.update(
-        _table,
-        {
-          'name': category.name,
-          'sort_order': category.sortOrder,
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [category.id],
-      );
-      LoggerService.instance.i(
-        'save: 更新标签分类 (ID: ${category.id}, name: ${category.name})',
-        category: LogCategory.database,
-        tags: ['prompt-tag-category', 'update'],
-      );
-      return category.id!;
-    } catch (e, stack) {
-      LoggerService.instance.e(
-        'save: 保存标签分类失败 (ID: ${category.id}, name: ${category.name}): $e',
-        stackTrace: stack.toString(),
-        category: LogCategory.database,
-        tags: ['prompt-tag-category', 'save', 'error'],
-      );
-      rethrow;
-    }
+        LoggerService.instance.i(
+          'save: 更新标签分类 (ID: ${category.id}, name: ${category.name})',
+          category: LogCategory.database,
+          tags: ['prompt-tag-category', 'update'],
+        );
+        return category.id!;
+      },
+      message: (e) =>
+          'save: 保存标签分类失败 (ID: ${category.id}, name: ${category.name}): $e',
+      category: LogCategory.database,
+      tags: ['prompt-tag-category', 'save', 'error'],
+    );
   }
 
   @override
   Future<void> delete(int id) async {
     final db = await database;
-    try {
-      await db.delete(_table, where: 'id = ?', whereArgs: [id]);
-      LoggerService.instance.i(
-        'delete: 删除标签分类 (ID: $id)',
-        category: LogCategory.database,
-        tags: ['prompt-tag-category', 'delete'],
-      );
-    } catch (e, stack) {
-      LoggerService.instance.e(
-        'delete: 删除标签分类失败 (ID: $id): $e',
-        stackTrace: stack.toString(),
-        category: LogCategory.database,
-        tags: ['prompt-tag-category', 'delete', 'error'],
-      );
-      rethrow;
-    }
+    return guard(
+      'prompt_tag_category.delete',
+      () async {
+        await db.delete(_table, where: 'id = ?', whereArgs: [id]);
+        LoggerService.instance.i(
+          'delete: 删除标签分类 (ID: $id)',
+          category: LogCategory.database,
+          tags: ['prompt-tag-category', 'delete'],
+        );
+      },
+      message: (e) => 'delete: 删除标签分类失败 (ID: $id): $e',
+      category: LogCategory.database,
+      tags: ['prompt-tag-category', 'delete', 'error'],
+    );
   }
 
   @override

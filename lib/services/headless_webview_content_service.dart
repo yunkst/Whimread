@@ -28,58 +28,49 @@
 ///
 /// ## 资源管理
 ///
-/// - HeadlessInAppWebView 是单例，懒初始化
-/// - 超时：页面加载 30s，脚本执行 60s（3 秒粒度检查抢占信号）
-/// - 连续失败 3 次自动标记脚本 `verified = 0`
+/// - WebView 单例 / 初始化 / 页面加载 / 脚本执行超时（120s）/ 脚本健康度
+///   由共享运行时 [HeadlessWebViewRuntime] 承担（组合持有，本服务独占一个实例）
+/// - 本服务仅保留互斥与优先级抢占、内容校验与 OCR 还原编排
+/// - 连续失败 3 次自动标记脚本 `verified = 0`（运行时统一实现）
 library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/chapter_content_result.dart';
 import '../repositories/site_script_repository.dart';
-import '../services/crawler/browser_mode.dart';
 import '../services/crawler/crawl_request.dart';
 import '../services/crawler/crawl_request_resolver.dart';
 import '../services/logger_service.dart';
-import '../services/novel_agent/scenarios/webview_js_executor.dart';
-import 'browser_settings_service.dart';
 import 'headless_webview_errors.dart';
-import 'ocr_pua_renderer.dart';
+import 'headless_webview_runtime.dart';
 import 'ocr_restore_service.dart';
-import 'webview_page_loader.dart';
 
 class HeadlessWebViewContentService {
-  final SiteScriptRepository _scriptRepo;
   final CrawlRequestResolver _resolver;
   final Ref? _ref; // 产品路径非 null（读 ocrPredictorProvider），测试可不传
+
+  /// 共享 WebView 运行时（初始化/加载/脚本执行/健康度），本服务独占一个实例
+  final HeadlessWebViewRuntime _runtime;
 
   HeadlessWebViewContentService({
     required SiteScriptRepository scriptRepo,
     required CrawlRequestResolver resolver,
     Ref? ref,
-  })  : _scriptRepo = scriptRepo,
-        _resolver = resolver,
-        _ref = ref;
+  })  : _resolver = resolver,
+        _ref = ref,
+        _runtime = HeadlessWebViewRuntime(
+          scriptRepo: scriptRepo,
+          logPrefix: 'HeadlessWebView',
+          logTags: const ['headless-webview'],
+          // 历史日志 tag：脚本执行超时沿用两段式
+          scriptTimeoutTags: const ['execute_script', 'timeout'],
+        );
 
-  // ===== Headless WebView 单例 =====
-
-  HeadlessInAppWebView? _headlessWebView;
-  InAppWebViewController? _controller;
-  bool _isInitializing = false;
   bool _isFetching = false;
-
-  /// 创建当前 WebView 实例时的桌面模式快照；与最新设置不一致时销毁重建，
-  /// 使 UA/尺寸跟随用户内置浏览器的展示模式（见 BrowserSettingsService）。
-  bool _desktopModeAtCreation = BrowserSettingsService.desktopModeSync;
-
-  /// 共用页面加载工具（onLoadStop 事件驱动）
-  final WebViewPageLoader _pageLoader = WebViewPageLoader();
 
   // ===== 优先级抢占 =====
 
@@ -95,14 +86,6 @@ class HeadlessWebViewContentService {
   /// 让出信号：低优先级请求创建并 complete，
   /// 高优先级请求通过 [Completer.future] 等待低优先级让出（替代 500ms 轮询）。
   Completer<void>? _yieldedSignal;
-
-  // ===== 脚本健康度追踪 =====
-
-  /// 脚本连续失败次数（内存，不持久化）
-  final Map<String, int> _scriptFailureCount = {};
-
-  /// 连续失败多少次后自动标记 unverified
-  static const int _maxConsecutiveFailures = 3;
 
   // ===== 公开 API =====
 
@@ -196,7 +179,7 @@ class HeadlessWebViewContentService {
       final hostRewrite = request.hostRewriteLog;
 
       // 2. 确保 WebView 就绪（模式已由 resolver 对齐）
-      await _ensureWebView(mode: request.mode);
+      await _runtime.ensureWebView(mode: request.mode);
 
       LoggerService.instance.i(
         'HeadlessWebView: 开始获取 domain=${script.domain} scriptId=$scriptId '
@@ -208,7 +191,7 @@ class HeadlessWebViewContentService {
       );
 
       // 3. 加载对齐后的 URL
-      await _loadPage(canonicalUrl.toString());
+      await _runtime.loadPage(canonicalUrl.toString());
 
       // 抢占检查点：页面加载后
       if (_shouldYield) {
@@ -238,7 +221,7 @@ class HeadlessWebViewContentService {
 
       // 5. 校验内容
       if (result == null || result.content.trim().isEmpty) {
-        _recordFailure(script.id);
+        _runtime.recordFailure(script.id);
         LoggerService.instance.w(
           'HeadlessWebView: 脚本返回空内容 domain=$logDomain',
           category: LogCategory.crawler,
@@ -248,7 +231,7 @@ class HeadlessWebViewContentService {
       }
 
       if (result.content.trim().length < 50) {
-        _recordFailure(script.id);
+        _runtime.recordFailure(script.id);
         LoggerService.instance.w(
           'HeadlessWebView: 内容过短(${result.content.length}字符) domain=$logDomain',
           category: LogCategory.crawler,
@@ -258,7 +241,7 @@ class HeadlessWebViewContentService {
       }
 
       // 6. 成功 → 清除失败计数，标记已使用
-      _recordSuccess(script.id);
+      _runtime.recordSuccess(script.id);
 
       LoggerService.instance.i(
         'HeadlessWebView: 获取成功 domain=$logDomain scriptId=$scriptId '
@@ -289,7 +272,7 @@ class HeadlessWebViewContentService {
       );
     } on PageLoadFailedException {
       // 页面加载失败（onLoadStop 超时/错误）→ 区分于"真无脚本"，返回 loadFailed
-      if (scriptId != null) _recordFailure(scriptId);
+      if (scriptId != null) _runtime.recordFailure(scriptId);
       LoggerService.instance.w(
         'HeadlessWebView: 页面加载失败，返回 loadFailed domain=$logDomain url=$chapterUrl',
         category: LogCategory.crawler,
@@ -297,7 +280,7 @@ class HeadlessWebViewContentService {
       );
       return FetchContentResult.loadFailed();
     } catch (e, stackTrace) {
-      if (scriptId != null) _recordFailure(scriptId);
+      if (scriptId != null) _runtime.recordFailure(scriptId);
       // 区分 JSON 解析错误（脚本本身有缺陷）与其他失败
       if (e is FormatException) {
         LoggerService.instance.e(
@@ -332,11 +315,7 @@ class HeadlessWebViewContentService {
 
   /// 释放 WebView 资源
   void dispose() {
-    _headlessWebView?.dispose();
-    _headlessWebView = null;
-    _controller = null;
-    _pageLoader.reset();
-    _scriptFailureCount.clear();
+    _runtime.dispose();
   }
 
   // ===== OCR 还原编排 =====
@@ -344,7 +323,7 @@ class HeadlessWebViewContentService {
   /// OCR 还原编排：[needsOcr] 时调 [restoreService] 还原 PUA，失败降级返回原文。
   ///
   /// 抽成 static `@visibleForTesting` 便于在纯 Dart 环境单测编排逻辑，
-  /// 绕开 WebView 平台实现限制（fetchContent 走到 _ensureWebView 会抛异常）。
+  /// 绕开 WebView 平台实现限制（fetchContent 走到 WebView 初始化会抛异常）。
   /// 产品路径由 [fetchContent] 在 `script.needsOcr` 时调用。
   @visibleForTesting
   static Future<String> restoreContentIfNeeded({
@@ -415,228 +394,52 @@ class HeadlessWebViewContentService {
 
   /// 已对齐的爬取请求由 Resolver 完成；本服务不再做 host 提取或模式推断。
 
-  static String _modeLabelBool(bool desktop) => desktop ? 'desktop' : 'mobile';
-
-  /// 确保 HeadlessInAppWebView 已初始化
-  ///
-  /// [mode] 是 Resolver 对齐后的目标模式（已是「脚本模式优先 / 全局兜底」结果）。
-  /// 实例模式与目标不一致则销毁重建（一次 fetch 内部应自洽，不中途切 UA）。
-  Future<void> _ensureWebView({required BrowserMode mode}) async {
-    final targetDesktop = mode == BrowserMode.desktop;
-    if (_controller != null) {
-      if (_desktopModeAtCreation == targetDesktop) return;
-      LoggerService.instance.i(
-        'HeadlessWebView: 模式切换 (${_modeLabelBool(_desktopModeAtCreation)} → '
-        '${_modeLabelBool(targetDesktop)})，重建 WebView',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'recreate', 'mode-change'],
-      );
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      _controller = null;
-    }
-    _desktopModeAtCreation = targetDesktop;
-    if (_isInitializing) {
-      // 等待初始化完成（简单轮询）
-      for (var i = 0; i < 60; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (_controller != null) return;
-      }
-      LoggerService.instance.w(
-        'HeadlessWebView: 初始化超时（30s 轮询）',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'init', 'timeout'],
-      );
-      throw Exception('HeadlessWebView 初始化超时');
-    }
-
-    _isInitializing = true;
-    try {
-      final completer = Completer<InAppWebViewController>();
-
-      _headlessWebView = HeadlessInAppWebView(
-        initialSize: targetDesktop
-            ? BrowserSettingsService.headlessDesktopSize
-            : const Size(-1, -1),
-        onWebViewCreated: (controller) {
-          if (!completer.isCompleted) {
-            completer.complete(controller);
-          }
-        },
-        // 关键：创建时注册常驻 onLoadStop 回调，供 WebViewPageLoader 协调
-        onLoadStop: _pageLoader.onLoadStopCallback,
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true,
-          // UA 与已对齐的 target 模式一致（不再读全局，保证「创建即目标模式」）
-          userAgent: targetDesktop
-              ? BrowserSettingsService.headlessUserAgent
-              : '',
-          // 不加载图片，节省流量和时间
-          loadsImagesAutomatically: false,
-          // 禁用不需要的功能
-          mediaPlaybackRequiresUserGesture: true,
-          // 超时由 callAsyncJavaScript 的 timeout 控制
-        ),
-      );
-
-      await _headlessWebView!.run();
-      _controller = await completer.future.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw Exception('WebView 创建超时'),
-      );
-
-      LoggerService.instance.i(
-        'HeadlessWebView: 初始化完成',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'init'],
-      );
-    } catch (e, stackTrace) {
-      _isInitializing = false;
-      // 初始化失败时清理
-      _headlessWebView?.dispose();
-      _headlessWebView = null;
-      LoggerService.instance.e(
-        'HeadlessWebView: 初始化失败 $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'init', 'failed'],
-      );
-      rethrow;
-    }
-    _isInitializing = false;
-  }
-
-  /// 加载页面并等待 onLoadStop。
-  ///
-  /// 使用 [WebViewPageLoader]（onLoadStop 事件驱动）替代原 URL 轮询。
-  /// 超时（onLoadStop 未在 30s 内触发）时抛 [PageLoadFailedException]，
-  /// 由 [fetchContent] 的 catch 块映射为 `FetchContentResult.loadFailed()`。
-  Future<void> _loadPage(String url) async {
-    await _pageLoader.loadPage(
-      controller: _controller!,
-      url: url,
-      throwOnTimeout: true,
-    );
-  }
-
   /// 执行 chapter_content_js 提取脚本
   ///
-  /// 使用 3 秒粒度循环检查抢占信号 [_shouldYield]，
-  /// 使低优先级请求最多 3 秒就能响应抢占。
+  /// 脚本校验/执行/超时统一由 [_runtime.executeScript] 承担；
+  /// 本方法通过 `shouldAbort` 注入抢占信号（3 秒粒度检查 [_shouldYield]，
+  /// 使低优先级请求最多 3 秒就能响应抢占）并负责内容结果解析。
   ///
   /// 返回 record `(content, fontFamily)`：fontFamily 可空（脚本未声明时为 null）。
   Future<({String content, String? fontFamily})?> _executeContentScript(
     String scriptTemplate,
     String pageUrl,
   ) async {
-    // 校验脚本
-    final validationError = WebViewJsExecutor.validateScript(scriptTemplate);
-    if (validationError != null) {
-      LoggerService.instance.w(
-        'HeadlessWebView: 脚本校验失败 $validationError',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'validation'],
-      );
-      return null;
-    }
-
-    // 替换 {{URL}} → 实际 URL
-    final resolvedScript = WebViewJsExecutor.replaceUrlPlaceholder(scriptTemplate, pageUrl);
-
-    // 提取 IIFE 函数体
-    final functionBody =
-        WebViewJsExecutor.extractAsyncFunctionBody(resolvedScript);
-
-    // 执行 — 3 秒粒度检查抢占信号，总超时 120 秒（与 agent execute_js/save_script 对齐）
-    final resultFuture = _controller!
-        .callAsyncJavaScript(functionBody: functionBody);
-
-    final deadline = DateTime.now().add(const Duration(seconds: 120));
-    while (DateTime.now().isBefore(deadline)) {
-      try {
-        final result = await resultFuture.timeout(const Duration(seconds: 3));
-
-        // 脚本执行完成，处理结果
-        if (result == null) return null;
-
-        if (result.error != null) {
-          LoggerService.instance.w(
-            'HeadlessWebView: JS执行错误 ${result.error}',
-            category: LogCategory.crawler,
-            tags: ['headless-webview', 'js-error'],
-          );
-          return null;
-        }
-
-        // 解析返回值
-        final jsonStr = WebViewJsExecutor.stringifyJsResult(result.value);
-        final data = jsonDecode(jsonStr);
-
-        // 兼容两种返回格式：
-        // 1. { "title": "...", "content": "...", "font_family": "..." }
-        //    （agent 也可能写 camelCase fontFamily，两个都兜底取）
-        // 2. 直接字符串内容
-        if (data is Map<String, dynamic>) {
-          final c = (data['content'] as String?)?.trim();
-          final ff = (data['font_family'] as String? ??
-                  data['fontFamily'] as String?)
-              ?.trim();
-          if (c == null) return null;
-          return (
-            content: c,
-            fontFamily: (ff == null || ff.isEmpty) ? null : ff,
-          );
-        }
-        if (data is String) {
-          return (content: data.trim(), fontFamily: null);
-        }
-
-        return null;
-      } on TimeoutException {
-        // 3 秒超时，检查抢占信号
-        if (_shouldYield) return null;
-        continue;
-      }
-    }
-
-    // 整体 120 秒超时
-    LoggerService.instance.w(
-      'HeadlessWebView: 脚本执行整体超时（120s） pageUrl=$pageUrl',
-      category: LogCategory.crawler,
-      tags: ['headless-webview', 'execute_script', 'timeout'],
+    final jsonStr = await _runtime.executeScript(
+      scriptTemplate,
+      pageUrl,
+      // 抢占信号：脚本执行中以 3 秒粒度检查，被抢占立即退出
+      shouldAbort: () => _shouldYield,
     );
+    if (jsonStr == null) return null;
+
+    // 解析返回值
+    final data = jsonDecode(jsonStr);
+
+    // 兼容两种返回格式：
+    // 1. { "title": "...", "content": "...", "font_family": "..." }
+    //    （agent 也可能写 camelCase fontFamily，两个都兜底取）
+    // 2. 直接字符串内容
+    if (data is Map<String, dynamic>) {
+      final c = (data['content'] as String?)?.trim();
+      final ff = (data['font_family'] as String? ?? data['fontFamily'] as String?)
+          ?.trim();
+      if (c == null) return null;
+      return (
+        content: c,
+        fontFamily: (ff == null || ff.isEmpty) ? null : ff,
+      );
+    }
+    if (data is String) {
+      return (content: data.trim(), fontFamily: null);
+    }
+
     return null;
   }
 
   /// 渲染单个 PUA 码点为 base64 PNG（供 [OcrRestoreService] 用）。
   ///
-  /// 委托给共享实现 [renderPuaViaController]，消除跨服务重复。
-  /// 返回值是 base64 字符串（非 JSON），故不走 stringifyJsResult + jsonDecode。
-  Future<String> _renderPua(int codepoint, String fontFamily) async {
-    if (_controller == null) {
-      throw StateError('WebView 未就绪，无法渲染 PUA');
-    }
-    return renderPuaViaController(_controller!, codepoint, fontFamily);
-  }
-
-  // ===== 脚本健康度 =====
-
-  void _recordFailure(String scriptId) {
-    final count = (_scriptFailureCount[scriptId] ?? 0) + 1;
-    _scriptFailureCount[scriptId] = count;
-
-    if (count >= _maxConsecutiveFailures) {
-      LoggerService.instance.w(
-        'HeadlessWebView: 脚本连续失败$count次，自动标记 unverified id=$scriptId',
-        category: LogCategory.crawler,
-        tags: ['headless-webview', 'auto-disable'],
-      );
-      _scriptRepo.setVerified(scriptId, false);
-    }
-  }
-
-  void _recordSuccess(String scriptId) {
-    _scriptFailureCount.remove(scriptId);
-    _scriptRepo.markUsed(scriptId);
-  }
+  /// 委托给共享运行时 [_runtime.renderPua]。
+  Future<String> _renderPua(int codepoint, String fontFamily) =>
+      _runtime.renderPua(codepoint, fontFamily);
 }

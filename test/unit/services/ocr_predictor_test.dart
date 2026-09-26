@@ -13,7 +13,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_app/poc/ocr_predictor.dart';
+import 'package:novel_app/services/ocr/ocr_predictor.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -31,18 +31,18 @@ void main() {
     });
 
     test('recognizeGlyph 已从源文件移除（P2 清理生效）', () async {
-      final src = await File('lib/poc/ocr_predictor.dart').readAsString();
+      final src = await File('lib/services/ocr/ocr_predictor.dart').readAsString();
       expect(src, isNot(contains('recognizeGlyph')),
           reason: 'PoC 入口已被产品 recognizeImage 取代，应已删除');
     });
 
     test('源文件 import 了 dart:convert', () async {
-      final src = await File('lib/poc/ocr_predictor.dart').readAsString();
+      final src = await File('lib/services/ocr/ocr_predictor.dart').readAsString();
       expect(src, contains("import 'dart:convert'"));
     });
 
     test('源文件已无 @Deprecated 注解（P2 清理生效）', () async {
-      final src = await File('lib/poc/ocr_predictor.dart').readAsString();
+      final src = await File('lib/services/ocr/ocr_predictor.dart').readAsString();
       expect(src, isNot(contains('@Deprecated')),
           reason: 'deprecated PoC 路径已删除，源文件不应再含 @Deprecated');
     });

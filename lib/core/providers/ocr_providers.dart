@@ -10,7 +10,7 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../poc/ocr_predictor.dart';
+import '../../services/ocr/ocr_predictor.dart';
 import '../../services/ocr_model_downloader.dart';
 import '../../utils/device_arch.dart';
 

@@ -28,151 +28,139 @@ class ChatSessionRepository extends BaseRepository
   // ===== 会话 =====
 
   @override
-  Future<int> createSession(ChatSession session) async {
-    try {
-      final db = await database;
-      final id = await db.insert(_tableSessions, session.toMap());
-      LoggerService.instance.i(
-        '创建会话: id=$id scenarioId=${session.scenarioId} title=${session.title}',
-        category: LogCategory.database,
-        tags: ['chat_session', 'create', 'success'],
-      );
-      return id;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '创建会话失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'create', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> createSession(ChatSession session) {
+    return guard(
+      'chat_session.createSession',
+      () async {
+        final db = await database;
+        final id = await db.insert(_tableSessions, session.toMap());
+        LoggerService.instance.i(
+          '创建会话: id=$id scenarioId=${session.scenarioId} title=${session.title}',
+          category: LogCategory.database,
+          tags: ['chat_session', 'create', 'success'],
+        );
+        return id;
+      },
+      message: (e) => '创建会话失败: $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'create', 'failed'],
+    );
   }
 
   @override
   Future<List<ChatSession>> listSessionsByScenario(
     String scenarioId, {
     int limit = 200,
-  }) async {
-    try {
-      final db = await database;
-      final maps = await db.query(
-        _tableSessions,
-        where: 'scenarioId = ?',
-        whereArgs: [scenarioId],
-        orderBy: 'updatedAt DESC',
-        limit: limit,
-      );
-      return maps.map((m) => ChatSession.fromMap(m)).toList();
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '列出会话失败: scenarioId=$scenarioId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'list', 'failed'],
-      );
-      rethrow;
-    }
+  }) {
+    return guard(
+      'chat_session.listSessionsByScenario',
+      () async {
+        final db = await database;
+        final maps = await db.query(
+          _tableSessions,
+          where: 'scenarioId = ?',
+          whereArgs: [scenarioId],
+          orderBy: 'updatedAt DESC',
+          limit: limit,
+        );
+        return maps.map((m) => ChatSession.fromMap(m)).toList();
+      },
+      message: (e) => '列出会话失败: scenarioId=$scenarioId - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'list', 'failed'],
+    );
   }
 
   @override
-  Future<ChatSession?> getSession(int id) async {
-    try {
-      final db = await database;
-      final maps = await db.query(
-        _tableSessions,
-        where: 'id = ?',
-        whereArgs: [id],
-        limit: 1,
-      );
-      if (maps.isEmpty) return null;
-      return ChatSession.fromMap(maps.first);
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '查询会话失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'get', 'failed'],
-      );
-      rethrow;
-    }
+  Future<ChatSession?> getSession(int id) {
+    return guard(
+      'chat_session.getSession',
+      () async {
+        final db = await database;
+        final maps = await db.query(
+          _tableSessions,
+          where: 'id = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (maps.isEmpty) return null;
+        return ChatSession.fromMap(maps.first);
+      },
+      message: (e) => '查询会话失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'get', 'failed'],
+    );
   }
 
   @override
-  Future<int> renameSession(int id, String title) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final affected = await db.update(
-        _tableSessions,
-        {'title': title, 'updatedAt': now},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        '重命名会话: id=$id affected=$affected',
-        category: LogCategory.database,
-        tags: ['chat_session', 'rename', 'success'],
-      );
-      return affected;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '重命名会话失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'rename', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> renameSession(int id, String title) {
+    return guard(
+      'chat_session.renameSession',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final affected = await db.update(
+          _tableSessions,
+          {'title': title, 'updatedAt': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          '重命名会话: id=$id affected=$affected',
+          category: LogCategory.database,
+          tags: ['chat_session', 'rename', 'success'],
+        );
+        return affected;
+      },
+      message: (e) => '重命名会话失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'rename', 'failed'],
+    );
   }
 
   @override
-  Future<int> deleteSession(int id) async {
-    try {
-      final db = await database;
-      final affected = await db.delete(
-        _tableSessions,
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-      LoggerService.instance.i(
-        '删除会话: id=$id affected=$affected（messages 经 FK CASCADE 自动删除）',
-        category: LogCategory.database,
-        tags: ['chat_session', 'delete', 'success'],
-      );
-      return affected;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除会话失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'delete', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> deleteSession(int id) {
+    return guard(
+      'chat_session.deleteSession',
+      () async {
+        final db = await database;
+        final affected = await db.delete(
+          _tableSessions,
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        LoggerService.instance.i(
+          '删除会话: id=$id affected=$affected（messages 经 FK CASCADE 自动删除）',
+          category: LogCategory.database,
+          tags: ['chat_session', 'delete', 'success'],
+        );
+        return affected;
+      },
+      message: (e) => '删除会话失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'delete', 'failed'],
+    );
   }
 
   @override
-  Future<int> touchSession(int id) async {
-    try {
-      final db = await database;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      // 必须 await：让 update 的异步异常进入下方 catch（否则既不记日志也不 rethrow）
-      return await db.update(
-        _tableSessions,
-        {'updatedAt': now},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '刷新会话时间失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'touch', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> touchSession(int id) {
+    return guard(
+      'chat_session.touchSession',
+      () async {
+        final db = await database;
+        final now = DateTime.now().millisecondsSinceEpoch;
+        // await 明确等待 update 完成，异步异常由 guard 记日志后统一上抛
+        return await db.update(
+          _tableSessions,
+          {'updatedAt': now},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      message: (e) => '刷新会话时间失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'touch', 'failed'],
+    );
   }
 
   @override
@@ -180,96 +168,91 @@ class ChatSessionRepository extends BaseRepository
     int id, {
     int? novelId,
     String? novelTitle,
-  }) async {
-    try {
-      final db = await database;
-      await db.update(
-        _tableSessions,
-        {
-          'currentNovelId': novelId,
-          'currentNovelTitle': novelTitle,
-          'updatedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '更新 currentNovel 失败: id=$id - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_session', 'update_novel', 'failed'],
-      );
-      rethrow;
-    }
+  }) {
+    return guard(
+      'chat_session.updateCurrentNovel',
+      () async {
+        final db = await database;
+        await db.update(
+          _tableSessions,
+          {
+            'currentNovelId': novelId,
+            'currentNovelTitle': novelTitle,
+            'updatedAt': DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      },
+      message: (e) => '更新 currentNovel 失败: id=$id - $e',
+      category: LogCategory.database,
+      tags: ['chat_session', 'update_novel', 'failed'],
+    );
   }
 
   // ===== 消息 =====
 
   @override
-  Future<int> appendMessage(ChatMessageRecord record) async {
-    try {
-      final db = await database;
-      // 用 transaction 把 插入消息 + 更新 session 时间戳合并
-      return await db.transaction((txn) async {
-        final insertable = record.toMap();
-        final messageId = await txn.insert(_tableMessages, insertable);
+  Future<int> appendMessage(ChatMessageRecord record) {
+    return guard(
+      'chat_session.appendMessage',
+      () async {
+        final db = await database;
+        // 用 transaction 把 插入消息 + 更新 session 时间戳合并
+        return await db.transaction((txn) async {
+          final insertable = record.toMap();
+          final messageId = await txn.insert(_tableMessages, insertable);
 
-        // 刷新 session.updatedAt，让列表排序稳定
-        final now = DateTime.now().millisecondsSinceEpoch;
-        await txn.update(
-          _tableSessions,
-          {'updatedAt': now},
-          where: 'id = ?',
-          whereArgs: [record.sessionId],
-        );
+          // 刷新 session.updatedAt，让列表排序稳定
+          final now = DateTime.now().millisecondsSinceEpoch;
+          await txn.update(
+            _tableSessions,
+            {'updatedAt': now},
+            where: 'id = ?',
+            whereArgs: [record.sessionId],
+          );
 
-        LoggerService.instance.d(
-          '追加消息: sessionId=${record.sessionId} role=${record.role} agentIdx=${record.agentMsgIndex} messageId=$messageId',
-          category: LogCategory.database,
-          tags: ['chat_message', 'append', 'success'],
-        );
-        return messageId;
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '追加消息失败: sessionId=${record.sessionId} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'append', 'failed'],
-      );
-      rethrow;
-    }
+          LoggerService.instance.d(
+            '追加消息: sessionId=${record.sessionId} role=${record.role} agentIdx=${record.agentMsgIndex} messageId=$messageId',
+            category: LogCategory.database,
+            tags: ['chat_message', 'append', 'success'],
+          );
+          return messageId;
+        });
+      },
+      message: (e) => '追加消息失败: sessionId=${record.sessionId} - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'append', 'failed'],
+    );
   }
 
   @override
   Future<int> appendMessages(List<ChatMessageRecord> records) async {
     if (records.isEmpty) return 0;
     final sessionId = records.first.sessionId;
-    try {
-      final db = await database;
-      return await db.transaction((txn) async {
-        var lastId = 0;
-        for (final record in records) {
-          lastId = await txn.insert(_tableMessages, record.toMap());
-        }
-        await txn.update(
-          _tableSessions,
-          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
-        return lastId;
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '批量追加消息失败: sessionId=$sessionId count=${records.length} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'append_batch', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'chat_session.appendMessages',
+      () async {
+        final db = await database;
+        return await db.transaction((txn) async {
+          var lastId = 0;
+          for (final record in records) {
+            lastId = await txn.insert(_tableMessages, record.toMap());
+          }
+          await txn.update(
+            _tableSessions,
+            {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          return lastId;
+        });
+      },
+      message: (e) =>
+          '批量追加消息失败: sessionId=$sessionId count=${records.length} - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'append_batch', 'failed'],
+    );
   }
 
   @override
@@ -282,34 +265,33 @@ class ChatSessionRepository extends BaseRepository
       throw ArgumentError.value(
           foreign.toSet().toList(), 'records', 'records 含非 session $sessionId 的消息');
     }
-    try {
-      final db = await database;
-      return await db.transaction((txn) async {
-        await txn.delete(
-          _tableMessages,
-          where: 'sessionId = ?',
-          whereArgs: [sessionId],
-        );
-        for (final record in records) {
-          await txn.insert(_tableMessages, record.toMap());
-        }
-        await txn.update(
-          _tableSessions,
-          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
-        return records.length;
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '原子重写消息失败: sessionId=$sessionId count=${records.length} - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'replace', 'failed'],
-      );
-      rethrow;
-    }
+    return guard(
+      'chat_session.replaceMessages',
+      () async {
+        final db = await database;
+        return await db.transaction((txn) async {
+          await txn.delete(
+            _tableMessages,
+            where: 'sessionId = ?',
+            whereArgs: [sessionId],
+          );
+          for (final record in records) {
+            await txn.insert(_tableMessages, record.toMap());
+          }
+          await txn.update(
+            _tableSessions,
+            {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          return records.length;
+        });
+      },
+      message: (e) =>
+          '原子重写消息失败: sessionId=$sessionId count=${records.length} - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'replace', 'failed'],
+    );
   }
 
   @override
@@ -339,110 +321,103 @@ class ChatSessionRepository extends BaseRepository
     int sessionId, {
     int? limit,
     int offset = 0,
-  }) async {
-    try {
-      final db = await database;
-      final maps = await db.query(
-        _tableMessages,
-        where: 'sessionId = ?',
-        whereArgs: [sessionId],
-        orderBy: 'agentMsgIndex ASC',
-        limit: limit,
-        offset: offset,
-      );
-      return maps.map((m) => ChatMessageRecord.fromMap(m)).toList();
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '列举消息失败: sessionId=$sessionId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'list', 'failed'],
-      );
-      rethrow;
-    }
-  }
-
-  @override
-  Future<int> getMessageCount(int sessionId) async {
-    try {
-      final db = await database;
-      final result = await db.rawQuery(
-        'SELECT COUNT(*) AS cnt FROM $_tableMessages WHERE sessionId = ?',
-        [sessionId],
-      );
-      return (result.first['cnt'] as int?) ?? 0;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '统计消息数失败: sessionId=$sessionId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'count', 'failed'],
-      );
-      rethrow;
-    }
-  }
-
-  @override
-  Future<int> deleteMessagesBefore(int sessionId, int beforeIndex) async {
-    try {
-      final db = await database;
-      return await db.transaction((txn) async {
-        final deleted = await txn.delete(
-          _tableMessages,
-          where: 'sessionId = ? AND agentMsgIndex < ?',
-          whereArgs: [sessionId, beforeIndex],
-        );
-        await txn.update(
-          _tableSessions,
-          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
-        LoggerService.instance.d(
-          '删除消息: sessionId=$sessionId beforeIdx=$beforeIndex 删除 $deleted 行',
-          category: LogCategory.database,
-          tags: ['chat_message', 'delete_before', 'success'],
-        );
-        return deleted;
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除消息失败: sessionId=$sessionId beforeIndex=$beforeIndex - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'delete_before', 'failed'],
-      );
-      rethrow;
-    }
-  }
-
-  @override
-  Future<int> clearMessages(int sessionId) async {
-    try {
-      final db = await database;
-      // 必须 await：让 transaction 的异步异常进入下方 catch（否则既不记日志也不 rethrow）
-      return await db.transaction((txn) async {
-        final deleted = await txn.delete(
+  }) {
+    return guard(
+      'chat_session.listMessages',
+      () async {
+        final db = await database;
+        final maps = await db.query(
           _tableMessages,
           where: 'sessionId = ?',
           whereArgs: [sessionId],
+          orderBy: 'agentMsgIndex ASC',
+          limit: limit,
+          offset: offset,
         );
-        await txn.update(
-          _tableSessions,
-          {'updatedAt': DateTime.now().millisecondsSinceEpoch},
-          where: 'id = ?',
-          whereArgs: [sessionId],
+        return maps.map((m) => ChatMessageRecord.fromMap(m)).toList();
+      },
+      message: (e) => '列举消息失败: sessionId=$sessionId - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'list', 'failed'],
+    );
+  }
+
+  @override
+  Future<int> getMessageCount(int sessionId) {
+    return guard(
+      'chat_session.getMessageCount',
+      () async {
+        final db = await database;
+        final result = await db.rawQuery(
+          'SELECT COUNT(*) AS cnt FROM $_tableMessages WHERE sessionId = ?',
+          [sessionId],
         );
-        return deleted;
-      });
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '清空会话消息失败: sessionId=$sessionId - $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['chat_message', 'clear', 'failed'],
-      );
-      rethrow;
-    }
+        return (result.first['cnt'] as int?) ?? 0;
+      },
+      message: (e) => '统计消息数失败: sessionId=$sessionId - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'count', 'failed'],
+    );
+  }
+
+  @override
+  Future<int> deleteMessagesBefore(int sessionId, int beforeIndex) {
+    return guard(
+      'chat_session.deleteMessagesBefore',
+      () async {
+        final db = await database;
+        return await db.transaction((txn) async {
+          final deleted = await txn.delete(
+            _tableMessages,
+            where: 'sessionId = ? AND agentMsgIndex < ?',
+            whereArgs: [sessionId, beforeIndex],
+          );
+          await txn.update(
+            _tableSessions,
+            {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          LoggerService.instance.d(
+            '删除消息: sessionId=$sessionId beforeIdx=$beforeIndex 删除 $deleted 行',
+            category: LogCategory.database,
+            tags: ['chat_message', 'delete_before', 'success'],
+          );
+          return deleted;
+        });
+      },
+      message: (e) =>
+          '删除消息失败: sessionId=$sessionId beforeIndex=$beforeIndex - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'delete_before', 'failed'],
+    );
+  }
+
+  @override
+  Future<int> clearMessages(int sessionId) {
+    return guard(
+      'chat_session.clearMessages',
+      () async {
+        final db = await database;
+        // await 明确等待 transaction 完成，异步异常由 guard 记日志后统一上抛
+        return await db.transaction((txn) async {
+          final deleted = await txn.delete(
+            _tableMessages,
+            where: 'sessionId = ?',
+            whereArgs: [sessionId],
+          );
+          await txn.update(
+            _tableSessions,
+            {'updatedAt': DateTime.now().millisecondsSinceEpoch},
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          return deleted;
+        });
+      },
+      message: (e) => '清空会话消息失败: sessionId=$sessionId - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'clear', 'failed'],
+    );
   }
 }

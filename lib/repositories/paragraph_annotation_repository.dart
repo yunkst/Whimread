@@ -45,30 +45,28 @@ class ParagraphAnnotationRepository extends BaseRepository
   }
 
   @override
-  Future<int> upsert(ParagraphAnnotation annotation) async {
-    try {
-      final db = await database;
-      final id = await db.insert(
-        _table,
-        annotation.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      LoggerService.instance.i(
-        '保存段落标注: chapterUrl=${annotation.chapterUrl} '
-        'index=${annotation.paragraphIndex} id=$id',
-        category: LogCategory.database,
-        tags: ['paragraph_annotation', 'upsert'],
-      );
-      return id;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '保存段落标注失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['paragraph_annotation', 'upsert', 'failed'],
-      );
-      rethrow;
-    }
+  Future<int> upsert(ParagraphAnnotation annotation) {
+    return guard(
+      'paragraph_annotation.upsert',
+      () async {
+        final db = await database;
+        final id = await db.insert(
+          _table,
+          annotation.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        LoggerService.instance.i(
+          '保存段落标注: chapterUrl=${annotation.chapterUrl} '
+          'index=${annotation.paragraphIndex} id=$id',
+          category: LogCategory.database,
+          tags: ['paragraph_annotation', 'upsert'],
+        );
+        return id;
+      },
+      message: (e) => '保存段落标注失败: $e',
+      category: LogCategory.database,
+      tags: ['paragraph_annotation', 'upsert', 'failed'],
+    );
   }
 
   @override
