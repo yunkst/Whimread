@@ -107,7 +107,16 @@ void main() {
     PathProviderPlatform.instance = originalPathProvider;
     await controlServer.close(force: true);
     await generationServer.close(force: true);
-    await tempDir.delete(recursive: true);
+    // Windows 下刚关闭的服务句柄释放有延迟，删除临时目录可能报 errno=32
+    // （另一个程序正在使用此文件）；重试几轮，清理失败不影响测试结论。
+    for (var i = 0; i < 3; i++) {
+      try {
+        await tempDir.delete(recursive: true);
+        return;
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   });
 
   LocalDreamBackend backend(DatabaseConnection dbConn) => LocalDreamBackend(

@@ -168,6 +168,8 @@ class _NovelCoverState extends State<NovelCover> {
     final width = widget.width;
     final height = width * 4 / 3;
 
+    // 缓存未命中走网络加载（成功后异步回写缓存）；无 coverUrl 由
+    // _networkImage 内部回退程序化封面
     final content = _cachedFile != null
         ? Image.file(
             _cachedFile!,
@@ -176,13 +178,7 @@ class _NovelCoverState extends State<NovelCover> {
             height: height,
             errorBuilder: (_, __, ___) => _networkImage(width, height),
           )
-        : CustomPaint(
-            size: Size(width, height),
-            painter: _ProgrammaticCoverPainter(
-              title: widget.novel.title,
-              palette: _CoverPalette.pick(widget.novel.title),
-            ),
-          );
+        : _networkImage(width, height);
 
     return SizedBox(
       width: width,
