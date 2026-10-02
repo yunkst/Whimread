@@ -386,7 +386,10 @@ class NovelRepository extends BaseRepository
     return null;
   }
 
-  /// 获取上次阅读的章节索引
+  /// 获取上次阅读的章节索引。
+  ///
+  /// 约定：无阅读记录（不在书架或该列为空）返回 -1，0 是合法的章节索引（第一章），
+  /// 调用方用 `< 0` 判定无记录，不要把 -1 当作章节索引直接使用。
   @override
   Future<int> getLastReadChapter(String novelUrl) async {
     final db = await database;
@@ -398,9 +401,9 @@ class NovelRepository extends BaseRepository
     );
 
     if (maps.isNotEmpty) {
-      return maps.first['lastReadChapter'] as int? ?? 0;
+      return maps.first['lastReadChapter'] as int? ?? -1;
     }
-    return 0;
+    return -1;
   }
 
   /// 根据 URL 查找小说（用于 Agent 重写结果跳转阅读器）

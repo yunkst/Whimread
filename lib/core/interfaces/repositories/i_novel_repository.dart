@@ -67,7 +67,8 @@ abstract class INovelRepository {
   /// 获取上次阅读的章节索引
   ///
   /// [novelUrl] 小说的URL
-  /// 返回章节索引，如果不存在则返回0
+  /// 返回章节索引（0-based，0 是合法的第一章）；无阅读记录返回 -1，
+  /// 调用方需用 `< 0` 判定无记录。
   Future<int> getLastReadChapter(String novelUrl);
 
   /// 根据 URL 查找小说
