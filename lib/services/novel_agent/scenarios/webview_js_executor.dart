@@ -257,18 +257,37 @@ class WebViewJsExecutor {
     final firstBrace = trimmed.indexOf('{', match.start);
     if (firstBrace == -1) return buildSandboxPreamble() + trimmed;
 
-    // 找到匹配的最后一个 }（去掉末尾的 )()
+    // 找到匹配的最后一个 }（去掉末尾的 )()）。括号计数必须跳过字符串
+    // 字面量与注释：字符串/注释里的 { } 不是语法括号，一并计数会把函数体
+    // 在字符串中途截断（如 '<div}end>'），拼上前导后必然 JS_SYNTAX_ERROR，
+    // agent 还会按诊断去"修"一个本来正确的脚本，陷入重试循环。
     var depth = 0;
     var lastBrace = -1;
-    for (var i = firstBrace; i < trimmed.length; i++) {
-      if (trimmed[i] == '{') {
+    var i = firstBrace;
+    while (i < trimmed.length) {
+      final ch = trimmed[i];
+      if (ch == '{') {
         depth++;
-      } else if (trimmed[i] == '}') {
+        i++;
+      } else if (ch == '}') {
         depth--;
         if (depth == 0) {
           lastBrace = i;
           break;
         }
+        i++;
+      } else if (ch == '\'' || ch == '"' || ch == '`') {
+        i = _skipJsStringLiteral(trimmed, i);
+      } else if (ch == '/' && i + 1 < trimmed.length && trimmed[i + 1] == '/') {
+        // 行注释：跳到行尾
+        final nl = trimmed.indexOf('\n', i);
+        i = nl == -1 ? trimmed.length : nl + 1;
+      } else if (ch == '/' && i + 1 < trimmed.length && trimmed[i + 1] == '*') {
+        // 块注释：跳到 */ 之后
+        final end = trimmed.indexOf('*/', i + 2);
+        i = end == -1 ? trimmed.length : end + 2;
+      } else {
+        i++;
       }
     }
 
@@ -277,6 +296,25 @@ class WebViewJsExecutor {
     // 提取 { } 之间的内容（去掉外层花括号），首部注入同源守卫前导
     final body = trimmed.substring(firstBrace + 1, lastBrace).trim();
     return buildSandboxPreamble() + body;
+  }
+
+  /// 跳过一个 JS 字符串字面量（[start] 指向引号字符），返回结束引号之后的
+  /// 下标。处理 `\` 转义；未闭合（截断脚本）时返回末尾，外层按"未找到匹配
+  /// 括号"回退为整段保留。模板字面量的 `${...}` 表达式整体随字面量跳过——
+  /// 其内部括号自平衡，不参与外层计数是安全的。
+  static int _skipJsStringLiteral(String s, int start) {
+    final quote = s[start];
+    var i = start + 1;
+    while (i < s.length) {
+      final ch = s[i];
+      if (ch == '\\') {
+        i += 2; // 跳过转义对（如 \' \" \\）
+        continue;
+      }
+      if (ch == quote) return i + 1;
+      i++;
+    }
+    return s.length;
   }
 
   /// 将 callAsyncJavaScript 返回值统一转为 JSON 字符串

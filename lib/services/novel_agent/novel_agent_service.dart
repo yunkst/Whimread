@@ -44,6 +44,15 @@ AgentEvent _tagEventWithRunId(AgentEvent event, String runId) {
       ),
     ToolProgressEvent() =>
       ToolProgressEvent(event.toolCallId, event.generatedChars, runId: runId),
+    ToolArgDeltaEvent() => ToolArgDeltaEvent(
+        event.toolCallId,
+        event.name,
+        text: event.text,
+        character: event.character,
+        runId: runId,
+      ),
+    ReasoningDeltaEvent() =>
+      ReasoningDeltaEvent(event.text, runId: runId),
     AgentDoneEvent() => AgentDoneEvent(runId: runId),
     AgentErrorEvent() =>
       AgentErrorEvent(event.error, quotaExhausted: event.quotaExhausted, runId: runId),
@@ -229,13 +238,17 @@ class NovelAgentService {
 
         // 构造本轮 user message：把"用户正在阅读 / 当前工作小说"作为临时上下文
         // 注入到用户输入头部。history 保持原文（落库的也是原文）。
+        // 场景动态上下文（文字游戏设定块等易变数据）同样只在载荷尾部注入，
+        // 不落库不累积——见 [AgentScenario.buildDynamicContext]。
         final contextPrefix = AgentSystemPrompt.buildUserContextPrefix(
           readingContext: scenarioContext.readingContext,
           currentNovelTitle: scenarioContext.currentNovelTitle,
         );
-        final userContent = contextPrefix.isEmpty
+        final dynamicPrefix = env.scenario.buildDynamicContext(scenarioContext);
+        final combinedPrefix = '$contextPrefix$dynamicPrefix';
+        final userContent = combinedPrefix.isEmpty
             ? userInput
-            : '$contextPrefix$userInput';
+            : '$combinedPrefix$userInput';
 
         // 构造初始消息
         final initialMessages = [
@@ -329,14 +342,21 @@ class NovelAgentService {
         await env.scenario.getMemories();
         final systemPrompt = env.scenario.buildSystemPrompt(scenarioContext);
 
-        // ★ 与 sendMessage 的关键差异：不 append user，不注入 contextPrefix
+        // ★ 与 sendMessage 的关键差异：不 append user，不注入 contextPrefix。
+        // 场景动态上下文（文字游戏设定块）仍需注入——重试轮 LLM 同样需要
+        // 最新设定。拼在载荷最后一条 user 消息前缀（仅载荷，不影响调用方历史）。
+        final payload = _applyDynamicContextToResume(
+          initialMessages,
+          env.scenario.buildDynamicContext(scenarioContext),
+        );
+
         final emit = runId == null
             ? (AgentEvent event) => _controller.add(event)
             : (AgentEvent event) =>
                 _controller.add(_tagEventWithRunId(event, runId));
 
         await loop.run(
-          initialMessages: initialMessages,
+          initialMessages: payload,
           systemPrompt: systemPrompt,
           emit: emit,
           cancellationToken: token,
@@ -369,6 +389,28 @@ class NovelAgentService {
         _pendingInjectionsByScenario.remove(scenarioId);
       }
     }
+  }
+
+  /// resume 载荷注入场景动态上下文：拼到最后一条 user 消息前缀（仅运行时
+  /// 载荷的浅拷贝，不影响调用方历史与落库）。无 user 消息时以独立 user
+  /// 消息追加在末尾。[dynamicPrefix] 为空原样返回。
+  List<ChatMessage> _applyDynamicContextToResume(
+    List<ChatMessage> messages,
+    String dynamicPrefix,
+  ) {
+    if (dynamicPrefix.isEmpty) return messages;
+    final payload = List<ChatMessage>.from(messages);
+    for (var i = payload.length - 1; i >= 0; i--) {
+      if (payload[i].role == 'user') {
+        payload[i] = ChatMessage(
+          role: 'user',
+          content: '$dynamicPrefix${payload[i].content ?? ''}',
+        );
+        return payload;
+      }
+    }
+    payload.add(ChatMessage(role: 'user', content: dynamicPrefix));
+    return payload;
   }
 
   /// 构造 Agent 运行所需的 LLM Provider + Scenario。

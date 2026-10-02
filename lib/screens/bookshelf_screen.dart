@@ -22,8 +22,12 @@ import '../screens/reader_screen.dart';
 import '../core/providers/bookshelf_providers.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/database_providers.dart';
+import '../core/providers/scenario_sessions_provider.dart';
 import '../core/providers/service_providers.dart';
+import '../core/providers/text_game_providers.dart';
 import '../core/providers/webview_providers.dart';
+import '../models/text_game.dart';
+import '../services/novel_agent/agent_scenario.dart' show ScenarioIds;
 import '../dialogs/novel_edit_dialog.dart';
 import '../models/site_script.dart';
 import '../widgets/site_bookshelf_refresh_sheet.dart';
@@ -125,15 +129,45 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen>
   }
 
   Future<void> _removeFromBookshelf(Novel novel) async {
+    // 文字游戏绑定检查：游戏共享该小说的角色卡，小说移除前先一并删游戏
+    var boundGames = <TextGame>[];
+    try {
+      final all = await ref.read(textGameRepositoryProvider).listAll();
+      boundGames = all
+          .where((g) => g.sourceNovelId != null && g.sourceNovelId == novel.id)
+          .toList();
+    } catch (_) {
+      // 列表读取失败不阻断删除主流程（届时游戏成为残局，可手动删除）
+    }
     final confirmed = await ConfirmDialog.show(
       context,
       title: '确认删除',
-      message: '确定要从书架移除《${novel.title}》吗？',
+      message: boundGames.isEmpty
+          ? '确定要从书架移除《${novel.title}》吗？'
+          : '《${novel.title}》被 ${boundGames.length} 个文字游戏绑定'
+              '（共享其角色卡），移除后将一并删除这些游戏及其剧情记录。\n'
+              '确定删除吗？',
       confirmText: '删除',
     );
 
     if (confirmed == true) {
       try {
+        // 先删绑定的游戏（级联删剧情会话），再移除小说
+        if (boundGames.isNotEmpty) {
+          // 若其中有正在推进剧情的局，先中断该回合
+          final session = ref
+              .read(scenarioSessionsProvider.notifier)
+              .getIfExists(ScenarioIds.textGame);
+          if (session != null &&
+              boundGames.any((g) => g.chatSessionId == session.sessionId)) {
+            await session.cancel();
+          }
+          final gameRepo = ref.read(textGameRepositoryProvider);
+          for (final g in boundGames) {
+            await gameRepo.delete(g.id!);
+          }
+          ref.invalidate(textGamesProvider);
+        }
         // 从数据库中删除小说（这会删除bookshelf表中的记录）
         // 写路径经 BookshelfMutationNotifier，自动 invalidate bookshelfNovelsProvider
         await ref

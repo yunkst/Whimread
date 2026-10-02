@@ -53,6 +53,10 @@ class AgentTools {
     // ===== 文生图（客户端本地引擎）=====
     _listText2ImgModels,
     _createImages,
+    // ===== 文字游戏（创建 / 管理，游玩走专属页面）=====
+    _createTextGame,
+    _listTextGames,
+    _updateTextGame,
     // ===== 子 Agent =====
     _dispatchSubagent,
   ];
@@ -473,6 +477,12 @@ class AgentTools {
             'type': 'string',
             'description': '头像媒体资源ID（图像），由 create_images 返回的 mediaId',
           },
+          'reason': {
+            'type': 'string',
+            'description':
+                '本次修改的一句话原因（如「根据第3章剧情补充背景」）。'
+                '会记录到角色卡版本历史中，留空则不记录原因。',
+          },
         },
         'required': ['name'],
       },
@@ -529,6 +539,11 @@ class AgentTools {
             'type': 'array',
             'items': {'type': 'string'},
             'description': '别名列表（如 ["小李", "云哥"]）',
+          },
+          'reason': {
+            'type': 'string',
+            'description': '创建该角色的一句话原因（如「剧情第3章新登场的铁匠」）。'
+                '会记录到角色卡版本历史中。',
           },
         },
         'required': ['name'],
@@ -934,6 +949,152 @@ class AgentTools {
           },
         },
         'required': ['task', 'allowed_tools'],
+      },
+    },
+  };
+
+  // ===== 文字游戏 =====
+
+  static const _createTextGame = {
+    'type': 'function',
+    'function': {
+      'name': 'create_text_game',
+      'description':
+          '根据与用户确认好的设定创建一个文字游戏（互动小说）。'
+          '文字游戏必须绑定一本小说以共享角色卡：用户指定书架小说（list_novels '
+          '查 id），或先用 create_novel 建轻量小说壳。角色卡（登场角色 + 玩家'
+          '角色）先经 create_character 在该小说下创建，再传 id 引用——不拷贝'
+          '角色设定。调用前提：世界观、玩家角色、登场角色、规则已与用户逐项'
+          '探讨并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'title': {
+            'type': 'string',
+            'description': '游戏标题（10 字以内，有辨识度）',
+          },
+          'source_novel_id': {
+            'type': 'integer',
+            'description':
+                '绑定的小说 id（list_novels 返回的 id，必填）。参战角色卡必须'
+                '都属于这本小说；自定义玩法就先用 create_novel 建一本轻量小说壳',
+          },
+          'source_novel_title': {
+            'type': 'string',
+            'description': '来源小说标题（供展示；缺省自动取小说真实标题）',
+          },
+          'opening': {
+            'type': 'string',
+            'description': '开场情境（50-150 字）：玩家开局所处的场景与处境',
+          },
+          'character_ids': {
+            'type': 'array',
+            'description':
+                '参战角色卡 id 列表（该小说下 create_character 返回的 '
+                'characterId；2-6 个为宜，含主要配角，不含玩家角色）',
+            'items': {'type': 'integer'},
+          },
+          'player_character_id': {
+            'type': 'integer',
+            'description':
+                '玩家角色卡 id（该小说下 create_character 创建的玩家角色；'
+                '其「当前状态」会在游玩中随剧情演化）',
+          },
+          'worldview': {
+            'type': 'string',
+            'description':
+                '游戏世界观（100-300 字）。改编已有小说时省略=直接用该小说的'
+                '背景设定；仅当需要偏离原作时才填',
+          },
+          'narrativeStyle': {
+            'type': 'string',
+            'description': '叙事风格/基调（如：悬疑压抑、轻快幽默、古龙式短句）',
+          },
+          'contentBoundary': {
+            'type': 'string',
+            'description': '内容边界（用户在意的尺度/禁忌；无特殊要求可省略）',
+          },
+          'choicesCount': {
+            'type': 'integer',
+            'description': '每回合选项数量（2-4，默认 3）',
+          },
+          'imagePolicy': {
+            'type': 'string',
+            'enum': ['auto', 'manual'],
+            'description':
+                '场景插图策略：auto=关键场景自动配图（默认）；'
+                'manual=仅玩家手动要求时生成',
+          },
+        },
+        'required': ['title', 'source_novel_id', 'opening', 'character_ids',
+          'player_character_id'],
+      },
+    },
+  };
+
+  static const _listTextGames = {
+    'type': 'function',
+    'function': {
+      'name': 'list_text_games',
+      'description':
+          '列出已创建的文字游戏（标题/来源/状态/最后游玩时间），'
+          '供创建前查重或用户询问时使用。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+    },
+  };
+
+  static const _updateTextGame = {
+    'type': 'function',
+    'function': {
+      'name': 'update_text_game',
+      'description':
+          '修改已创建文字游戏的设定（用户反悔改设定时使用；'
+          '仅允许修改尚未游玩或用户明确要求修改的游戏）。'
+          '只传需要修改的字段，未传字段保持不变。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'game_id': {
+            'type': 'integer',
+            'description': 'list_text_games 返回的游戏 id',
+          },
+          'title': {'type': 'string', 'description': '新标题'},
+          'worldview': {'type': 'string', 'description': '新世界观背景'},
+          'opening': {'type': 'string', 'description': '新开场情境'},
+          'narrativeStyle': {'type': 'string', 'description': '新叙事风格'},
+          'contentBoundary': {'type': 'string', 'description': '新内容边界'},
+          'choicesCount': {'type': 'integer', 'description': '新选项数量（2-4）'},
+          'imagePolicy': {
+            'type': 'string',
+            'enum': ['auto', 'manual'],
+            'description': '新插图策略',
+          },
+          'character_ids': {
+            'type': 'array',
+            'description': '替换参战角色卡 id 列表（须都属于绑定小说的角色卡；'
+                '与 add/remove_character_ids 互斥）',
+            'items': {'type': 'integer'},
+          },
+          'add_character_ids': {
+            'type': 'array',
+            'description': '向参战名单追加角色卡 id（增量，与 character_ids 互斥）',
+            'items': {'type': 'integer'},
+          },
+          'remove_character_ids': {
+            'type': 'array',
+            'description': '从参战名单移除角色卡 id（玩家角色不可移除；'
+                '与 character_ids 互斥）',
+            'items': {'type': 'integer'},
+          },
+          'player_character_id': {
+            'type': 'integer',
+            'description': '替换玩家角色卡 id（须属于绑定小说）',
+          },
+        },
+        'required': ['game_id'],
       },
     },
   };

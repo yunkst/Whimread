@@ -16,12 +16,13 @@ import 'package:novel_app/services/novel_agent/agent_tools.dart';
 
 void main() {
   group('AgentTools.allTools — 基础验证', () {
-    test('应该有 27 个工具（2026-09 删除图生视频 create_image_to_video）', () {
-      expect(AgentTools.allTools.length, 27, reason: '所有工具数应为 27（2026-09 移除 create_image_to_video 后，'
+    test('应该有 30 个工具（2026-10 新增文字游戏创建/列表/更新）', () {
+      expect(AgentTools.allTools.length, 30, reason: '所有工具数应为 30（2026-09 移除 create_image_to_video 后，'
           'list/select/create novel + read/list/search chapter + create/update/rewrite/delete chapter + '
           'list/update/create/delete character + get_background_setting/update_background_setting + '
           'update_outline/write_outline/get_outline + set_novel_cover + prompt tags + '
-          'list_text2img_models + create_images + dispatch_subagent）');
+          'list_text2img_models + create_images + create_text_game/list_text_games/update_text_game + '
+          'dispatch_subagent）');
     });
 
     test('每个工具都有 type=function', () {

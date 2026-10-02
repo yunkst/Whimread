@@ -21,6 +21,7 @@ import '../widgets/character/avatar_media.dart';
 import '../widgets/common/confirm_dialog.dart';
 import '../widgets/media/media_view.dart';
 import 'character_edit_screen.dart';
+import 'character_revision_history_screen.dart';
 
 /// 人物卡详情页
 ///
@@ -62,6 +63,17 @@ class _CharacterDetailScreenState
           style: AppTypography.chapterTitle.copyWith(fontSize: 18),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: '版本历史',
+            onPressed: () {
+              final id = _character.id;
+              if (id == null) return;
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => CharacterRevisionHistoryScreen(characterId: id),
+              ));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: '编辑',
@@ -555,7 +567,8 @@ class _CharacterDetailScreenState
       final repo = ref.read(characterRepositoryProvider);
       switch (action) {
         case 'avatar':
-          await repo.updateCharacterAvatarMediaId(characterId, image.mediaId);
+          await repo.updateCharacterAvatarMediaId(characterId, image.mediaId,
+              sourceRef: '角色详情页');
           if (mounted) {
             setState(() => _character = _character.copyWith(
                   avatarMediaId: image.mediaId,

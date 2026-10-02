@@ -14,6 +14,7 @@ import '../../repositories/prompt_tag_repository.dart';
 import '../../repositories/site_script_repository.dart';
 import '../../repositories/agent_memory_repository.dart';
 import '../../repositories/chat_session_repository.dart';
+import '../../repositories/text_game_repository.dart';
 import '../../repositories/paragraph_annotation_repository.dart';
 import '../database/database_connection.dart';
 import '../interfaces/repositories/i_novel_repository.dart';
@@ -185,4 +186,12 @@ final llmConfigRepositoryProvider = Provider<LlmConfigRepository>((ref) {
 final chatSessionRepositoryProvider = Provider<ChatSessionRepository>((ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   return ChatSessionRepository(dbConnection: dbConnection);
+});
+
+/// TextGameRepository Provider
+///
+/// 文字游戏的持久化操作（text_games 表，剧情历史复用 chat_sessions）
+final textGameRepositoryProvider = Provider<TextGameRepository>((ref) {
+  final dbConnection = ref.watch(databaseConnectionProvider);
+  return TextGameRepository(dbConnection: dbConnection);
 });

@@ -18,6 +18,8 @@ class Character {
   final String? avatarMediaId; // 头像媒体资源ID（图像/视频），经 MediaView 渲染
   final List<String>? aliases; // 别名列表，上限10个
   final int? firstAppearanceChapter; // 登场章节(0-based index),空=视为§0登场
+  final String? speechStyle; // 说话风格（文字游戏台词语气/口头禅等）
+  final String? currentState; // 当前状态（近况演化层：游戏/写作过程中动态回写）
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -33,12 +35,14 @@ class Character {
     this.clothingStyle,
     this.appearanceFeatures,
     this.backgroundStory,
-    this.facePrompts, // 面部提示词
-    this.bodyPrompts, // 身材提示词
-    this.cachedImageUrl, // 缓存的图集第一张图片路径
-    this.avatarMediaId, // 头像媒体资源ID
-    this.aliases, // 别名列表
-    this.firstAppearanceChapter, // 登场章节
+    this.facePrompts,
+    this.bodyPrompts,
+    this.cachedImageUrl,
+    this.avatarMediaId,
+    this.aliases,
+    this.firstAppearanceChapter,
+    this.speechStyle,
+    this.currentState,
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -62,6 +66,8 @@ class Character {
       'avatarMediaId': avatarMediaId,
       'aliases': aliases?.isEmpty ?? true ? null : jsonEncode(aliases),
       'firstAppearanceChapter': firstAppearanceChapter,
+      'speechStyle': speechStyle,
+      'currentState': currentState,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'updatedAt': updatedAt?.millisecondsSinceEpoch,
     };
@@ -96,6 +102,8 @@ class Character {
       avatarMediaId: map['avatarMediaId'] as String?,
       aliases: parseAliases(map['aliases'] as String?),
       firstAppearanceChapter: map['firstAppearanceChapter'] as int?,
+      speechStyle: map['speechStyle'] as String?,
+      currentState: map['currentState'] as String?,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt']),
       updatedAt: map['updatedAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['updatedAt'])
@@ -121,6 +129,8 @@ class Character {
     String? avatarMediaId,
     List<String>? aliases,
     int? firstAppearanceChapter,
+    String? speechStyle,
+    String? currentState,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -142,6 +152,8 @@ class Character {
       avatarMediaId: avatarMediaId ?? this.avatarMediaId,
       aliases: aliases ?? this.aliases,
       firstAppearanceChapter: firstAppearanceChapter ?? this.firstAppearanceChapter,
+      speechStyle: speechStyle ?? this.speechStyle,
+      currentState: currentState ?? this.currentState,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

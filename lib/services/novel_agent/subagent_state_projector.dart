@@ -49,6 +49,21 @@ class EventTagger {
         generatedChars: final generatedChars
       ) =>
         ToolProgressEvent(toolCallId, generatedChars, runId: runId),
+      ToolArgDeltaEvent(
+        toolCallId: final toolCallId,
+        name: final name,
+        text: final text,
+        character: final character,
+      ) =>
+        ToolArgDeltaEvent(
+          toolCallId,
+          name,
+          text: text,
+          character: character,
+          runId: runId,
+        ),
+      ReasoningDeltaEvent(:final text) =>
+        ReasoningDeltaEvent(text, runId: runId),
       AgentDoneEvent() => AgentDoneEvent(runId: runId),
       AgentErrorEvent(:final error, :final quotaExhausted) =>
         AgentErrorEvent(error, runId: runId, quotaExhausted: quotaExhausted),
@@ -137,6 +152,16 @@ class SubagentStateProjector {
           (call) => call.copyWith(progressChars: generatedChars),
         );
         run.chatState = state.copyWith(streamingSegments: segments);
+        return;
+
+      case ToolArgDeltaEvent():
+        // No-op：参数级流式只服务文字游戏剧情打字机（游玩页自订阅事件流
+        // 处理），子 Agent 聊天态不需要；正文仍以 ToolCallStart/End 为准。
+        return;
+
+      case ReasoningDeltaEvent():
+        // No-op：思维链仅服务文字游戏"GM 思考"开关（游玩页自订阅事件流），
+        // 子 Agent 聊天态不展示。
         return;
 
       case ToolCallEndEvent(:final toolCallId, :final result, :final success):

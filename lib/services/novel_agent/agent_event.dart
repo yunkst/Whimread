@@ -100,6 +100,45 @@ class ToolProgressEvent extends AgentEvent {
   const ToolProgressEvent(this.toolCallId, this.generatedChars, {super.runId});
 }
 
+/// 工具参数流式增量（白名单工具）
+///
+/// 文字游戏场景的 narrate / speak 以参数承载剧情正文。为保留打字机体验，
+/// AgentLoop 在 LLM 流式输出工具参数的过程中，对场景声明的
+/// [AgentScenario.streamableToolNames] 命中的工具按节流 emit 本事件
+/// （参数聚合串经 ToolArgTextExtractor 宽容解出 text / character）。
+///
+/// [text] 是**累计**文本（非增量），UI 整段替换渲染；[character] 为
+/// speak 的角色名（可能尚未流完，null 表示未知）。
+/// 注意：参数仍在流式中途时 [toolCallId] 可能是 'call_N' 占位
+/// （真实 id 帧未到达，N 为流内 index），消费方以 ToolCallStart/EndEvent
+/// 的完整参数为准，本事件仅用于显示。
+class ToolArgDeltaEvent extends AgentEvent {
+  final String toolCallId;
+  final String name;
+  final String text;
+  final String? character;
+
+  const ToolArgDeltaEvent(
+    this.toolCallId,
+    this.name, {
+    required this.text,
+    this.character,
+    super.runId,
+  });
+}
+
+/// 思维链增量（仅 UI 展示用）
+///
+/// 模型的 reasoning_content（DeepSeek thinking 等扩展）此前在 provider 层
+/// 被丢弃。现按原样 emit 供文字游戏游玩页的"GM 思考"开关消费；其它场景
+/// 与通用聊天不渲染。思维链**不落库、不进消息链**——仅运行时可见，离开
+/// 页面/回合结束后不再可查。
+class ReasoningDeltaEvent extends AgentEvent {
+  final String text;
+
+  const ReasoningDeltaEvent(this.text, {super.runId});
+}
+
 /// Agent 循环结束
 class AgentDoneEvent extends AgentEvent {
   const AgentDoneEvent({super.runId});

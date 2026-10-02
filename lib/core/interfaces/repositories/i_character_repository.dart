@@ -1,20 +1,27 @@
 import '../../../models/character.dart';
 import '../../../models/character_gallery_image.dart';
+import '../../../models/character_revision.dart';
 
 /// 角色数据仓库接口
 ///
 /// 负责角色的数据访问操作，包括角色的CRUD操作、
-/// 角色搜索和查询、角色图片管理
+/// 角色搜索和查询、角色图片管理、角色卡版本记录
 ///
 /// 注意：关系管理方法已移至 ICharacterRelationRepository
 abstract class ICharacterRepository {
   // ========== 角色CRUD操作 ==========
 
-  /// 创建角色
+  /// 创建角色（成功后写 baseline 版本快照）
   ///
   /// [character] 要创建的角色对象
+  /// [source]/[sourceRef]/[reason] 版本来源三元组
   /// 返回新插入记录的ID
-  Future<int> createCharacter(Character character);
+  Future<int> createCharacter(
+    Character character, {
+    String source,
+    String? sourceRef,
+    String? reason,
+  });
 
   /// 获取小说的所有角色
   ///
@@ -28,13 +35,19 @@ abstract class ICharacterRepository {
   /// 返回角色对象，如果不存在则返回null
   Future<Character?> getCharacter(int id);
 
-  /// 更新角色
+  /// 更新角色（成功后追加改后快照版本）
   ///
   /// [character] 要更新的角色对象（必须包含id）
+  /// [source]/[sourceRef]/[reason] 版本来源三元组
   /// 返回受影响的行数
-  Future<int> updateCharacter(Character character);
+  Future<int> updateCharacter(
+    Character character, {
+    String source,
+    String? sourceRef,
+    String? reason,
+  });
 
-  /// 删除角色
+  /// 删除角色（版本记录级联清理）
   ///
   /// [id] 角色ID
   /// 返回受影响的行数
@@ -47,7 +60,7 @@ abstract class ICharacterRepository {
   /// 返回角色对象，如果不存在则返回null
   Future<Character?> findCharacterByName(String novelUrl, String name);
 
-  /// 删除小说的所有角色
+  /// 删除小说的所有角色（版本记录级联清理）
   ///
   /// [novelUrl] 小说URL
   /// 返回受影响的行数
@@ -59,8 +72,21 @@ abstract class ICharacterRepository {
   ///
   /// [characterId] 角色ID
   /// [mediaId] 媒体资源ID（图像或视频），传 null 清空头像
+  /// [sourceRef] 版本来源定位
   /// 返回受影响的行数
-  Future<int> updateCharacterAvatarMediaId(int characterId, String? mediaId);
+  Future<int> updateCharacterAvatarMediaId(int characterId, String? mediaId,
+      {String? sourceRef});
+
+  // ========== 角色卡版本记录（v53） ==========
+
+  /// 查询角色卡版本历史（新→旧；[limit] 缺省全量）
+  Future<List<CharacterRevision>> getRevisions(int characterId, {int? limit});
+
+  /// 按 id 取单条版本
+  Future<CharacterRevision?> getRevision(int revisionId);
+
+  /// 回滚到指定版本（写回快照 + 追加 rollback 版本）
+  Future<bool> rollbackToRevision(int revisionId, {String? sourceRef});
 
   // ========== 角色图集（character_images，v50） ==========
 

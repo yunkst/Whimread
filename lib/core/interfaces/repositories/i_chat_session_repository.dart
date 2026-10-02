@@ -74,6 +74,15 @@ abstract class IChatSessionRepository {
   /// 返回受影响行数（0 表示消息已被删/不存在）。
   Future<int> updateMessageContent(int messageId, String content);
 
+  /// 按 toolCallId 定位会话内的单条消息（异步生图完成后改写 tool 结果用）。
+  ///
+  /// 返回命中的消息记录（含行 id，可直接喂给 updateMessageContent），
+  /// 未命中返回 null。
+  Future<ChatMessageRecord?> findMessageByToolCallId(
+    int sessionId,
+    String toolCallId,
+  );
+
   /// 获取会话的消息（按 agentMsgIndex ASC 排序）
   ///
   /// [limit] / [offset] 支持分页，避免长会话冷启动一次性全量加载。

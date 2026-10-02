@@ -107,7 +107,10 @@ class RunStore {
   }) {
     final String runId;
     if (source == RunEntrySource.database) {
-      runId = 'db_${rawId ?? (_counter + 1)}';
+      // rawId 缺失时退化为自增序号：必须推进 _counter，否则连续两次
+      // 无 rawId 的 put 会生成同 id 互相覆盖
+      _counter += 1;
+      runId = 'db_${rawId ?? _counter}';
     } else {
       _counter += 1;
       runId = 'exec_$_counter';

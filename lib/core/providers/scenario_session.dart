@@ -702,6 +702,17 @@ class ScenarioSession {
       _notifyStateError('网页提取工具依赖当前页面状态，无法重试');
       return;
     }
+    // 防御：text_game 场景工具不支持重试——重试路径以 WritingScenario 重建
+    // 执行器，游戏工具不在其工具面，会把消息改写成 unknown_tool 污染剧情
+    if (scenarioId == ScenarioIds.textGame) {
+      LoggerService.instance.w(
+        'ScenarioSession [$scenarioId] 拒绝重试 text_game 工具 $toolName',
+        category: LogCategory.ai,
+        tags: ['session', 'retry_tool', 'text_game_rejected', scenarioId],
+      );
+      _notifyStateError('文字游戏工具不支持重试');
+      return;
+    }
 
     // 从 DB 取该 tool 消息的主键 id（内存 ChatMessage 不带 id）
     final persisted = await _resolveRetryMessageId(sid, toolIdx);
@@ -866,6 +877,29 @@ class ScenarioSession {
         );
         return 0;
       }));
+    }
+  }
+
+  /// 外部改写某条 tool 消息的内容（异步生图完成后由游玩页控制器调用）。
+  ///
+  /// 只同步内存真理源 _agentMessages + UI 投影；DB 改写由调用方
+  /// （TextGameImageService）负责。找不到对应消息（会话未 hydrate /
+  /// 已切换到其它会话）静默忽略——DB 已是最终态，下次 hydrate 自然正确。
+  /// 同步内存的意义：本会话后续的 compaction 整链重写以内存为基准，
+  /// 不同步会让改写结果被「已提交」旧值覆盖。
+  void updateToolMessageContent(String toolCallId, String content) {
+    for (var i = _agentMessages.length - 1; i >= 0; i--) {
+      final m = _agentMessages[i];
+      if (m.role == 'tool' && m.toolCallId == toolCallId) {
+        _agentMessages[i] = ChatMessage(
+          role: 'tool',
+          content: content,
+          toolCallId: toolCallId,
+        );
+        _state = _state.copyWith(messages: _uiMessages);
+        _notifyStateChanged();
+        return;
+      }
     }
   }
 
@@ -1318,13 +1352,21 @@ class ScenarioSession {
       history.removeLast();
     }
 
-    final scenarioContext = _buildScenarioContext();
+    final scenarioContext = await _buildScenarioContext();
+
+    // text_game 场景：所有运行统一打标 runId=sessionId，游玩页的事件流监听
+    // 据此精确接收本局事件（防止与其它场景并发运行时事件互相污染）；
+    // 本 session 自身的接收过滤（shouldMainSessionHandleEvent）对
+    // runId==sessionId 的事件放行，接收行为不变。
+    final effectiveRunId = runId ??
+        (scenarioId == ScenarioIds.textGame ? _sessionId?.toString() : null);
 
     if (resume) {
       await agentService.resumeFromMessages(
         scenarioId: scenarioId,
         initialMessages: history,
         scenarioContext: scenarioContext,
+        runId: effectiveRunId,
       );
     } else {
       await agentService.sendMessage(
@@ -1332,7 +1374,7 @@ class ScenarioSession {
         history: history,
         scenarioId: scenarioId,
         scenarioContext: scenarioContext,
-        runId: runId,
+        runId: effectiveRunId,
       );
     }
   }
@@ -1420,6 +1462,18 @@ class ScenarioSession {
             );
           }
         }
+
+      case ToolArgDeltaEvent():
+        // No-op：参数级流式（文字游戏 narrate/speak 剧情打字机）由游玩页
+        // 直接订阅 agentService.events 处理（自建 GameSegment 流式模型）。
+        // 通用聊天不渲染参数级流式，正文仍以 ToolCallStart/EndEvent 为准
+        // 进入 _pendingSegments / 消息链。
+        break;
+
+      case ReasoningDeltaEvent():
+        // No-op：思维链仅服务文字游戏"GM 思考"开关（游玩页自订阅事件流），
+        // 不落库不进消息链，通用聊天不展示。
+        break;
 
       case CompactionEvent e:
         _handleCompaction(e);
@@ -1665,21 +1719,49 @@ class ScenarioSession {
   // - clearMessagesFromDb        ← 原 _clearMessagesFromDb
 
   /// 构造当前场景上下文
-  AgentScenarioContext _buildScenarioContext() {
-    final readingContext = _ref.read(readingContextProvider);
-    final webviewController = _ref.read(webviewControllerProvider);
-    final currentUrl = _ref.read(webviewCurrentUrlProvider);
+  ///
+  /// text_game 场景特殊处理：
+  /// - 按 chatSessionId 反查 text_games 注入 textGameId（factory 据此
+  ///   加载游戏设定构造 TextGameScenario）
+  /// - 不注入阅读上下文 / 当前小说（游戏的 user 消息是玩家输入，
+  ///   阅读上下文前缀会污染玩家语义）
+  Future<AgentScenarioContext> _buildScenarioContext() async {
+    final isTextGame = scenarioId == ScenarioIds.textGame;
+    final readingContext =
+        isTextGame ? null : _ref.read(readingContextProvider);
+    final webviewController =
+        isTextGame ? null : _ref.read(webviewControllerProvider);
+    final currentUrl = isTextGame ? null : _ref.read(webviewCurrentUrlProvider);
 
     final useHeadless = scenarioId == ScenarioIds.webviewExtract;
+
+    int? textGameId;
+    if (isTextGame && _sessionId != null) {
+      try {
+        final game = await _ref
+            .read(textGameRepositoryProvider)
+            .getByChatSessionId(_sessionId!);
+        textGameId = game?.id;
+      } catch (e, st) {
+        LoggerService.instance.e(
+          'ScenarioSession [$scenarioId] 反查文字游戏失败: sessionId=$_sessionId - $e',
+          stackTrace: st.toString(),
+          category: LogCategory.ai,
+          tags: ['session', 'text_game', 'lookup', 'failed', scenarioId],
+        );
+      }
+    }
 
     return AgentScenarioContext(
       readingContext: readingContext,
       webviewController: useHeadless ? null : webviewController,
       currentUrl: currentUrl,
       useHeadlessWebView: useHeadless,
-      currentNovelId: _currentNovel?.id,
-      currentNovelTitle: _currentNovel?.title,
+      currentNovelId: isTextGame ? null : _currentNovel?.id,
+      currentNovelTitle: isTextGame ? null : _currentNovel?.title,
       rewriteTarget: _pendingRewriteTarget,
+      textGameId: textGameId,
+      chatSessionId: _sessionId,
     );
   }
 }

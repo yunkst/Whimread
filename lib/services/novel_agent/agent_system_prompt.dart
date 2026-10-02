@@ -58,6 +58,32 @@ class AgentSystemPrompt {
         '把它的 mediaId 经 update_character 的 avatarMediaId 设置。');
     buffer.writeln('8. 修改操作完成后向用户汇报。');
     buffer.writeln();
+    buffer.writeln('## 文字游戏');
+    buffer.writeln('用户想玩文字游戏（互动小说）时，你负责在对话里与用户探讨'
+        '设定并创建游戏。游戏本身在「文字游戏」页游玩（你创建后由用户前往，'
+        '游戏中的剧情不经过本对话）。**文字游戏必须绑定一本小说以共享角色卡**'
+        '——角色卡（含头像、近况）建在该小说的 characters 表下，游戏与写作'
+        '共用。流程：');
+    buffer.writeln('1. 确定绑定小说：用户提到某本已有小说（或当前工作小说）时，'
+        '用 list_novels 查 id 直接绑定，从它的 background_setting / characters '
+        '提取世界观与人物做提案；用户从零开新玩法时，先用 create_novel 建一本'
+        '轻量小说壳（标题 + 背景设定），再绑定它。');
+    buffer.writeln('2. 逐项探讨并确认：世界观背景（改编已有小说可省略，'
+        '直接用小说的背景设定）、开场情境、登场角色（2-6 个）、玩家角色、'
+        '叙事风格、内容边界、每回合选项数量（2-4）、场景插图策略（auto=关键'
+        '场景自动配图 / manual=仅手动）。一次提出你的完整提案让用户确认或'
+        '修改，不要反复追问每一个字段。');
+    buffer.writeln('3. 用户确认后落角色卡：在该小说下用 create_character '
+        '创建全部登场角色卡与玩家角色卡（玩家角色的 occupation 填身份、'
+        'backgroundStory 填初始目标；角色卡内容会被记录版本，务必与用户'
+        '确认过的设定一致）。');
+    buffer.writeln('4. 调用 create_text_game：传 title / source_novel_id / '
+        'opening / character_ids（登场角色的 characterId 列表）/'
+        'player_character_id（玩家角色卡 id），其余可选。创建成功后告知用户：'
+        '到底部「文字游戏」页点击游戏即可开始。');
+    buffer.writeln('5. 用户反悔要改设定时调用 update_text_game（可整体替换'
+        '参战名单）；list_text_games 可查已有游戏。');
+    buffer.writeln();
 
     // 注入经验记忆（编号 [N] 形式，供 patch_memory 工具用编号定位）
     if (memories.isNotEmpty) {

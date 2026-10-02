@@ -161,9 +161,12 @@ abstract final class WebViewExtractScriptValidator {
         };
       }
       for (final c in chapters) {
-        if (c is! Map ||
-            ((c['title'] as String?) ?? '').isEmpty ||
-            ((c['url'] as String?) ?? '').isEmpty) {
+        // 判型而非强转：`as String?` 遇非字符串值（如 title:123）会抛
+        // TypeError，冒泡到 save_script 兜底 catch 退化成 internal_error，
+        // agent 拿不到这里的结构化诊断
+        final title = c is Map ? c['title'] : null;
+        final url = c is Map ? c['url'] : null;
+        if (title is! String || title.isEmpty || url is! String || url.isEmpty) {
           return {
             'reason': 'chapter_missing_field',
             'diagnostic': '某 chapter 缺少 title 或 url',
@@ -199,9 +202,10 @@ abstract final class WebViewExtractScriptValidator {
         };
       }
       for (final n in novels) {
-        if (n is! Map ||
-            ((n['title'] as String?) ?? '').isEmpty ||
-            ((n['url'] as String?) ?? '').isEmpty) {
+        // 同上：判型避免 TypeError 掩盖结构化诊断
+        final title = n is Map ? n['title'] : null;
+        final url = n is Map ? n['url'] : null;
+        if (title is! String || title.isEmpty || url is! String || url.isEmpty) {
           return {
             'reason': 'novel_missing_field',
             'diagnostic': '某 novel 缺少 title 或 url',
@@ -228,7 +232,8 @@ abstract final class WebViewExtractScriptValidator {
     }
 
     // chapter_content
-    final content = ((data['content'] as String?) ?? '').trim();
+    final contentRaw = data['content'];
+    final content = (contentRaw is String ? contentRaw : '').trim();
     if (content.length < 50) {
       return {
         'reason': 'content_too_short',

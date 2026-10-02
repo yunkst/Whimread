@@ -41,6 +41,8 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
   late final TextEditingController _bodyTypeController;
   late final TextEditingController _clothingController;
   late final TextEditingController _backgroundController;
+  late final TextEditingController _speechStyleController;
+  late final TextEditingController _currentStateController;
   late final TextEditingController _facePromptsController;
   late final TextEditingController _bodyPromptsController;
 
@@ -69,6 +71,10 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
         TextEditingController(text: c?.clothingStyle ?? '');
     _backgroundController =
         TextEditingController(text: c?.backgroundStory ?? '');
+    _speechStyleController =
+        TextEditingController(text: c?.speechStyle ?? '');
+    _currentStateController =
+        TextEditingController(text: c?.currentState ?? '');
     _facePromptsController =
         TextEditingController(text: c?.facePrompts ?? '');
     _bodyPromptsController =
@@ -87,6 +93,8 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
     _bodyTypeController.dispose();
     _clothingController.dispose();
     _backgroundController.dispose();
+    _speechStyleController.dispose();
+    _currentStateController.dispose();
     _facePromptsController.dispose();
     _bodyPromptsController.dispose();
     super.dispose();
@@ -168,6 +176,18 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
               label: '背景经历',
               hint: '出身江南，幼年……',
               maxLines: 5,
+            ),
+            _buildMultilineField(
+              controller: _speechStyleController,
+              label: '说话风格（文字游戏台词语气/口头禅）',
+              hint: '冷淡寡言，惯用反问……',
+              maxLines: 2,
+            ),
+            _buildMultilineField(
+              controller: _currentStateController,
+              label: '当前状态/近况（每行一条，游戏中 AI 也会更新）',
+              hint: '重伤初愈\n获得玄重尺',
+              maxLines: 4,
             ),
             const SizedBox(height: 24),
 
@@ -380,6 +400,12 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
         backgroundStory: _backgroundController.text.trim().isEmpty
             ? null
             : _backgroundController.text.trim(),
+        speechStyle: _speechStyleController.text.trim().isEmpty
+            ? null
+            : _speechStyleController.text.trim(),
+        currentState: _currentStateController.text.trim().isEmpty
+            ? null
+            : _currentStateController.text.trim(),
         facePrompts: _facePromptsController.text.trim().isEmpty
             ? null
             : _facePromptsController.text.trim(),
@@ -412,6 +438,12 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
         backgroundStory: _backgroundController.text.trim().isEmpty
             ? null
             : _backgroundController.text.trim(),
+        speechStyle: _speechStyleController.text.trim().isEmpty
+            ? null
+            : _speechStyleController.text.trim(),
+        currentState: _currentStateController.text.trim().isEmpty
+            ? null
+            : _currentStateController.text.trim(),
         facePrompts: _facePromptsController.text.trim().isEmpty
             ? null
             : _facePromptsController.text.trim(),
@@ -425,9 +457,9 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
     try {
       final repo = ref.read(characterRepositoryProvider);
       if (_isEditing) {
-        await repo.updateCharacter(target);
+        await repo.updateCharacter(target, sourceRef: '角色编辑页');
       } else {
-        await repo.createCharacter(target);
+        await repo.createCharacter(target, sourceRef: '角色编辑页');
       }
       if (!mounted) return;
       ToastUtils.showSuccess(

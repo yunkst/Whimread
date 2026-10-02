@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/bookshelf_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/text_game/text_game_home_screen.dart';
 import 'screens/webview_browser_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/resource_bootstrap/resource_bootstrap_screen.dart';
@@ -476,7 +477,10 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver {
   /// 浏览器 Tab 索引（统一进 IndexedStack 后也用于场景切换判定）
-  static const int _browserTabIndex = 1;
+  static const int _browserTabIndex = HomeTabIndex.browser;
+
+  /// 文字游戏 Tab 索引
+  static const int _gameTabIndex = HomeTabIndex.textGame;
 
   void _onItemTapped(int index, WidgetRef ref) {
     // 更新 Tab 索引（单一真相源：homeTabIndexNotifierProvider）。
@@ -634,9 +638,11 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     final selectedIndex = ref.watch(homeTabIndexNotifierProvider);
 
     // 响应外部/导航触发的 Tab 切换，执行副作用：
-    // 切换 AI Agent 场景
+    // 切换 AI Agent 场景（文字游戏 Tab 不切场景——它有专属游玩页，
+    // 不依赖聊天场景选择）
     ref.listen<int>(homeTabIndexNotifierProvider, (previous, next) {
       if (previous == null || previous == next) return;
+      if (next == _gameTabIndex) return;
       ref.read(currentAgentScenarioProvider.notifier).state =
           next == _browserTabIndex
               ? ScenarioIds.webviewExtract
@@ -654,6 +660,8 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         scenarioId: selectedIndex == _browserTabIndex
             ? ScenarioIds.webviewExtract
             : ScenarioIds.writing,
+        // 文字游戏 Tab 不展示聊天 FAB（游玩页与管理页有自己的入口）
+        showFloatingButton: selectedIndex != _gameTabIndex,
         child: IndexedStack(
           index: selectedIndex,
           children: [
@@ -661,6 +669,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
             // active 标记当前浏览器是否可见：
             // 仅在可见时拦截系统返回手势，避免 offstage 状态下误拦截其他 Tab 的返回键。
             WebViewBrowserScreen(active: selectedIndex == _browserTabIndex),
+            const TextGameHomeScreen(),
             const SettingsScreen(),
           ],
         ),
@@ -674,6 +683,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
           NavigationDestination(
             icon: Icon(Icons.book),
             label: '书架',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sports_esports),
+            label: '文字游戏',
           ),
           NavigationDestination(
             icon: Icon(Icons.public),

@@ -22,6 +22,7 @@ import '../../../models/image_model.dart';
 import '../../logger_service.dart';
 import '../../image_generation/image_generation_backend.dart';
 import '../../image_generation/image_generation_providers.dart';
+import '../../image_generation/image_model_picker.dart';
 import '../../image_generation/local_sd_backend.dart';
 import '../agent_scenario.dart' show AgentScenarioContext;
 import '../tool_arg_parser.dart' show ToolArgParser;
@@ -140,37 +141,11 @@ class MediaExecutor with ToolExecutorHelpers {
       character = resolved;
     }
 
-    // ---------- 选模型 ----------
+    // ---------- 选模型（共享选取器：显式名 → 默认 → 第一个启用） ----------
     final repo = ref.read(imageModelRepositoryProvider);
-    ImageModel? model;
-    if (modelName != null && modelName.isNotEmpty) {
-      model = await repo.getByName(modelName);
-      if (model == null) {
-        final available = (await repo.getEnabled()).map((m) => m.name).toList();
-        return jsonEncode({
-          'error': 'model_not_found',
-          'message': '生图模型 "$modelName" 不存在或未启用。'
-              '请先调用 list_text2img_models 查看可用模型，'
-              '从中选择一个 name。可用模型：${available.isEmpty ? "（无）" : available.join("、")}',
-        });
-      }
-      if (!model.isEnabled) {
-        return jsonEncode({
-          'error': 'model_disabled',
-          'message': '生图模型 "${model.name}" 已被用户停用，请改用其他模型。',
-        });
-      }
-    } else {
-      final enabled = await repo.getEnabled();
-      model = await repo.getDefault() ?? (enabled.isEmpty ? null : enabled.first);
-    }
-    if (model == null) {
-      return jsonEncode({
-        'error': 'no_models_available',
-        'message': '还没有可用的生图模型。请引导用户到「设置 → 生图模型管理」'
-            '导入 .gguf 模型或添加 Local Dream 设备模型后再试。',
-      });
-    }
+    final pick = await pickImageModel(repo, modelName: modelName);
+    if (pick.errorJson != null) return jsonEncode(pick.errorJson);
+    final model = pick.model!;
 
     // ---------- 生图 ----------
     final backend = ref.read(imageGenerationBackendByTypeProvider(model.backendType));
@@ -215,7 +190,7 @@ class MediaExecutor with ToolExecutorHelpers {
             .map((mediaId) => {
                   'mediaId': mediaId,
                   'prompt': prompt,
-                  'modelName': model!.name,
+                  'modelName': model.name,
                   if (negativePrompt != null) 'negativePrompt': negativePrompt,
                   if (character != null) 'character': character.name,
                   if (character != null) 'addedToGallery': true,

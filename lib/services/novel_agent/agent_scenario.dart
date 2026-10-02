@@ -49,6 +49,17 @@ class AgentScenarioContext {
   /// 当前小说的标题（写作场景专用，用于 system prompt 与 UI 展示）
   final String? currentNovelTitle;
 
+  /// 当前文字游戏的 id（text_game 场景必需）
+  ///
+  /// 由 ScenarioSession 在构建上下文时按 chatSessionId 反查 text_games 注入。
+  /// factory 据此加载游戏设定并构造 TextGameScenario；为 null 时 factory 抛
+  /// ArgumentError（与 annotation_rewrite 缺 rewriteTarget 同型）。
+  final int? textGameId;
+
+  /// 当前会话的数据库 id（text_game 场景的异步生图任务用它定位 tool 消息；
+  /// 其它场景为 null 不受影响）
+  final int? chatSessionId;
+
   /// 按标注重写的目标绑定（仅 annotation_rewrite 场景使用）
   ///
   /// 携带小说/章节 url、章节标题、列表 position（1-based）、以及用户在阅读页
@@ -66,6 +77,8 @@ class AgentScenarioContext {
     this.currentNovelId,
     this.currentNovelTitle,
     this.rewriteTarget,
+    this.textGameId,
+    this.chatSessionId,
   });
 }
 
@@ -115,6 +128,28 @@ abstract class AgentScenario {
 
   /// 工具定义列表（OpenAI Function Calling schema）
   List<Map<String, dynamic>> get tools;
+
+  /// 需要把工具参数流式透出的工具名集合。
+  ///
+  /// 文字游戏场景的 narrate / speak 用参数承载剧情正文，需要打字机流式渲染。
+  /// 命中白名单时，AgentLoop 在 LLM 流式输出工具参数的过程中按节流 emit
+  /// [ToolArgDeltaEvent]（累计文本，宽容解析）。工具的正式执行与其它工具
+  /// 完全一致（等流结束后 jsonDecode 完整参数），本机制只影响显示。
+  ///
+  /// 默认空集由 [AgentScenarioCleanupMixin] 提供（所有场景均混入该 mixin），
+  /// 子类按需 override。
+  Set<String> get streamableToolNames;
+
+  /// 每轮请求尾部注入的动态上下文（缓存友好布局：易变内容放请求尾部，
+  /// 静态协议放开头，前缀稳定可命中供应商的 prompt cache）。
+  ///
+  /// 由 NovelAgentService 在构建 LLM 载荷时拼到最后一条 user 消息前缀
+  /// （仅运行时载荷，不落库、不进历史——下一轮重新生成，天然无累积）。
+  /// 典型用途：文字游戏的设定块（设定可被 update_game_state / 手动编辑
+  /// 频繁变更，放开头会每次变更加速缓存）。
+  ///
+  /// 默认空串由 [AgentScenarioCleanupMixin] 提供，子类按需 override。
+  String buildDynamicContext(AgentScenarioContext context);
 
   /// 构建系统提示词
   String buildSystemPrompt(AgentScenarioContext context);
@@ -193,6 +228,16 @@ abstract class AgentScenario {
 /// 场景类通过 `with AgentScenarioCleanupMixin implements AgentScenario`
 /// 即可获得 [cleanup] / [setCleanupTask] 的默认实现，无需各自重复字段逻辑。
 mixin AgentScenarioCleanupMixin implements AgentScenario {
+  /// [AgentScenario.streamableToolNames] 的默认实现：不透传任何工具参数。
+  /// 放在 mixin 里让所有 `with AgentScenarioCleanupMixin implements
+  /// AgentScenario` 的场景自动获得默认值，无需逐个实现。
+  @override
+  Set<String> get streamableToolNames => const {};
+
+  /// [AgentScenario.buildDynamicContext] 的默认实现：无动态上下文。
+  @override
+  String buildDynamicContext(AgentScenarioContext context) => '';
+
   Future<void> Function()? _cleanupTask;
 
   @override
@@ -309,32 +354,54 @@ mixin AgentMemoryPatchMixin on AgentScenario {
     Map<String, dynamic> args, {
     required String logTag,
   }) async {
-    final index = args['index'] as int?;
-    final newText = args['newText'] as String? ?? '';
-    final result = await patchMemory(index, newText);
-    if (result.success) {
-      LoggerService.instance.i(
-        'patchMemory 成功: ${result.message}',
+    // 本工具在各场景 executeTool 的统一 try 之外执行（提前 return 分支），
+    // 这里任何异常都会直达 AgentLoop 外层 catch 变成 AgentErrorEvent，
+    // 终止整个运行——其他工具失败只回 error JSON。故自行兜底，并宽容解析：
+    // LLM 偶尔把 index 传成 "3"/3.0，原始 as int? 强转会抛 TypeError。
+    try {
+      final indexRaw = args['index'];
+      final index = indexRaw is int
+          ? indexRaw
+          : indexRaw is num
+              ? indexRaw.toInt()
+              : int.tryParse('$indexRaw');
+      final newTextRaw = args['newText'];
+      final newText = newTextRaw == null ? '' : '$newTextRaw';
+      final result = await patchMemory(index, newText);
+      if (result.success) {
+        LoggerService.instance.i(
+          'patchMemory 成功: ${result.message}',
+          category: LogCategory.ai,
+          tags: ['agent', logTag, 'patch_memory', 'success'],
+        );
+        return jsonEncode({'success': true, 'message': result.message});
+      }
+      LoggerService.instance.w(
+        'patchMemory 失败: ${result.message}',
         category: LogCategory.ai,
-        tags: ['agent', logTag, 'patch_memory', 'success'],
+        tags: ['agent', logTag, 'patch_memory', 'failed'],
       );
-      return jsonEncode({'success': true, 'message': result.message});
+      // 失败：返回 [N] 格式的编号列表，与 system prompt 展示一致，供 AI 用正确编号重试
+      return jsonEncode({
+        'error': 'memory_index_invalid',
+        'message': result.message,
+        'allMemories': result.allMemories
+            .asMap()
+            .entries
+            .map((e) => '[${e.key + 1}] ${e.value}')
+            .toList(),
+      });
+    } catch (e) {
+      LoggerService.instance.e(
+        'patchMemory 异常: $e',
+        category: LogCategory.ai,
+        tags: ['agent', logTag, 'patch_memory', 'exception'],
+      );
+      return jsonEncode({
+        'error': 'memory_patch_failed',
+        'message': '记忆更新失败: $e',
+      });
     }
-    LoggerService.instance.w(
-      'patchMemory 失败: ${result.message}',
-      category: LogCategory.ai,
-      tags: ['agent', logTag, 'patch_memory', 'failed'],
-    );
-    // 失败：返回 [N] 格式的编号列表，与 system prompt 展示一致，供 AI 用正确编号重试
-    return jsonEncode({
-      'error': 'memory_index_invalid',
-      'message': result.message,
-      'allMemories': result.allMemories
-          .asMap()
-          .entries
-          .map((e) => '[${e.key + 1}] ${e.value}')
-          .toList(),
-    });
   }
 }
 
@@ -419,4 +486,9 @@ abstract final class ScenarioIds {
   /// 工具面被锁死（仅 read/update_chapter_content/list_chapters，且
   /// update_chapter_content 物理上只能改当前章节），改写过程进入对话窗口。
   static const annotationRewrite = 'annotation_rewrite';
+
+  /// 文字游戏 — 一个游戏对应本场景下的一个 chat_session（text_games 行关联）。
+  /// 剧情内容经 narrate/speak 工具输出（参数流式打字机），present_choices
+  /// 收尾提交选项。不在通用聊天场景菜单出现（showInChatMenu=false）。
+  static const textGame = 'text_game';
 }

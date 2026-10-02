@@ -317,6 +317,31 @@ class ChatSessionRepository extends BaseRepository
   }
 
   @override
+  Future<ChatMessageRecord?> findMessageByToolCallId(
+    int sessionId,
+    String toolCallId,
+  ) {
+    return guard(
+      'chat_session.findMessageByToolCallId',
+      () async {
+        final db = await database;
+        final maps = await db.query(
+          _tableMessages,
+          where: 'sessionId = ? AND toolCallId = ?',
+          whereArgs: [sessionId, toolCallId],
+          limit: 1,
+        );
+        if (maps.isEmpty) return null;
+        return ChatMessageRecord.fromMap(maps.first);
+      },
+      message: (e) =>
+          '按 toolCallId 查消息失败: sessionId=$sessionId toolCallId=$toolCallId - $e',
+      category: LogCategory.database,
+      tags: ['chat_message', 'find_by_tool_call', 'failed'],
+    );
+  }
+
+  @override
   Future<List<ChatMessageRecord>> listMessages(
     int sessionId, {
     int? limit,

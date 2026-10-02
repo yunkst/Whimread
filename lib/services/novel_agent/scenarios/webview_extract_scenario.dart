@@ -542,6 +542,25 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   static const _domStabilizeDelay = Duration(milliseconds: 500);
   static const _headlessTrustDelay = Duration(seconds: 2);
 
+  /// 页面级 URL 相等：按 scheme + host + path 归一化比较。
+  ///
+  /// 整串相等在站点常见重定向下永不成立（http→https、补尾斜杠、附加
+  /// query、WebUri.toString 的规范化），会让 [navigate_to] 误报
+  /// NAVIGATE_TIMEOUT、headless 同步白等一轮超时。query/fragment 不参与
+  /// 比较——同页不同锚点对「是否在目标页」是同一答案。
+  static bool _samePageUrl(String a, String b) {
+    if (a == b) return true;
+    final ua = Uri.tryParse(a);
+    final ub = Uri.tryParse(b);
+    if (ua == null || ub == null) return false;
+    String norm(Uri u) {
+      final path = u.path.isEmpty ? '/' : u.path;
+      return '${u.scheme.toLowerCase()}://${u.host.toLowerCase()}$path';
+    }
+
+    return norm(ua) == norm(ub);
+  }
+
   /// 等待 WebView 加载完成（URL 匹配 targetUrl）
   ///
   /// 返回 `true` 表示成功等到 URL 匹配；`false` 表示超时。
@@ -555,7 +574,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       await Future.delayed(_pollInterval);
       try {
         final current = await _webviewController.getUrl();
-        if (current != null && current.toString() == targetUrl) {
+        if (current != null && _samePageUrl(current.toString(), targetUrl)) {
           await Future.delayed(_domStabilizeDelay);
           return true;
         }
@@ -875,10 +894,13 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       });
     }
 
-    // 阻止跳转到当前页面（避免无意义重载浪费一次 HTTP 请求）
-    if (_isHeadless) {
-      // Headless 模式：用 _currentUrl 比较
-      if (_currentUrl == url) {
+    // 阻止跳转到当前页面（避免无意义重载浪费一次 HTTP 请求）。
+    // 两种模式统一用 getUrl() 实际值比较：headless 不能用 _currentUrl——
+    // 它是构造时快照，save_script 验证等流程会把 WebView 导航到 test_url，
+    // 用过期值误判「已在目标页面」会让后续工具全部跑在错误页面上
+    try {
+      final currentUrl = await _webviewController.getUrl();
+      if (currentUrl != null && _samePageUrl(currentUrl.toString(), url)) {
         return jsonEncode({
           'ok': true,
           'message': '已在目标页面',
@@ -886,20 +908,8 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           'note': '当前页面已为目标 URL，未执行跳转',
         });
       }
-    } else {
-      try {
-        final currentUrl = await _webviewController.getUrl();
-        if (currentUrl != null && currentUrl.toString() == url) {
-          return jsonEncode({
-            'ok': true,
-            'message': '已在目标页面',
-            'url': url,
-            'note': '当前页面已为目标 URL，未执行跳转',
-          });
-        }
-      } catch (_) {
-        // getUrl 失败不阻止跳转
-      }
+    } catch (_) {
+      // getUrl 失败不阻止跳转
     }
 
     try {
@@ -1407,7 +1417,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     }
     return (
       error: null,
-      domain: domain,
+      // 归一化为小写：site_scripts.domain 是 BINARY collation（大小写敏感），
+      // 查询侧一律用 Uri.host（Dart 恒小写）——大写落库会导致后续
+      // get_cached_script / onNoToolCalls 查不到并重复插行
+      domain: domain.toLowerCase(),
       runId: runId,
       scriptType: scriptType,
       testUrl: testUrl,

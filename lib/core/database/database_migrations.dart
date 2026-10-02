@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 51;
+  static const int currentVersion = 53;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -1060,6 +1060,62 @@ class DatabaseMigrations {
         );
         _log('迁移 v50 → v51: 清理死表 chat_scenes/prompt_history/prompt_tag_history'
             '，media_items 遗留来源归一为 local_upload');
+        break;
+
+      // ========== 版本 52：文字游戏 ==========
+      // 每个游戏一行，剧情历史复用 chat_sessions/chat_messages（chat_session_id
+      // 关联），设定结构化存 settings_json：
+      // - sourceType: 'novel'（sourceNovelId 指向 bookshelf.id）| 'custom'
+      // - status: 'active' | 'finished' | 'abandoned'
+      // - 无 FK：删游戏时由 TextGameRepository 联动删会话（messages 经现有
+      //   FK CASCADE 随之删除）；小说删除不删游戏（settings_json 已是快照）
+      // - 幂等：CREATE TABLE IF NOT EXISTS + _createIndexIfNotExists
+      case 52:
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS text_games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            sourceType TEXT NOT NULL DEFAULT 'custom',
+            sourceNovelId INTEGER,
+            sourceNovelTitle TEXT,
+            settingsJson TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            chatSessionId INTEGER NOT NULL,
+            coverMediaId TEXT,
+            lastPlayedAt INTEGER,
+            createdAt INTEGER NOT NULL,
+            updatedAt INTEGER NOT NULL
+          )
+        ''');
+        await _createIndexIfNotExists(
+            db, 'idx_text_games_session', 'text_games', 'chatSessionId');
+        _log('迁移 v51 → v52: 新建 text_games 表（文字游戏）');
+        break;
+
+      // ========== 版本 53：角色卡共享 + 版本管理 ==========
+      // 文字游戏改为绑定小说共享角色卡（不再拷贝进 settings_json）：
+      // - characters 加 speechStyle（说话风格）/ currentState（近况演化层，
+      //   写作与游戏共同维护，头像 avatarMediaId 既有列直接共享）
+      // - character_revisions：角色卡版本表，快照式（每次修改后存整卡 JSON +
+      //   来源 + 原因），回滚 = 写回快照并追加 rollback 版本，append-only
+      case 53:
+        await _addColumnIfNotExists(db, 'characters', 'speechStyle', 'TEXT');
+        await _addColumnIfNotExists(db, 'characters', 'currentState', 'TEXT');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS character_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            characterId INTEGER NOT NULL,
+            snapshotJson TEXT NOT NULL,
+            source TEXT NOT NULL,
+            sourceRef TEXT,
+            reason TEXT,
+            createdAt INTEGER NOT NULL
+          )
+        ''');
+        await _createIndexIfNotExists(db, 'idx_character_revisions_char',
+            'character_revisions', 'characterId');
+        _log('迁移 v52 → v53: characters 加 speechStyle/currentState 列，'
+            '新建 character_revisions 表（角色卡版本管理）');
         break;
     }
   }

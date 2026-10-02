@@ -64,22 +64,28 @@ class LlmStreamChunk {
   final String? finishReason;
   final LlmUsage? usage;
 
+  /// 思维链增量（DeepSeek `reasoning_content` 扩展；仅部分模型/网关提供）。
+  /// 仅供 UI 展示（如文字游戏"GM 思考"开关），不参与任何业务逻辑。
+  final String? reasoningChunk;
+
   const LlmStreamChunk({
     this.contentChunk,
     this.toolCallDeltas = const [],
     this.finishReason,
     this.usage,
+    this.reasoningChunk,
   });
 
   bool get isContent => contentChunk != null && contentChunk!.isNotEmpty;
   bool get isToolCallDelta => toolCallDeltas.isNotEmpty;
+  bool get isReasoning => reasoningChunk != null && reasoningChunk!.isNotEmpty;
   bool get isFinished => finishReason != null;
   bool get hasUsage => usage != null;
 
   @override
   String toString() =>
       'LlmStreamChunk(content=$contentChunk, deltas=${toolCallDeltas.length}, '
-      'finish=$finishReason, usage=$usage)';
+      'reasoning=$reasoningChunk, finish=$finishReason, usage=$usage)';
 }
 
 class LlmProvider {
@@ -390,6 +396,7 @@ class LlmProvider {
           return const LlmStreamChunk();
         }
         final content = (delta['content'] as String?) ?? '';
+        final reasoning = (delta['reasoning_content'] as String?) ?? '';
         final tcDeltas = <Map<String, dynamic>>[];
         final tcRaw = delta['tool_calls'] as List?;
         if (tcRaw != null) {
@@ -402,6 +409,7 @@ class LlmProvider {
         final finishReason = first['finish_reason'] as String?;
         return LlmStreamChunk(
           contentChunk: content.isNotEmpty ? content : null,
+          reasoningChunk: reasoning.isNotEmpty ? reasoning : null,
           toolCallDeltas: tcDeltas,
           finishReason: finishReason,
           usage: usage,
@@ -415,7 +423,11 @@ class LlmProvider {
         return const LlmStreamChunk();
       }
     }).where((chunk) =>
-            chunk.isContent || chunk.isToolCallDelta || chunk.isFinished || chunk.hasUsage);
+            chunk.isContent ||
+            chunk.isToolCallDelta ||
+            chunk.isReasoning ||
+            chunk.isFinished ||
+            chunk.hasUsage);
   }
 
   /// 解析 OpenAI 兼容 SSE 帧的 usage 字段。字段缺失或类型不匹配返回 null。

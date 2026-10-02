@@ -25,8 +25,8 @@ class HomeTabIndex {
   /// 书架
   static const int bookshelf = 0;
 
-  /// 生图调试
-  static const int illustration = 1;
+  /// 文字游戏
+  static const int textGame = 1;
 
   /// 浏览器
   static const int browser = 2;

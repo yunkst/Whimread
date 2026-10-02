@@ -123,7 +123,8 @@ abstract final class WebViewExtractToolSchemas {
             'description': '保存的脚本类型。chapter_list 返回 {title, cover_url, chapters:[{title,url}]}'
               '（cover_url 字段必填，缺失会被拒绝落库；允许空串表示确实无封面）；'
               'chapter_content 返回 {title, content, font_family}（OCR 模式需 font_family）；'
-              'bookshelf 返回 {novels:[{title,url}]}，提取「我的书架/收藏」页的小说列表，'
+              'bookshelf 返回 {novels:[{title,url,cover_url}]}（cover_url 必填，允许空串），'
+              '提取「我的书架/收藏」页的小说列表，'
               'url 为该站小说目录页绝对路径（bookshelf 不适用 OCR，ocr 固定传 false）。',
           },
           'test_url': {

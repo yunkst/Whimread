@@ -24,6 +24,7 @@ import 'tool_executor/media_executor.dart';
 import 'tool_executor/novel_navigation_executor.dart';
 import 'tool_executor/outline_executor.dart';
 import 'tool_executor/prompt_tag_executor.dart';
+import 'tool_executor/text_game_executor.dart';
 import 'tool_executor_helpers.dart';
 
 class ToolExecutor with ToolExecutorHelpers {
@@ -40,6 +41,7 @@ class ToolExecutor with ToolExecutorHelpers {
   late final _outline = OutlineExecutor(ref);
   late final _promptTag = PromptTagExecutor(ref);
   late final _media = MediaExecutor(ref);
+  late final _textGame = TextGameExecutor(ref);
 
   /// 分发工具调用
   ///
@@ -145,6 +147,13 @@ class ToolExecutor with ToolExecutorHelpers {
           return await _media.listText2ImgModels(args);
         case 'create_images':
           return await _media.createImages(args, scenarioContext: scenarioContext);
+        // ===== 文字游戏（创建/管理，游玩走专属页面与场景）=====
+        case 'create_text_game':
+          return await _textGame.createTextGame(args);
+        case 'list_text_games':
+          return await _textGame.listTextGames();
+        case 'update_text_game':
+          return await _textGame.updateTextGame(args);
         default:
           LoggerService.instance.w('未知工具: $toolName',
               category: LogCategory.ai, tags: ['agent', 'tool', toolName, 'unknown']);

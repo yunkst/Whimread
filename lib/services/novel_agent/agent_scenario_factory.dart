@@ -6,10 +6,13 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:novel_app/core/providers/database_providers.dart';
+import 'package:novel_app/models/character.dart';
 import '../logger_service.dart';
 import 'agent_scenario.dart';
 import '../headless_webview_pool.dart';
 import 'scenarios/annotation_rewrite_scenario.dart';
+import 'scenarios/text_game_scenario.dart';
 import 'scenarios/writing_scenario.dart';
 import 'scenarios/webview_extract_scenario.dart';
 
@@ -35,6 +38,35 @@ class AgentScenarioFactory {
               'annotation_rewrite 场景需要 AgentScenarioContext.rewriteTarget');
         }
         return AnnotationRewriteScenario(_ref, target);
+      case ScenarioIds.textGame:
+        final gameId = context.textGameId;
+        if (gameId == null) {
+          throw ArgumentError(
+              'text_game 场景需要 AgentScenarioContext.textGameId');
+        }
+        final game = await _ref.read(textGameRepositoryProvider).getById(gameId);
+        if (game == null) {
+          throw StateError('文字游戏不存在: id=$gameId');
+        }
+        // 共享角色卡：按绑定小说加载参战名单（含玩家角色卡）。
+        // 小说被删/名单为空时优雅降级（动态上下文给出提示），不硬失败。
+        final novel = game.sourceNovelId == null
+            ? null
+            : await _ref.read(novelRepositoryProvider).getNovelById(
+                  game.sourceNovelId!,
+                );
+        var cast = <Character>[];
+        if (novel != null && game.settings.characterIds.isNotEmpty) {
+          final all = await _ref
+              .read(characterRepositoryProvider)
+              .getCharacters(novel.url);
+          final byId = {for (final c in all) c.id: c};
+          cast = [
+            for (final id in game.settings.characterIds)
+              if (byId[id] != null) byId[id]!,
+          ];
+        }
+        return TextGameScenario(_ref, game, novel: novel, cast: cast);
       case ScenarioIds.webviewExtract:
         if (context.useHeadlessWebView) {
           // Headless 模式：从池获取 controller（排他占用）
@@ -104,6 +136,13 @@ class AgentScenarioFactory {
           icon: '📝',
           supportsMemory: false,
         ),
+        const ScenarioInfo(
+          id: ScenarioIds.textGame,
+          displayName: '文字游戏',
+          icon: '🎲',
+          supportsMemory: false,
+          showInChatMenu: false,
+        ),
       ];
 }
 
@@ -121,10 +160,17 @@ class ScenarioInfo {
   /// 诱导用户写入无人消费的死数据。
   final bool supportsMemory;
 
+  /// 是否出现在通用聊天窗口顶部的场景切换菜单中。
+  ///
+  /// text_game 有专属游玩页（在通用聊天里玩会退化成无选项的纯文本），
+  /// 注册为 false 从菜单隐藏；场景配置（LLM 绑定）走游玩页的菜单入口。
+  final bool showInChatMenu;
+
   const ScenarioInfo({
     required this.id,
     required this.displayName,
     required this.icon,
     this.supportsMemory = false,
+    this.showInChatMenu = true,
   });
 }

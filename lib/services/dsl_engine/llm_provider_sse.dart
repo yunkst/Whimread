@@ -41,36 +41,9 @@ class StreamingResult {
 
   /// 从累积的 tool_call deltas 构建最终的 ToolCall 列表
   List<ToolCall> buildToolCalls() {
-    if (toolCallDeltas.isEmpty) return [];
-
-    // 按 index 聚合 tool_call deltas
-    final aggregated = <int, _ToolCallDelta>{};
-    for (final delta in toolCallDeltas) {
-      final idx = (delta['index'] as int?) ?? 0;
-      final entry =
-          aggregated.putIfAbsent(idx, () => _ToolCallDelta(index: idx));
-
-      final id = delta['id'] as String?;
-      // 空串视为缺失：部分网关(DeepSeek 经 new-api)在后续 delta 帧把 id 发成
-      // ""，一旦 if(id != null) 放过会覆盖首帧已聚合的真 id。与下方 name 的
-      // 空串防御同型。
-      if (id != null && id.isNotEmpty) entry.id = id;
-
-      final func = delta['function'] as Map<String, dynamic>?;
-      if (func != null) {
-        // 空串视为缺失：OpenAI 规范在后续 delta 帧省略 name 字段，
-        // 但 DeepSeek-V4-Pro 通过 new-api 网关时会把 name 发成 ""（实测见
-        // tmp/sse_capture_<ts>.txt frame #56）。一旦 if(name != null)
-        // 放过，会覆盖首帧已聚合的真名（如"list_prompt_tags"），下游将
-        // 用空函数名调用未知工具。空串不写入即可兼容两种格式。
-        final name = func['name'] as String?;
-        if (name != null && name.isNotEmpty) entry.name = name;
-        final args = func['arguments'] as String?;
-        if (args != null) entry.argumentsBuffer.write(args);
-      }
-    }
-
-    return aggregated.values.where((d) => d.name != null && d.name!.isNotEmpty).map((d) {
+    return _aggregateDeltas().values
+        .where((d) => d.name != null && d.name!.isNotEmpty)
+        .map((d) {
       var args = <String, dynamic>{};
       final argsStr = d.argumentsBuffer.toString();
       if (argsStr.isNotEmpty) {
@@ -104,6 +77,76 @@ class StreamingResult {
       return ToolCall(id: callId, name: d.name ?? '', arguments: args);
     }).toList();
   }
+
+  /// 当前已聚合的 tool_call 状态快照（不解析 JSON，参数保留原始累计串）。
+  ///
+  /// 供 AgentLoop 在流式过程中转发白名单工具的参数增量（文字游戏剧情
+  /// 打字机）：每收到 tool_call delta 批次后调用一次，按流内 index 聚合出
+  /// 各 tool_call 当前的 id / name / arguments 累计文本。
+  List<StreamingToolCallState> toolCallStates() {
+    return _aggregateDeltas().values
+        .map((d) => StreamingToolCallState(
+              index: d.index,
+              id: d.id,
+              name: d.name,
+              argumentsSoFar: d.argumentsBuffer.toString(),
+            ))
+        .toList();
+  }
+
+  /// 按 delta['index'] 聚合 tool_call deltas（[buildToolCalls] /
+  /// [toolCallStates] 共用的聚合骨架，含 id/name 空串防御）
+  Map<int, _ToolCallDelta> _aggregateDeltas() {
+    if (toolCallDeltas.isEmpty) return {};
+    final aggregated = <int, _ToolCallDelta>{};
+    for (final delta in toolCallDeltas) {
+      final idx = (delta['index'] as int?) ?? 0;
+      final entry =
+          aggregated.putIfAbsent(idx, () => _ToolCallDelta(index: idx));
+
+      final id = delta['id'] as String?;
+      // 空串视为缺失：部分网关(DeepSeek 经 new-api)在后续 delta 帧把 id 发成
+      // ""，一旦 if(id != null) 放过会覆盖首帧已聚合的真 id。与下方 name 的
+      // 空串防御同型。
+      if (id != null && id.isNotEmpty) entry.id = id;
+
+      final func = delta['function'] as Map<String, dynamic>?;
+      if (func != null) {
+        // 空串视为缺失：OpenAI 规范在后续 delta 帧省略 name 字段，
+        // 但 DeepSeek-V4-Pro 通过 new-api 网关时会把 name 发成 ""（实测见
+        // tmp/sse_capture_<ts>.txt frame #56）。一旦 if(name != null)
+        // 放过，会覆盖首帧已聚合的真名（如"list_prompt_tags"），下游将
+        // 用空函数名调用未知工具。空串不写入即可兼容两种格式。
+        final name = func['name'] as String?;
+        if (name != null && name.isNotEmpty) entry.name = name;
+        final args = func['arguments'] as String?;
+        if (args != null) entry.argumentsBuffer.write(args);
+      }
+    }
+    return aggregated;
+  }
+}
+
+/// 流式过程中单个 tool_call 的聚合状态快照（参数尚未解析为 JSON）
+class StreamingToolCallState {
+  final int index;
+  final String? id;
+  final String? name;
+
+  /// arguments 的原始累计串（可能是半截 JSON）
+  final String argumentsSoFar;
+
+  const StreamingToolCallState({
+    required this.index,
+    this.id,
+    this.name,
+    required this.argumentsSoFar,
+  });
+
+  /// 稳定 toolCallId：真实 id 未到达时按流内 index 合成占位（与
+  /// buildToolCalls 的兜底规则一致）
+  String get callId =>
+      (id != null && id!.isNotEmpty) ? id! : 'call_$index';
 }
 
 class _ToolCallDelta {

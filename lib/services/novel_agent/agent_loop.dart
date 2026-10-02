@@ -18,6 +18,7 @@ import '../dsl_engine/retry_signals.dart';
 import 'agent_event.dart';
 import 'agent_scenario.dart';
 import 'context_compactor.dart';
+import 'tool_arg_text_extractor.dart';
 import 'tool_result_formatter.dart';
 
 /// Agent 循环取消行为
@@ -180,6 +181,44 @@ class AgentLoop {
       String? streamFinishReason;
       int contentChunkCount = 0;
 
+      // 白名单工具参数流式转发状态（每轮重置）：按流内 index 记录上次
+      // emit 的累计文本长度与角色名，用于 ≥12 字符增量节流。
+      final streamedArgState =
+          <int, ({int textLen, String? character})>{};
+
+      // 白名单工具（_scenario.streamableToolNames，文字游戏 narrate/speak）
+      // 的参数流式转发：参数聚合串经宽容提取器解出 text/character 累计文本，
+      // 首个非空必发，之后每增 12 字符或角色名变化才 emit 一次。
+      // 工具正式执行仍以流结束后的完整参数为准，本机制只影响显示。
+      void emitStreamableToolArgDeltas() {
+        final streamable = _scenario.streamableToolNames;
+        if (streamable.isEmpty) return;
+        for (final call in streamingResult.toolCallStates()) {
+          final name = call.name;
+          if (name == null || !streamable.contains(name)) continue;
+          final extracted =
+              ToolArgTextExtractor.extract(call.argumentsSoFar);
+          final text = extracted.text;
+          final character = extracted.character;
+          final prev = streamedArgState[call.index];
+          final isFirst = prev == null && text.isNotEmpty;
+          final charChanged = prev != null &&
+              character != null &&
+              character != (prev.character ?? '');
+          final grewEnough =
+              prev != null && text.length - prev.textLen >= 12;
+          if (!isFirst && !charChanged && !grewEnough) continue;
+          streamedArgState[call.index] =
+              (textLen: text.length, character: character);
+          emit(ToolArgDeltaEvent(
+            call.callId,
+            name,
+            text: text,
+            character: character,
+          ));
+        }
+      }
+
       try {
         LoggerService.instance.d('Agent 循环第 $round 轮 (${_scenario.id})',
             category: LogCategory.ai, tags: ['agent', 'loop', _scenario.id]);
@@ -296,6 +335,11 @@ class AgentLoop {
 
         streamSub = streamSource.listen(
           (chunk) {
+            // 实时 emit 思维链增量 → 仅 UI 展示（文字游戏"GM 思考"开关）；
+            // 不入 streamingResult、不影响历史与压缩。
+            if (chunk.isReasoning) {
+              emit(ReasoningDeltaEvent(chunk.reasoningChunk!));
+            }
             // 实时 emit 文本增量 → UI 流式展示
             if (chunk.isContent) {
               contentChunkCount++;
@@ -308,6 +352,7 @@ class AgentLoop {
             // 累积 tool_calls delta
             if (chunk.isToolCallDelta) {
               streamingResult.toolCallDeltas.addAll(chunk.toolCallDeltas);
+              emitStreamableToolArgDeltas();
             }
             // 记录 finish_reason
             if (chunk.isFinished) {

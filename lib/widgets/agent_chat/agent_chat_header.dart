@@ -147,7 +147,9 @@ class _ScenarioMenu extends ConsumerWidget {
         ref.read(scenarioSessionsProvider.notifier).get(value);
       },
       itemBuilder: (_) => [
-        for (final s in AgentScenarioFactory.availableScenarios)
+        // showInChatMenu=false 的场景（text_game 有专属游玩页）不在菜单出现
+        for (final s
+            in AgentScenarioFactory.availableScenarios.where((s) => s.showInChatMenu))
           PopupMenuItem(
             value: s.id,
             child: Row(children: [

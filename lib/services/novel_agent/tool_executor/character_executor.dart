@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/database_providers.dart';
 import '../../../models/character.dart';
+import '../../../models/character_revision.dart'
+    show CharacterRevisionSource;
 import '../../logger_service.dart';
 import '../tool_arg_parser.dart' show ToolArgParser;
 import '../agent_scenario.dart';
@@ -128,7 +130,13 @@ class CharacterExecutor with ToolExecutorHelpers {
       aliases: aliases ?? existing.aliases,
       avatarMediaId: avatarMediaId ?? existing.avatarMediaId,
     );
-    await repo.updateCharacter(updated);
+    final (reason, _) = parser.nullableString('reason');
+    await repo.updateCharacter(
+      updated,
+      source: CharacterRevisionSource.writingAgent,
+      sourceRef: '写作助手对话',
+      reason: (reason?.trim().isNotEmpty == true) ? reason!.trim() : null,
+    );
 
     LoggerService.instance.i('更新角色: "$name"',
         category: LogCategory.ai, tags: ['agent', 'tool', 'update_character']);
@@ -205,7 +213,14 @@ class CharacterExecutor with ToolExecutorHelpers {
       backgroundStory: backgroundStory,
       aliases: aliases,
     );
-    final id = await repo.createCharacter(character);
+    final (reason, reasonErr) = parser.nullableString('reason');
+    if (reasonErr != null) return reasonErr;
+    final id = await repo.createCharacter(
+      character,
+      source: CharacterRevisionSource.writingAgent,
+      sourceRef: '写作助手对话',
+      reason: (reason?.trim().isNotEmpty == true) ? reason!.trim() : null,
+    );
 
     LoggerService.instance.i('创建角色: "$name" (id=$id)',
         category: LogCategory.ai, tags: ['agent', 'tool', 'create_character']);
