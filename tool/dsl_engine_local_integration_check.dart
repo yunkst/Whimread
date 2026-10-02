@@ -1,11 +1,10 @@
-/// DSL 引擎本地集成测试 v3
+/// DSL 引擎本地集成检查脚本 v3
 ///
 /// 使用真实 LLM API 测试 DSL 引擎的完整工作流执行。
 /// API: 通过环境变量 TEST_API_BASE_URL 配置
 ///
-/// 运行方式:
-///   cd novel_app
-///   dart run test/unit/services/dsl_engine/local_integration_test.dart
+/// 运行方式（手动执行，不进 flutter test 套件——脚本吞异常仅 print，无法作为测试断言）:
+///   dart run tool/dsl_engine_local_integration_check.dart
 library;
 
 import 'dart:convert';
@@ -278,7 +277,7 @@ Future<void> testWithFlutterDslEngine() async {
   print('   3. 配置:');
   print('      - LLM API URL: $apiBaseUrl');
   print(
-      '      - LLM API Key: ${apiKey.isNotEmpty ? apiKey.substring(0, 10) : "<未配置>"}...');
+      '      - LLM API Key: ${apiKey.isNotEmpty ? "<已配置 ${apiKey.length} 字符>" : "<未配置>"}');
   print('      - 默认模型: $defaultModel (可选，留空则使用 DSL 中的模型)');
   print('   4. 进入任意小说章节，触发 AI 功能（特写/总结/聊天等）');
   print('   5. 观察是否正常生成内容');

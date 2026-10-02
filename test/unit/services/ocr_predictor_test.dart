@@ -11,7 +11,10 @@ import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:ui' as ui;
 
+import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/ocr/ocr_predictor.dart';
 
@@ -57,22 +60,33 @@ void main() {
     });
   });
 
-  // ── 真实推理测试（需 onnxruntime 原生库，不可用则跳过）──
-  // Windows flutter test 无 onnxruntime-android 原生库，load() 抛
-  // MissingPluginException/PlatformException 时整组不 FAIL。
+  // ── 真实推理测试（需 onnxruntime 原生库 + 模型资产，不可用则显式 skip）──
+  // 桌面 flutter test 无 onnxruntime-android 原生库、asset bundle 也不含
+  // 模型文件，load() 会抛 MissingPluginException/PlatformException/
+  // DioException/FlutterError(Unable to load asset) —— 均属"环境不具备"，
+  // 整组显式 markTestSkipped（CI 报告可见）。其余异常照常 FAIL——旧实现是
+  // 裸 catch + body 内 if-return 静默 return，吞掉 predictor 真实回归恒绿。
   group('OcrPredictor.recognizeImage 推理', () {
     late OcrPredictor ocr;
     bool onnxAvailable = false;
+    String unavailableReason = '';
 
     setUpAll(() async {
       ocr = OcrPredictor();
       try {
         await ocr.load();
         onnxAvailable = true;
-      } catch (e) {
-        // 桌面环境无 onnxruntime 原生库，graceful skip
-        print('skip: onnxruntime 不可用 - $e');
+      } on MissingPluginException catch (e) {
+        unavailableReason = 'onnxruntime 不可用（仅 Android/iOS 提供原生库）: $e';
+      } on PlatformException catch (e) {
+        unavailableReason = 'onnxruntime 原生库加载失败: $e';
+      } on DioException catch (e) {
+        unavailableReason = '模型文件不可达: ${e.message}';
+      } on FlutterError catch (e) {
+        // 桌面 test 的 asset bundle 不含模型文件（Unable to load asset）
+        unavailableReason = '模型资产缺失: $e';
       }
+      if (unavailableReason.isNotEmpty) print('skip: $unavailableReason');
     });
 
     tearDownAll(() async {
@@ -83,21 +97,24 @@ void main() {
 
     test('空白图返回空字符串', () async {
       if (!onnxAvailable) {
-        return;
+        markTestSkipped(unavailableReason);
+        return; // markTestSkipped 是 void，不会中断执行
       }
       final blankBase64 = await _encodeBlankPng();
       final result = await ocr.recognizeImage(blankBase64);
       expect(result, isEmpty);
     });
 
-    test('渲染单个汉字"中"的图识别返回短字符串', () async {
+    test('渲染单个汉字"中"的图识别返回 1-2 字符结果', () async {
       if (!onnxAvailable) {
+        markTestSkipped(unavailableReason);
         return;
       }
       final charImg = await _renderCharToBase64('中');
       final result = await ocr.recognizeImage(charImg);
-      // OCR 单字识别不保证 100% 命中，只验证不抛异常 + 返回类型 + 长度合理
-      expect(result, isA<String>());
+      // OCR 单字识别不保证 100% 命中，但渲染清晰的"中"必须至少给出
+      // 非空结果（识别成空串意味着模型/输入管线完全失效），且不超过 2 字符
+      expect(result, isNotEmpty, reason: '清晰单字图不应识别为空串');
       expect(result.length, lessThanOrEqualTo(2));
     });
   });

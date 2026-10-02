@@ -853,6 +853,84 @@ void main() {
       expect(json['error'], 'chapter_position_out_of_range');
       expect(json['suggested_tool'], 'list_chapters');
     });
+
+    // ---------------------------------------------------------------
+    // 反馈 id=4「json 混入原文」回归：LLM 从 read_chapter_content 返回的
+    // `{"raw": "..."}` 里复制文本时，会把字面 `\n` / `\"` 转义序列透传进
+    // 工具入参。chapter_write_executor.updateChapterContent 入口必须对
+    // oldString / newString 调 unescapeJsonEscapeSequences，保证落库的是
+    // 真字符（旧测试只在单元层测了 unescape 函数本身，executor 的这两行
+    // 接线无任何测试覆盖，删掉照样全绿）。
+    // ---------------------------------------------------------------
+
+    test('字面 \\n 入参 → 落库为真换行（新旧串双向）', () async {
+      final novelId = await insertNovel();
+      await insertChapter(content: '第一段\n第二段\n第三段');
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'update_chapter_content',
+        {
+          'position': 1,
+          // 字面转义序列：LLM 直接复制 JSON 包装内容时的典型产物
+          'oldString': '第一段\\n第二段',
+          'newString': '第一段(改)\\n第二段',
+        },
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['success'], true, reason: json.toString());
+
+      final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
+      final content = chapters.first.content!;
+      expect(content, '第一段(改)\n第二段\n第三段');
+      expect(content.contains(r'\n'), isFalse,
+          reason: '落库正文不得残留字面 \\n 反斜杠序列');
+    });
+
+    test('字面 \\" 入参 → 落库为真引号', () async {
+      final novelId = await insertNovel();
+      await insertChapter(content: '他说："别动。"然后退了一步。');
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'update_chapter_content',
+        {
+          'position': 1,
+          'oldString': '他说：\\"别动。\\"',
+          'newString': '他说：\\"走开。\\"',
+        },
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['success'], true, reason: json.toString());
+
+      final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
+      final content = chapters.first.content!;
+      expect(content, '他说："走开。"然后退了一步。');
+      expect(content.contains(r'\"'), isFalse,
+          reason: '落库正文不得残留字面 \\" 反斜杠序列');
+    });
+
+    test('oldString 还原后与 newString 相同 → invalid_param（防自替换）', () async {
+      final novelId = await insertNovel();
+      await insertChapter(content: '第一段\n第二段');
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'update_chapter_content',
+        {
+          'position': 1,
+          'oldString': '第一段\\n第二段',
+          'newString': '第一段\n第二段',
+        },
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+
+      // 两者 unescape 后都是「第一段\n第二段」，必须在替换前就拒绝
+      expect(json['error'], 'invalid_param');
+    });
   });
 
   // ========================================================================

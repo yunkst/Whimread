@@ -19,6 +19,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException;
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/dsl_engine/llm_provider.dart';
 import 'package:novel_app/services/dsl_engine/retry_signals.dart';
@@ -166,6 +167,25 @@ Future<List<AgentEvent>> runLoop(
     cancellationToken: token,
   );
   return events;
+}
+
+/// 首次 set value 时抛异常的 notifier：模拟 RetrySignals 横幅写入瞬时故障。
+/// 只抛一次 —— agent_loop 对 clear() 没有守卫，持续抛会误伤正常收尾路径。
+class _FailOnceNotifier extends ValueNotifier<RetryState?> {
+  _FailOnceNotifier() : super(null);
+
+  bool firstSetThrew = false;
+  bool _armed = true;
+
+  @override
+  set value(RetryState? newValue) {
+    if (_armed) {
+      _armed = false;
+      firstSetThrew = true;
+      throw StateError('模拟 reportRound 阶段横幅写入故障');
+    }
+    super.value = newValue;
+  }
 }
 
 void main() {
@@ -409,6 +429,14 @@ void main() {
     test(
         'RetryableHttpException(503) → reportRound → 成功后 clear',
         () async {
+      // 记录 notifier 的完整值变化历史：若 agent_loop 的 reportRound 调用
+      // 被整体删掉（重试横幅静默失效），历史为空，本测试必须翻红
+      final seen = <RetryState?>[];
+      void listener() => seen.add(RetrySignals.instance.notifier.value);
+      RetrySignals.instance.notifier.addListener(listener);
+      addTearDown(
+          () => RetrySignals.instance.notifier.removeListener(listener));
+
       final llm = _ScriptedErrorLlm()
         ..enqueue(throwMode: const RetryableHttpException(503, 'mt', ''))
         ..enqueue(
@@ -425,8 +453,18 @@ void main() {
         emit: (e) {},
       );
 
+      // 中间态：round-level reportRound 确实写入了横幅状态
+      final roundStates = seen
+          .whereType<RetryState>()
+          .where((s) => s.level == RetryLevel.round)
+          .toList();
+      expect(roundStates, isNotEmpty,
+          reason: '重试必须通过 RetrySignals.reportRound 写入 round 级横幅状态');
+      expect(roundStates.first.attempt, 1);
+      expect(roundStates.first.maxAttempts, 2);
+
       // loop 成功结束 → AgentDoneEvent 已 clear,横幅消失。
-      expect(RetrySignals.instance.notifier.value, isNull,
+      expect(seen.last, isNull,
           reason: 'AgentDoneEvent 后 RetrySignals.clear()');
     });
 
@@ -462,13 +500,20 @@ void main() {
     });
 
     test('成功后 AgentDoneEvent → RetrySignals.clear()', () async {
+      // 同上：记录完整历史，防止 reportRound 接线被删后本测试仍绿
+      final seen = <RetryState?>[];
+      void listener() => seen.add(RetrySignals.instance.notifier.value);
+      RetrySignals.instance.notifier.addListener(listener);
+      addTearDown(
+          () => RetrySignals.instance.notifier.removeListener(listener));
+
       final llm = _ScriptedErrorLlm()
         ..enqueue(throwMode: const RetryableHttpException(503, 'mt', ''))
         ..enqueue(response: const _ScriptedResponse(contentChunks: ['ok']));
       final loop = AgentLoop(
         llm: llm,
         scenario: _FakeScenario(),
-        config: const AgentLoopConfig(networkRetryPerRound: 2),
+        config: const AgentLoopConfig(maxRounds: 5, networkRetryPerRound: 2),
       );
       await loop.run(
         initialMessages: const [ChatMessage(role: 'user', content: 'hi')],
@@ -476,7 +521,12 @@ void main() {
         emit: (e) {},
       );
 
-      expect(RetrySignals.instance.notifier.value, isNull,
+      expect(
+        seen.any((v) => v is RetryState && v.level == RetryLevel.round),
+        isTrue,
+        reason: '本用例跑的是 round 级重试路径，必须观察到 reportRound 写入',
+      );
+      expect(seen.last, isNull,
           reason: 'AgentDoneEvent 后 RetrySignals.clear()');
     });
 
@@ -509,24 +559,31 @@ void main() {
     });
 
     test('reportRound 抛异常 → 被吞掉，重试主流程继续', () async {
-      // 验证 agent_loop catch 块 try/catch 吞 reportRound 异常
-      // 不抛任何异常 = 正常结束，即重试继续
+      // 注入一个"首次 set 抛异常"的 notifier，让 agent_loop.dart 的
+      // reportRound 调用真正抛错（此前该 catch 块覆盖率为零：没有任何
+      // 手段让 RetrySignals 单例抛异常，本测试只是又一个"503 重试成功"）。
+      // 只抛一次：clear() 无守卫调用，若持续抛会误伤收尾路径。
+      final failingNotifier = _FailOnceNotifier();
+      final original = RetrySignals.instance.notifier;
+      RetrySignals.instance.notifier = failingNotifier;
+      addTearDown(() => RetrySignals.instance.notifier = original);
+
       final llm = _ScriptedErrorLlm()
         ..enqueue(throwMode: const RetryableHttpException(503, 'mt', ''))
         ..enqueue(response: const _ScriptedResponse(contentChunks: ['ok']));
       final loop = AgentLoop(
         llm: llm,
         scenario: _FakeScenario(),
-        config: const AgentLoopConfig(networkRetryPerRound: 2),
+        config: const AgentLoopConfig(maxRounds: 5, networkRetryPerRound: 2),
       );
-      // 不抛 → 重试成功
-      await loop.run(
-        initialMessages: const [ChatMessage(role: 'user', content: 'hi')],
-        systemPrompt: 'sys',
-        emit: (e) {},
-      );
-      // 验证重试成功（notifier 已被 AgentDoneEvent clear）
-      expect(RetrySignals.instance.notifier.value, isNull);
+      // reportRound 抛的异常必须被 agent_loop 的 try/catch 吞掉：
+      // run() 正常返回、第二次 LLM 调用成功、最终 clear 落地
+      final events = await runLoop(loop);
+
+      expect(llm.callCount, 2, reason: 'reportRound 异常后必须继续重试');
+      expect(failingNotifier.firstSetThrew, isTrue,
+          reason: '前置条件：notifier 的首次 set 必须真的抛过异常，否则本测试没测到 catch 块');
+      expect(events.last, isA<AgentDoneEvent>());
     });
   });
 

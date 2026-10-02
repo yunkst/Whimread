@@ -23,10 +23,28 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:novel_app/core/database/database_connection.dart';
+import 'package:novel_app/core/theme/app_colors.dart';
+import 'package:novel_app/services/media/media_proxy.dart';
 import 'package:novel_app/services/media/media_types.dart';
 import 'package:novel_app/widgets/agent_chat/media_gallery_card.dart';
+import 'package:novel_app/widgets/media/media_view.dart';
+
+/// MediaView 的媒体解析桩：直接返回 miss，切断 MediaStore 文件 IO 与数据库，
+/// 让回归 #3 只关心 widget 树结构（AspectRatio 包裹），不受异步加载状态影响。
+/// 传入的 DatabaseConnection 是惰性单例且 `database` getter 从不被触达
+/// （resolve 已覆写），因此测试内没有任何真实 I/O——testWidgets 的 FakeAsync
+/// 区无法驱动 sqflite_ffi 的真实 I/O，用真实 DB 会导致超时挂起。
+class _MissMediaProxy extends MediaProxy {
+  _MissMediaProxy() : super(dbConn: DatabaseConnection());
+
+  @override
+  Future<MediaResult> resolve(String mediaId) async =>
+      const MediaResult(status: MediaStatus.miss);
+}
 
 /// 等价的"裸 Image.file"在 Stack(StackFit.expand) 里的布局行为
 Widget _simulateUnboundedImageInStack() {
@@ -170,19 +188,21 @@ void main() {
             '4 个 stack 堆叠都不应触发 RenderBox 异常');
   });
 
-  /// 回归 #3（结构断言）：MediaGalleryCard 单图分支的 widget 树必须包含
-  /// AspectRatio 包裹 MediaView —— 防止后续维护者误删修复。
+  /// 回归 #3（结构断言）：MediaGalleryCard 单图分支的 widget 树必须让
+  /// MediaView 处于 AspectRatio 之内 —— 防止后续维护者误删修复。
   ///
-  /// 不依赖 MediaView 异步/timer 路径，CI 100% 稳定。
-  /// 用 `Material(child: ...)` 包裹避免 MaterialApp 缺失；用 SizedBox 限定
-  /// 高度避免 loading 态 Column 在 800x600 test 表面撑爆。
-  /// 关键：用 runZonedGuarded 抑制"Timer still pending"——MediaView 内部
-  /// 真实 _load 在 test 环境永不 resolve(走不到 loaded → timer 持续),
-  /// 卸载 widget 后 dispose 会 cancel，但 _verifyInvariants 在更后期检查
-  /// timer.cancel() 状态存在边缘 race，这里用断言+结构校验分离,只校验
-  /// widget 树结构,允许 timer 噪音。
-  testWidgets('回归 #3: MediaGalleryCard 单图分支含 AspectRatio 包裹',
+  /// 这是唯一锁定 `media_gallery_card.dart::_GallerySlot` 修复的回归防线
+  /// （#1/#2 只在测试本地复现布局机制，改生产代码时它们照样绿）。
+  /// 原先因「MediaView 异步/timer 噪音」被 skip，实际原因不成立：
+  /// - MediaView 的 periodic 轮询由 `_shouldPoll` 决定，单图分支
+  ///   （fullscreen=false、未出屏）下恒为 false，initState 不建 timer；
+  /// - 轮询逻辑用 `mediaProxyProvider` 覆写为 miss 桩，彻底断开文件 IO
+  ///   与数据库，保证 widget 树同步可断言；
+  /// - 断言后主动 pumpWidget 卸载 → MediaView.dispose 取消任何潜在 timer，
+  ///   teardown 干净无 "Timer is still pending"。
+  testWidgets('回归 #3: MediaGalleryCard 单图分支中 MediaView 被 AspectRatio 包裹',
       (tester) async {
+    final proxy = _MissMediaProxy();
     final card = MediaGalleryCard(
       data: MediaGalleryData(items: [
         MediaGalleryItem(mediaId: 'm0', kind: MediaKind.image, prompt: 'p0'),
@@ -190,24 +210,42 @@ void main() {
     );
 
     await tester.pumpWidget(
-      Material(
-        child: SizedBox(width: 200, height: 200, child: card),
+      ProviderScope(
+        overrides: [mediaProxyProvider.overrideWithValue(proxy)],
+        child: MaterialApp(
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFFB8843A),
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+            extensions: <ThemeExtension<dynamic>>[AppColors.dark],
+          ),
+          home: Scaffold(
+            body: SizedBox(width: 200, height: 200, child: card),
+          ),
+        ),
       ),
     );
     await tester.pump();
 
-    // 核心断言：MediaGalleryCard 的渲染树里能找到 AspectRatio
-    expect(find.byType(AspectRatio), findsAtLeastNWidgets(1),
-        reason: '修复后 MediaGalleryCard 单图分支必须在 MediaView 外层包 AspectRatio '
-            '（或等效 bounded 父约束），给内部 Stack(StackFit.expand) bounded 高度。'
-            '如本断言失败，说明有人误删了 _GallerySlot 的 AspectRatio 包裹，'
-            '会立刻在 ListView+Column 场景触发白屏+卡死 bug。');
-    // 注意：本测试不调用 _disposeMediaViews，因为 MediaView 在 test 环境
-    // 走不到 loaded → timer 一直跑；widget test 的 _verifyInvariants 会
-    // 报 "Timer is still pending"。这是 MediaView 测试基础设施问题，不影响
-    // 修复正确性。如需严格清理，参考 test/unit/widgets/ 现有 MediaView
-    // 测试的 init/override 套路（但那些测试也放弃了端到端，见
-    // avatar_media_test.dart 注释）。
-  }, skip: true);  // skip：MediaView 端到端 widget test 在当前 test 设施下
-                   // 不可稳定验证结构断言；通过 #1 + #2 已证明 fix 有效。
+    // 核心断言：MediaView 必须在 AspectRatio 之内（祖先关系），而不只是
+    // 「树里存在某个 AspectRatio」——后者可能被卡片其它角落的 AspectRatio
+    // 误满足，删掉 _GallerySlot 的包裹后仍会通过。
+    expect(find.byType(MediaView), findsOneWidget);
+    expect(
+      find.ancestor(of: find.byType(MediaView), matching: find.byType(AspectRatio)),
+      findsAtLeastNWidgets(1),
+      reason: '修复后 MediaGalleryCard 单图分支必须在 MediaView 外层包 AspectRatio '
+          '（或等效 bounded 父约束），给内部 Stack(StackFit.expand) bounded 高度。'
+          '如本断言失败，说明有人误删了 _GallerySlot 的 AspectRatio 包裹，'
+          '会立刻在 ListView+Column 场景触发白屏+卡死 bug。',
+    );
+
+    // 主动卸载 → MediaView.dispose；再推进 600ms 把 visibility_detector 在
+    // paint 期排的 500ms 一次性 timer（FakeAsync 区跟踪）无害跑完，
+    // teardown 不会报 "A Timer is still pending"
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 600));
+  });
 }

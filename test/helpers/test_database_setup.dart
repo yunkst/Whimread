@@ -22,8 +22,15 @@ class TestDatabaseSetup {
   ///
   /// 复用 DatabaseMigrations 的迁移逻辑：
   /// 1. 调用 DatabaseMigrations.createV1Tables(db) 创建 v1 基础表
-  /// 2. 调用 DatabaseMigrations.upgrade(db, 1, 21) 执行所有迁移
+  /// 2. 调用 DatabaseMigrations.upgrade(db, 1, currentVersion) 执行所有迁移
   /// 确保测试环境与生产环境的数据库结构完全一致。
+  ///
+  /// PRAGMA foreign_keys = ON：SQLite 默认关闭外键且该 PRAGMA 是
+  /// per-connection 的，必须在 onConfigure 里显式开启（与生产
+  /// database_connection.dart 一致，也与 test/helpers/in_memory_db.dart 对齐）。
+  /// 此前本 helper 不开 FK，级联删除 / 外键违规这类真实行为在该库上结构性
+  /// 不可见，部分测试只能依赖 v31 迁移顺带执行 PRAGMA 才通过（脆弱的隐式
+  /// 耦合）。统一开启后，请确保 fixture 先建父表行再插子表行。
   static Future<Database> createInMemoryDatabase() async {
     init();
 
@@ -31,6 +38,9 @@ class TestDatabaseSetup {
       ':memory:',
       version: DatabaseMigrations.currentVersion,
       singleInstance: false,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
     );
 
     await DatabaseMigrations.createV1Tables(db);
@@ -43,7 +53,6 @@ class TestDatabaseSetup {
   ///
   /// 清理顺序：先清带 FK 引用子表，再清被引用表，避免 FK CASCADE 误删。
   static Future<void> clearAllTables(Database db) async {
-    // 先关 FK，避免清 sessions 时 CASCADE 删 messages 触发 warning 噪音
     await db.delete('chat_messages');
     await db.delete('chat_sessions');
     await db.delete('bookshelf');

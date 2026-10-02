@@ -11,6 +11,10 @@
 // restorePuaInText 的对外契约不退化。
 library;
 
+import 'package:dio/dio.dart' show DioException;
+import 'package:flutter/foundation.dart' show FlutterError;
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/providers/ocr_providers.dart';
@@ -39,15 +43,26 @@ void main() {
 
   test('真实 OcrPredictor 加载（skip if no native lib）', () async {
     print('集成层意图：验证 ocrPredictorProvider 能拉起真实 onnx 模型；'
-        '桌面 CI 无 onnxruntime 原生库时走 catch skip，不阻塞流水线。');
+        '桌面 CI 无 onnxruntime 原生库时显式 skip，不阻塞流水线。');
     final container = ProviderContainer();
     addTearDown(container.dispose);
     try {
       final predictor = await container.read(ocrPredictorProvider.future);
       expect(predictor.isLoaded, isTrue);
-    } catch (e) {
-      // CI 无 onnxruntime 原生库时 skip
-      print('skip: onnxruntime 不可用 - $e');
+    } on MissingPluginException catch (e) {
+      // 显式 skip 让 CI 报告可见；其余异常照常失败（旧实现裸 catch +
+      // print 恒绿，会吞掉 predictor 的真实回归）
+      markTestSkipped('onnxruntime 不可用（仅 Android/iOS 提供原生库）: $e');
+      return; // markTestSkipped 是 void，不会中断执行，必须显式返回
+    } on PlatformException catch (e) {
+      markTestSkipped('onnxruntime 原生库加载失败: $e');
+      return;
+    } on DioException catch (e) {
+      markTestSkipped('模型文件不可达（CI 无网/源不可用）: ${e.message}');
+      return;
+    } on FlutterError catch (e) {
+      markTestSkipped('模型资产缺失（测试环境不打包模型文件）: $e');
+      return;
     }
   });
 }
