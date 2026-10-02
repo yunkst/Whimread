@@ -91,20 +91,27 @@ class SubagentRegistry {
   /// 保留最近 [keep] 个 run，清掉更早的**终态** run——控制内存
   /// （spec §5.3 N=20，生产接线点：[SubagentRunner.dispatch] 每注册新 run 后调用）。
   ///
-  /// 非终态（pending/running）一律保留，原因：
+  /// 非终态（pending/running）一律保留，**不因其占保留位而被多清一条**：
   /// - [countActiveBySession] 用它们做 4 并发 / 30 排队上限计数，
   ///   清掉会让计数低估、绕过 maxQueue 上限；
   /// - [SubagentRunner.cancelAllForSession]（主 Agent cancel 级联）按注册表
   ///   找活跃 run，清掉会导致取消漏杀。
-  /// （终态 run 按 createdAt 新→旧保留最近 keep 个，与既有单测
-  /// 「保留最近 N 个终态 run，清掉更早的」一致。）
+  ///
+  /// 排序稳定性：同一批快速创建的 run createdAt 同毫秒，Dart 的 List.sort
+  /// 不稳定会让"跳过集"随机落在不同 run 上（挂起 run 可能被排进保留位，
+  /// 导致多清一个终态或漏清）。Map 保序，createdAt 相同时按插入序兜底，
+  /// 保证清理量确定。
   void pruneForSession(String parentSessionId, {required int keep}) {
     final m = _runsBySession[parentSessionId];
     if (m == null) return;
     if (m.length <= keep) return;
-    final sorted = m.values.toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt)); // 新→旧
-    for (final r in sorted.skip(keep)) {
+    final sorted = m.values.toList().asMap().entries.toList()
+      ..sort((a, b) {
+        final byTime = b.value.createdAt.compareTo(a.value.createdAt);
+        return byTime != 0 ? byTime : a.key.compareTo(b.key);
+      }); // 新→旧
+    for (final e in sorted.skip(keep)) {
+      final r = e.value;
       if (!r.isTerminal) continue; // 非终态保留（见方法注释）
       m.remove(r.runId);
       if (r.toolCallId.isNotEmpty) {
