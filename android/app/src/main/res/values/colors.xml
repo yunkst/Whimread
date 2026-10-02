@@ -3,4 +3,6 @@
     <!-- 启动屏/开屏层统一背景（暗夜书馆炭纸），
          与 lib/widgets/startup_splash.dart 的 kStartupSplashBackground 对齐 -->
     <color name="launch_bg">#FF241F16</color>
+    <!-- 自适应图标背景层，与 assets/icon/master.png 底色一致 -->
+    <color name="ic_launcher_background">#181D2F</color>
 </resources>
