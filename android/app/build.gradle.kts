@@ -1,5 +1,9 @@
 import java.util.Properties
 import java.io.FileInputStream
+// 注意不能写 java.net.URI 形式：Kotlin DSL 里 `java` 会先解析成 java 扩展
+// （java { } 块访问器），必须显式 import
+import java.net.URI
+import java.net.HttpURLConnection
 
 plugins {
     id("com.android.application")
@@ -32,7 +36,7 @@ tasks.register("downloadLocalDreamEngine") {
     onlyIf { localDreamEngineUrl.isNotEmpty() && !localDreamEngineSo.exists() }
     doLast {
         localDreamEngineSo.parentFile.mkdirs()
-        val conn = java.net.URI(localDreamEngineUrl).toURL().openConnection() as java.net.HttpURLConnection
+        val conn = URI(localDreamEngineUrl).toURL().openConnection() as HttpURLConnection
         conn.connectTimeout = 30_000
         conn.readTimeout = 10 * 60_000
         if (conn.responseCode !in 200..299) {
