@@ -22,19 +22,55 @@ manager 换参数重启进程。
 
 ## 构建期人工步骤（不放置则功能优雅降级为"引擎未打包"）
 
-1. **引擎二进制**：Local Dream 仓库 `build.sh` 产物（或作者提供的
-   APK 内 `libstable_diffusion_core.so`，arm64）放入
-   `android/app/src/main/jniLibs/arm64-v8a/`。
-   - gradle 已设 `jniLibs.useLegacyPackaging = true`：Android 10+ W^X
-     禁止 exec 私有目录文件，必须由 installer 解包到 nativeLibraryDir，
-     因此该二进制**不能**像 libsds.so 那样动态下载。
-2. **QNN 运行库**：Local Dream `build/android/qnnlibs/` 下全部文件放入
-   `assets/local_dream/qnnlibs/`。首启由 MainActivity 的
-   `engine/prepareQnnLibs` 通道解压到 `filesDir/local_dream_runtime`，
-   并以 `LD_LIBRARY_PATH` 传给引擎子进程。
-3. **模型源 URL**：`assets/local_dream/catalog.json` 的 files[].url
-   填入真实可下载源（HuggingFace 等）。URL 全空的条目在下载页显示
-   为禁用态。
+1. **引擎二进制**（唯一需要进 APK 的产物）：Local Dream 仓库 `build.sh`
+   产物（或从其 APK 提取的 `libstable_diffusion_core.so`，arm64）放入
+   `android/app/src/main/jniLibs/arm64-v8a/`，**或**构建时自动下载：
+   ```
+   flutter build apk -PlocalDreamEngineUrl=https://<bucket>/libstable_diffusion_core.so
+   ```
+   - 它是被 **exec** 的可执行文件：Android 10+ W^X 禁止 exec 私有目录
+     文件，必须由 installer 解包到 nativeLibraryDir——因此**不能**像
+     libsds.so（dlopen 语义）那样运行时下载，这是平台硬约束。
+   - gradle 已设 `useLegacyPackaging = true`（APK 内压缩存储 + 安装时
+     解包，APK 体积按压缩后计）。
+   - 未放置且未设置 URL 时优雅降级："引擎未打包"引导，其余功能不受影响。
+
+## 产物获取与发布（待办操作手册）
+
+两个产物都从**手机上已安装的 Local Dream APK** 提取（无需 root）：
+
+```bash
+# 1. 从 Local Dream APK 提取（手机插 USB + USB 调试）
+adb shell pm path io.github.xororz.localdream
+adb pull <上一步输出的 base.apk 路径> localdream.apk
+unzip localdream.apk "lib/arm64-v8a/libstable_diffusion_core.so" "assets/qnnlibs/*" -d ld_extract
+
+# 2. 引擎 .so 放入工程（本机构建即含引擎）
+cp ld_extract/lib/arm64-v8a/libstable_diffusion_core.so   android/app/src/main/jniLibs/arm64-v8a/
+
+# 3. 上传两个产物到资源桶
+#    tcb CLI 首次使用需登录一次（浏览器授权；v2 版本凭据存 ~/.cloudbase/auth.json）：
+npx -y -p @cloudbase/cli@2.12.10 tcb login
+npx -y @cloudbase/cli@2.12.10 storage upload   ld_extract/lib/arm64-v8a/libstable_diffusion_core.so   app-resources/v1/local_dream_engine/libstable_diffusion_core.so   -e whimread-dev-d0gm4oi0z3099082d
+for f in ld_extract/assets/qnnlibs/*.so; do
+  npx -y @cloudbase/cli@2.12.10 storage upload "$f"     "app-resources/v1/local_dream_qnn/$(basename $f)"     -e whimread-dev-d0gm4oi0z3099082d
+done
+
+# 4. 重新生成并上传 manifest（工具会登记 local_dream_qnn 条目 + 引擎 URL）
+dart run tool/publish_resources.dart   --sd-so <现有 libsds.so>   --qnn-dir ld_extract/assets/qnnlibs   --ld-engine-so ld_extract/lib/arm64-v8a/libstable_diffusion_core.so   --out tool/app_resources/dist
+# 按 dist/UPLOAD_LIST.txt 上传（含更新后的 manifest.json）
+```
+
+完成后：构建用 `-PlocalDreamEngineUrl=<第 4 步输出的 URL>`；客户端首次启动
+NPU 模型时自动下载 QNN 运行库。模型源 URL：内置目录
+（`lib/services/local_dream_embedded/model_pack.dart`）已指向 HuggingFace
+真实源（`xororz/sd-qnn` 等作者仓库），国内可在下载页切 HF Mirror。
+2. **QNN 运行库不打包**：被引擎 dlopen（不受 exec 限制），经
+   `app_resource_manager` 统一 manifest（`local_dream_qnn` 条目）首次
+   启动 NPU 模型时按需下载到 `dynamic_resources/local_dream_qnn/`，
+   sha256 校验 + 断点重试。需要往资源桶 manifest 里发布该条目
+   （文件名 = 原始 so 名，如 libQnnHtp.so）。**未发布前 sd15cpu 包
+   （纯 MNN，无 QNN 依赖）可完整使用**。
 
 ## 模型分发（与 Local Dream App 同款目录）
 

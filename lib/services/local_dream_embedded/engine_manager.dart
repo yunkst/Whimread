@@ -4,8 +4,9 @@
 /// 以子进程形态运行并监听 localhost:8081（/generate /health）。
 ///
 /// 职责：
-/// - 探测引擎二进制 / QNN 运行库是否已打包（缺失时给出放置引导）
-/// - 解压 QNN 运行库（经 Kotlin 通道，rootBundle 无法枚举资产目录）
+/// - 探测引擎二进制是否已打包（缺失时给出放置引导）
+/// - QNN 运行库运行时按需下载（dlopen 语义不受 W^X exec 限制，
+///   走 app_resource_manager 统一 manifest 机制，不进 APK/启动引导）
 /// - 启动/停止子进程：参数相同复用运行中的实例，不同则重启切换模型
 /// - 启动后轮询 /health 等待模型加载完成（NPU 图加载可达数十秒）
 ///
@@ -19,6 +20,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
 
+import 'package:path/path.dart' as p;
+
+import '../app_resource_manager.dart';
 import '../logger_service.dart';
 import '../image_generation/local_dream_client.dart';
 import 'model_pack.dart';
@@ -72,6 +76,10 @@ class LocalDreamEngineManager {
       MethodChannel('com.example.novel_app/engine');
 
   final LocalDreamClient _client;
+  final AppResourceManager _resources;
+
+  /// manifest 缓存（QNN spec 查询用；失败不缓存，下次重试）
+  AppResourcesManifest? _manifestCache;
 
   Process? _process;
   LocalDreamEngineStatus _status = const LocalDreamEngineStatus.stopped();
@@ -86,8 +94,9 @@ class LocalDreamEngineManager {
   /// 进行中的启动任务（单飞去重：相同参数的并发 start 复用同一 Future）
   _ActiveStart? _activeStart;
 
-  LocalDreamEngineManager({LocalDreamClient? client})
-      : _client = client ?? LocalDreamClient(host: '127.0.0.1');
+  LocalDreamEngineManager({LocalDreamClient? client, AppResourceManager? resourceManager})
+      : _client = client ?? LocalDreamClient(host: '127.0.0.1'),
+        _resources = resourceManager ?? AppResourceManager();
 
   /// 当前运行状态（同步快照）
   LocalDreamEngineStatus get status => _status;
@@ -152,24 +161,48 @@ class LocalDreamEngineManager {
     }
   }
 
-  /// QNN 运行库是否已打包（纯查询：只枚举 assets，不触发解压——
-  /// 解压由 [ensureStarted] 内的 prepareQnnLibs 显式完成）
-  Future<bool> isQnnAssetsAvailable() async {
-    if (!Platform.isAndroid) return false;
+  /// QNN 运行库是否已下载就绪（本地检查，不触发网络/下载；
+  /// 权威校验在 [_ensureQnnRuntime] 的 sha256 流程里）
+  Future<bool> isQnnRuntimeReady() => _resources.localDreamQnnReady();
+
+  /// 解析 QNN 运行时目录：manifest 取 spec → ensureResource 下载校验。
+  /// [onProgress] 透传下载字节进度（仅首次下载时有流量）。
+  Future<String?> _ensureQnnRuntime(
+    LocalDreamPackType type, {
+    void Function(int received, int total)? onProgress,
+  }) async {
+    if (!type.needsQnnLibs) return null;
+
+    final manifest = await _manifest();
+    final spec = manifest.resources[ResourceIds.localDreamQnn];
+    if (spec == null) {
+      throw const LocalDreamEngineException(
+          'QNN 运行库资源尚未发布（资源清单缺少 local_dream_qnn 条目），'
+          '请等待资源更新后重试');
+    }
+    final Map<String, String> paths;
     try {
-      return await _channel.invokeMethod<bool>('hasQnnLibsAssets') ?? false;
-    } on PlatformException catch (e) {
-      // 通道异常 ≠ 未打包（Kotlin 侧打包缺失会正常回 false）：warn 区分排障
-      LoggerService.instance.w(
-          '查询 QNN 资产失败（通道异常）: ${e.message ?? e.code}',
-          category: LogCategory.ai,
-          tags: ['local_dream_engine', 'channel']);
-      return false;
-    } on MissingPluginException {
-      LoggerService.instance.d('引擎通道缺失，QNN 资产查询不可用',
-          category: LogCategory.ai,
-          tags: ['local_dream_engine', 'channel']);
-      return false;
+      paths = await _resources.ensureResource(spec, onProgress: onProgress);
+    } catch (e) {
+      throw LocalDreamEngineException('下载 QNN 运行库失败：$e');
+    }
+    if (paths.isEmpty) {
+      throw const LocalDreamEngineException('QNN 运行库资源下载结果为空');
+    }
+    return p.dirname(paths.values.first);
+  }
+
+  /// manifest（带缓存；仅在 QNN 启动路径使用）
+  Future<AppResourcesManifest> _manifest() async {
+    final cached = _manifestCache;
+    if (cached != null) return cached;
+    try {
+      final manifest = await _resources.fetchManifest();
+      _manifestCache = manifest;
+      return manifest;
+    } catch (e) {
+      throw LocalDreamEngineException(
+          '获取资源清单失败（检查网络后重试）：$e');
     }
   }
 
@@ -184,6 +217,7 @@ class LocalDreamEngineManager {
   Future<void> ensureStarted({
     required LocalDreamPackType type,
     required String modelDir,
+    void Function(int received, int total)? onQnnProgress,
   }) async {
     // 单飞：相同参数的启动已在进行中 → 复用同一 Future（含异常语义）
     final active = _activeStart;
@@ -198,7 +232,7 @@ class LocalDreamEngineManager {
           return;
         }
         await _stopInternal();
-        await _spawn(type: type, modelDir: modelDir);
+        await _spawn(type: type, modelDir: modelDir, onQnnProgress: onQnnProgress);
       } finally {
         // 只清理仍属于自己的记录（期间可能有不同参数的新任务已入队）
         if (identical(_activeStart, pending)) _activeStart = null;
@@ -219,6 +253,7 @@ class LocalDreamEngineManager {
   Future<void> _spawn({
     required LocalDreamPackType type,
     required String modelDir,
+    void Function(int received, int total)? onQnnProgress,
   }) async {
     final nativeDir = await nativeLibDir();
     final executable = nativeDir == null
@@ -231,21 +266,8 @@ class LocalDreamEngineManager {
           '请按 docs/local_dream_engine.md 放置 Local Dream 引擎产物后重新构建安装。');
     }
 
-    String? runtimeDir;
-    if (type.needsQnnLibs) {
-      try {
-        runtimeDir =
-            await _channel.invokeMethod<String>('prepareQnnLibs');
-      } on PlatformException catch (e) {
-        throw LocalDreamEngineException(
-            '准备 QNN 运行库失败：${e.message ?? e.code}');
-      }
-      if (runtimeDir == null || runtimeDir.isEmpty) {
-        throw const LocalDreamEngineException(
-            'QNN 运行库未打包：assets/local_dream/qnnlibs 为空。'
-            '请按 docs/local_dream_engine.md 放置 Local Dream 引擎产物。');
-      }
-    }
+    // QNN 运行库运行时下载（dlopen 语义；首次有流量，之后 sha256 命中直过）
+    final runtimeDir = await _ensureQnnRuntime(type, onProgress: onQnnProgress);
 
     final args = buildEngineArgs(
       type: type,

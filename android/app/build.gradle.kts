@@ -17,7 +17,40 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// Local Dream 嵌入式引擎构建期自动下载（2026-09）：
+// 引擎是"可执行文件伪装 .so"，Android 10+ W^X 禁止 exec 私有目录文件，
+// 必须经 installer 解包（jniLibs + useLegacyPackaging），因此不能像
+// libsds.so 那样运行时下载，但构建期可以自动化——消除手动放置产物的步骤。
+//
+// 用法（URL 指向 Local Dream 引擎产物，作者提供或从其 APK 提取后上传）：
+//   flutter build apk -PlocalDreamEngineUrl=https://<bucket>/libstable_diffusion_core.so
+// 未设置 URL 或文件已存在时跳过（本地已有产物优先，不重复下载）。
+val localDreamEngineUrl = (project.findProperty("localDreamEngineUrl") as String?) ?: ""
+val localDreamEngineSo = file("src/main/jniLibs/arm64-v8a/libstable_diffusion_core.so")
+
+tasks.register("downloadLocalDreamEngine") {
+    onlyIf { localDreamEngineUrl.isNotEmpty() && !localDreamEngineSo.exists() }
+    doLast {
+        localDreamEngineSo.parentFile.mkdirs()
+        val conn = java.net.URI(localDreamEngineUrl).toURL().openConnection() as java.net.HttpURLConnection
+        conn.connectTimeout = 30_000
+        conn.readTimeout = 10 * 60_000
+        if (conn.responseCode !in 200..299) {
+            throw GradleException("Local Dream 引擎下载失败: HTTP ${conn.responseCode} ($localDreamEngineUrl)")
+        }
+        conn.inputStream.use { input ->
+            localDreamEngineSo.outputStream().use { output -> input.copyTo(output) }
+        }
+        println("Local Dream 引擎已下载: ${localDreamEngineSo.absolutePath} (${localDreamEngineSo.length()} bytes)")
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("downloadLocalDreamEngine")
+}
+
 android {
+
     namespace = "com.example.novel_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion

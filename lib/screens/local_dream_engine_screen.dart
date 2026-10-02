@@ -36,7 +36,9 @@ class _LocalDreamEngineScreenState
       ref.read(localDreamEmbeddedEngineManagerProvider);
 
   bool? _binaryAvailable;
-  bool? _qnnAvailable;
+  bool? _qnnReady; // QNN 运行库是否已下载就绪（未就绪时启动引擎会自动下载）
+  int? _qnnReceived;
+  int? _qnnTotal;
   LocalDreamEngineStatus _status = const LocalDreamEngineStatus.stopped();
 
   ImageModel? _selectedModel;
@@ -87,11 +89,11 @@ class _LocalDreamEngineScreenState
 
   Future<void> _refreshChecks() async {
     final binary = await _manager.isBinaryAvailable();
-    final qnn = await _manager.isQnnAssetsAvailable();
+    final qnn = await _manager.isQnnRuntimeReady();
     if (!mounted) return;
     setState(() {
       _binaryAvailable = binary;
-      _qnnAvailable = qnn;
+      _qnnReady = qnn;
       _status = _manager.status;
     });
   }
@@ -188,7 +190,17 @@ class _LocalDreamEngineScreenState
     });
     final client = LocalDreamClient(host: '127.0.0.1');
     try {
-      await _manager.ensureStarted(type: type, modelDir: model.filePath);
+      await _manager.ensureStarted(
+        type: type,
+        modelDir: model.filePath,
+        onQnnProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            _qnnReceived = received;
+            _qnnTotal = total;
+          });
+        },
+      );
       setState(() => _status = _manager.status);
 
       final size = type.generationSize;
@@ -297,7 +309,7 @@ class _LocalDreamEngineScreenState
                   ? Icons.hourglass_empty
                   : ok
                       ? Icons.check_circle
-                      : Icons.cancel,
+                      : Icons.radio_button_unchecked,
               size: 18,
               color: ok == null
                   ? null
@@ -332,7 +344,15 @@ class _LocalDreamEngineScreenState
           row('引擎二进制（libstable_diffusion_core.so）', _binaryAvailable,
               '已打包', '未打包'),
           const SizedBox(height: 6),
-          row('QNN 运行库', _qnnAvailable, '已打包', '未打包'),
+          row('QNN 运行库', _qnnReady, '已下载', '未下载'),
+          if (_qnnReceived != null && _qnnTotal != null && _qnnTotal! > 0) ...[
+            const SizedBox(height: 4),
+            LinearProgressIndicator(value: _qnnReceived! / _qnnTotal!),
+            const SizedBox(height: 2),
+            Text(
+                'QNN 运行库下载中 ${(_qnnReceived! * 100 / _qnnTotal!).toStringAsFixed(0)}%',
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
           if (_status.running) ...[
             const SizedBox(height: 6),
             row('引擎进程', true, '运行中 (pid ${_status.pid})', ''),
@@ -344,8 +364,8 @@ class _LocalDreamEngineScreenState
             const SizedBox(height: 8),
             Text(
               '引擎未打包：请按 docs/local_dream_engine.md 将 '
-              'libstable_diffusion_core.so 放入 jniLibs，'
-              'QNN 运行库放入 assets/local_dream/qnnlibs 后重新构建。',
+              'libstable_diffusion_core.so 放入 jniLibs 后重新构建'
+              '（QNN 运行库无需打包，启动引擎时自动下载）。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.error,
                   ),

@@ -41,6 +41,7 @@ class _FakeEngineManager implements LocalDreamEngineManager {
   Future<void> ensureStarted({
     required LocalDreamPackType type,
     required String modelDir,
+    void Function(int received, int total)? onQnnProgress,
   }) async {
     started.add((type: type, modelDir: modelDir));
   }
@@ -52,7 +53,7 @@ class _FakeEngineManager implements LocalDreamEngineManager {
   LocalDreamEngineStatus get status => const LocalDreamEngineStatus.stopped();
 
   @override
-  Future<bool> isQnnAssetsAvailable() async => true;
+  Future<bool> isQnnRuntimeReady() async => true;
 
   @override
   Future<String?> nativeLibDir() async => '/unused';
@@ -108,7 +109,18 @@ void main() {
     PathProviderPlatform.instance = originalPathProvider;
     await generationServer.close(force: true);
     await db.close();
-    if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+    // Windows：刚 close 的 HttpServer / 引擎句柄释放是异步的，立刻递归删除
+    // 临时目录会撞 errno 32（另一个程序正在使用此文件）。重试数次；仍失败
+    // 则留给系统临时目录回收——teardown 清理噪音不该淹没真实断言。
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        if (!tempDir.existsSync()) return;
+        await tempDir.delete(recursive: true);
+        return;
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
   });
 
   /// 建 sdxl 模型包目录（9 个必需文件全写占位内容）

@@ -198,6 +198,11 @@ abstract final class ResourceIds {
   static const String uiFonts = 'ui_fonts';
   static const String sdEngine = 'sd_engine';
   static const String ocrModel = 'ocr_model';
+
+  /// Local Dream 嵌入式引擎的 QNN 运行库（多个 .so，dlopen 语义，
+  /// 不受 W^X exec 限制——与 libsds.so 同理可运行时下载）。
+  /// 引擎首次启动 NPU 类型时按需拉取，不进启动引导。
+  static const String localDreamQnn = 'local_dream_qnn';
 }
 
 class AppResourceManager {
@@ -404,6 +409,19 @@ class AppResourceManager {
     if (so.isEmpty) return false;
     sdLibraryPath = so.first;
     return true;
+  }
+
+  // ---- local_dream_qnn 专用 ----
+
+  /// QNN 运行库是否已下载就绪（资源目录内存在任一 .so；不触发网络/下载）。
+  /// 权威校验以 ensureResource 的 sha256 为准，这里仅供状态展示。
+  Future<bool> localDreamQnnReady() async {
+    final dir = await resourceDir(ResourceIds.localDreamQnn);
+    if (!await dir.exists()) return false;
+    await for (final e in dir.list()) {
+      if (e is File && e.path.endsWith('.so')) return true;
+    }
+    return false;
   }
 
   // ---- ui_fonts 专用 ----

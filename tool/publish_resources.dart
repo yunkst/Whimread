@@ -40,6 +40,8 @@ import 'package:crypto/crypto.dart';
 Future<void> main(List<String> args) async {
   String? sdSoPath;
   String? stripPath;
+  String? qnnDir;
+  String? ldEngineSo;
   var fontsDir = 'assets/fonts';
   var baseUrl =
       'https://7768-whimread-dev-d0gm4oi0z3099082d-1256733196.tcb.qcloud.la';
@@ -53,6 +55,10 @@ Future<void> main(List<String> args) async {
         stripPath = args[++i];
       case '--fonts-dir':
         fontsDir = args[++i];
+      case '--qnn-dir':
+        qnnDir = args[++i];
+      case '--ld-engine-so':
+        ldEngineSo = args[++i];
       case '--base-url':
         baseUrl = args[++i].replaceAll(RegExp(r'/+$'), '');
       case '--out':
@@ -126,6 +132,25 @@ Future<void> main(List<String> args) async {
   final sd = await fileEntry(
       '$baseUrl/app-resources/v1/sd_engine', soToPublish, 'libsds.so');
 
+  // 3. local_dream_qnn（QNN 运行库，多 .so；目录内所有 .so 全量登记）
+  List<Map<String, dynamic>> qnnFiles = [];
+  if (qnnDir != null) {
+    final qnnSource = Directory(qnnDir);
+    if (!await qnnSource.exists()) {
+      stderr.writeln('qnn 目录不存在: $qnnDir');
+      exit(2);
+    }
+    for (final f in qnnSource.listSync()) {
+      if (f is! File || !f.path.endsWith('.so')) continue;
+      final name = f.uri.pathSegments.last;
+      qnnFiles.add(await fileEntry(
+          '$baseUrl/app-resources/v1/local_dream_qnn', f, name));
+    }
+    if (qnnFiles.isEmpty) {
+      stderr.writeln('⚠️ qnn 目录里没有 .so 文件: $qnnDir');
+    }
+  }
+
   final manifest = {
     'manifest_version': 1,
     'generated_at': DateTime.now().toUtc().toIso8601String(),
@@ -140,6 +165,12 @@ Future<void> main(List<String> args) async {
         'version': DateTime.now().toUtc().toIso8601String(),
         'files': [sd],
       },
+      if (qnnFiles.isNotEmpty)
+        {
+          'id': 'local_dream_qnn',
+          'version': DateTime.now().toUtc().toIso8601String(),
+          'files': qnnFiles,
+        },
     ],
   };
 
@@ -156,10 +187,26 @@ Future<void> main(List<String> args) async {
         'app-resources/v1/ui_fonts/${f['name']} → $fontsDir/${f['name']}');
   }
   buffer.writeln('app-resources/v1/sd_engine/libsds.so → ${soToPublish.path}');
+  for (final f in qnnFiles) {
+    buffer.writeln(
+        'app-resources/v1/local_dream_qnn/${f['name']} → $qnnDir/${f['name']}');
+  }
+  if (ldEngineSo != null) {
+    buffer.writeln(
+        'app-resources/v1/local_dream_engine/libstable_diffusion_core.so → $ldEngineSo');
+  }
   await File('${out.path}/UPLOAD_LIST.txt').writeAsString(buffer.toString());
 
   stdout.writeln('manifest 已生成: ${manifestFile.path}');
   stdout.writeln('上传清单: ${out.path}/UPLOAD_LIST.txt');
   stdout.writeln(
       '上传后客户端从 $baseUrl/app-resources/v1/manifest.json 拉取');
+  if (ldEngineSo != null) {
+    stdout.writeln(
+        '引擎构建期下载 URL: $baseUrl/app-resources/v1/local_dream_engine/'
+        'libstable_diffusion_core.so');
+    stdout.writeln(
+        '用法: flutter build apk -PlocalDreamEngineUrl=$baseUrl/'
+        'app-resources/v1/local_dream_engine/libstable_diffusion_core.so');
+  }
 }
