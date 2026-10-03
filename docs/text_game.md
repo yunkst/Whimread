@@ -131,6 +131,12 @@
   区分度）；create_scene_image → 插图卡；present_choices → 选项
   按钮组（只有最后一条可点；玩家输入精确命中 label 标记 ✓）；
   roll_random_event → 命运骰子卡。
+- **失败调用不进剧情流**：`isFailedToolCall`（完成态 + 结果 JSON 含 error）判定
+  narrate/speak 失败（`unknown_character` / `missing_character` / 工具异常）。
+  失败尝试视为"没演成"，GM 会按纠错提示重调，只渲染重调成功的那次——否则
+  同一句台词会以"失败版 + 重调版"显示两遍（现场日志：speak 失败 →
+  create_character → 同文重调成功）。插图与骰子例外：失败态本身是信息
+  （错误卡/判定失败），照常渲染。运行中与结果解析失败按未失败处理。
 - **动画纪律：只为"本次到访新增的内容"播一次，历史永不重播**。游玩页在
   首次见到非空定稿链时播种（`_seedAnimationBookkeeping`）：链内已有的
   判定/选项 toolCallId 记为已播、记录链长度；回溯使链缩短时以当前长度

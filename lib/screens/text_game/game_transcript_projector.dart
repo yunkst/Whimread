@@ -13,6 +13,12 @@
 /// - roll_random_event 工具调用 → [GameDiceRoll]（分支/选中从参数与 result 解析）
 /// - present_choices 工具调用 → [GameChoices]
 ///
+/// 失败调用不进剧情流：narrate/speak 若以 error 告终（[isFailedToolCall]，
+/// 如 speak 的 unknown_character / missing_character），该次尝试视为"没演成"，
+/// GM 会按纠错提示重调——只渲染重调成功的那次，否则同一句台词会显示两遍
+/// （现场日志：speak 失败 → create_character → 同文重调成功）。插图与骰子
+/// 例外：它们的失败态本身是信息（错误卡/判定失败），照常渲染。
+///
 /// 选项活性：只有「最后一条」GameChoices 是可点的（active），其后出现玩家
 /// 输入则转为历史；若玩家输入与某选项 label 精确一致，该选项标记 chosen。
 /// 历史选项组带 rollbackUiIndex 锚点（其后那条玩家输入的位置），供游玩页
@@ -27,7 +33,8 @@ library;
 import 'dart:convert';
 
 import '../../models/agent_chat_message.dart';
-import '../../services/novel_agent/agent_event.dart' show AgentToolStatus;
+import '../../services/novel_agent/agent_event.dart'
+    show AgentToolCall, AgentToolStatus;
 import '../../services/novel_agent/scenarios/text_game_scenario.dart'
     show kGameProtocolNudge, weightedPercent;
 
@@ -323,6 +330,25 @@ bool isSkippableSystemText(String text) {
   return false;
 }
 
+/// 工具调用是否以失败告终（完成态且结果 JSON 含 error 字段）
+///
+/// 校验失败的 narrate/speak（如 speak 的 unknown_character）没有真正"演出"，
+/// GM 会按工具返回的纠错提示重调——失败尝试不进剧情流，否则同一句台词
+/// 会以"失败版 + 重调成功版"重复渲染两遍（用户反馈 #10/#11 现场日志：
+/// speak 失败 → create_character → 同文重调成功）。
+/// 运行中（无结果）与结果解析失败时按未失败处理，不误伤内容。
+bool isFailedToolCall(AgentToolCall call) {
+  if (call.status == AgentToolStatus.running) return false;
+  final raw = call.result;
+  if (raw == null || raw.isEmpty) return false;
+  try {
+    final decoded = jsonDecode(raw);
+    return decoded is Map && decoded.containsKey('error');
+  } catch (_) {
+    return false;
+  }
+}
+
 /// 回合收尾诊断（游玩页「自动补选」兜底的判定输入）
 ///
 /// 回合协议要求 GM 以 present_choices 收尾，但只是提示词约定：GM 若只演了
@@ -437,11 +463,15 @@ List<GameSegment> projectGameTranscript(
             final call = seg.call;
             switch (call.name) {
               case 'narrate':
+                // 校验失败的调用没有真正演出（工具返回纠错提示等 GM 重调），
+                // 不进剧情流——否则失败版 + 重调成功版重复渲染
+                if (isFailedToolCall(call)) break;
                 final text = call.arguments['text']?.toString() ?? '';
                 if (text.trim().isNotEmpty) {
                   result.add(GameNarration(text.trim()));
                 }
               case 'speak':
+                if (isFailedToolCall(call)) break;
                 final text = call.arguments['text']?.toString() ?? '';
                 final character =
                     call.arguments['character']?.toString().trim() ?? '';

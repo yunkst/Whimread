@@ -652,4 +652,102 @@ void main() {
       expect((segs[4] as GameChoices).active, isTrue);
     });
   });
+
+  group('失败工具调用不进剧情流（isFailedToolCall）', () {
+    const errUnknownCharacter = '{"error":"unknown_character",'
+        '"message":"未知角色「虞贵妃」。登场角色：虞欢。",'
+        '"knownCharacters":["虞欢"]}';
+
+    test('speak 校验失败 + 同文重调成功 → 只渲染成功那条', () {
+      final segs = projectGameTranscript([
+        AgentChatMessage.user('我看向她'),
+        // 第一次：角色名不在参战名单，工具返回纠错错误
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'speak',
+            {'character': '虞贵妃', 'text': '七郎无罪，是臣妾教子无方。'},
+            id: 's_fail',
+            result: errUnknownCharacter,
+          )),
+        ]),
+        // GM 建卡后同文重调 → 玩家只应看到这一条
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'speak',
+            {'character': '虞欢', 'text': '七郎无罪，是臣妾教子无方。'},
+            id: 's_ok',
+            result: '{"ok":true}',
+          )),
+        ]),
+      ], agentRunning: false);
+
+      expect(segs, hasLength(2), reason: '玩家输入 + 一条台词（失败版不渲染）');
+      final dialogue = segs[1] as GameDialogue;
+      expect(dialogue.character, '虞欢');
+      expect(dialogue.text, '七郎无罪，是臣妾教子无方。');
+    });
+
+    test('narrate 失败（execution_failed 但 text 非空）→ 不渲染旁白', () {
+      final segs = projectGameTranscript([
+        AgentChatMessage.user('我推门而入'),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'narrate',
+            {'text': '这段没能演成。'},
+            id: 'n_fail',
+            result: '{"error":"execution_failed","message":"工具异常"}',
+          )),
+        ]),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'narrate',
+            {'text': '屋内烛火摇曳。'},
+            id: 'n_ok',
+            result: '{"ok":true}',
+          )),
+        ]),
+      ], agentRunning: false);
+
+      expect(segs, hasLength(2));
+      expect((segs[1] as GameNarration).text, '屋内烛火摇曳。');
+    });
+
+    test('防误伤：结果坏 JSON / 运行中（无结果）→ 照常渲染', () {
+      final segs = projectGameTranscript([
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'narrate',
+            {'text': '结果解析坏了也要留着。'},
+            id: 'n_bad',
+            result: 'not-json{',
+          )),
+          ToolCallSegment(_call(
+            'speak',
+            {'character': '林昭', 'text': '还在判定中。'},
+            id: 's_running',
+            status: AgentToolStatus.running,
+          )),
+        ]),
+      ], agentRunning: true);
+
+      expect(segs, hasLength(2));
+      expect((segs[0] as GameNarration).text, '结果解析坏了也要留着。');
+      expect((segs[1] as GameDialogue).text, '还在判定中。');
+    });
+
+    test('isFailedToolCall 四态判定', () {
+      expect(
+          isFailedToolCall(_call('speak', const {}, result: '{"ok":true}')), isFalse);
+      expect(
+          isFailedToolCall(_call('speak', const {},
+              status: AgentToolStatus.running)),
+          isFalse);
+      expect(isFailedToolCall(_call('speak', const {}, result: null)), isFalse);
+      expect(
+          isFailedToolCall(_call('speak', const {}, result: 'garbage')), isFalse);
+      expect(
+          isFailedToolCall(_call('speak', const {}, result: errUnknownCharacter)),
+          isTrue);
+    });
+  });
 }
