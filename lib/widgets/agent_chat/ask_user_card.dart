@@ -19,11 +19,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../services/novel_agent/agent_event.dart';
+import '../../services/novel_agent/ask_user_registry.dart'
+    show normalizeAskUserOption;
 
 /// ask_user 参数（call.arguments 解析结果）
 class AskUserArgs {
   final String question;
-  final List<String> options;
+
+  /// 候选（已归一化）：LLM 可能传字符串，也可能传 {label, description}
+  /// 对象，统一成 (label, description) 记录
+  final List<({String label, String? description})> options;
   final bool multiSelect;
   final bool allowFreeText;
 
@@ -37,8 +42,11 @@ class AskUserArgs {
   static AskUserArgs parse(Map<String, dynamic> arguments) {
     final rawOptions = arguments['options'];
     final options = rawOptions is List
-        ? rawOptions.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).toList()
-        : const <String>[];
+        ? rawOptions
+            .map((e) => normalizeAskUserOption(e))
+            .where((o) => o.label.isNotEmpty)
+            .toList()
+        : const <({String label, String? description})>[];
     return AskUserArgs(
       question: (arguments['question'] as String?)?.trim() ?? '',
       options: options,
@@ -236,27 +244,14 @@ class _AskUserCardState extends State<AskUserCard> {
     final widgets = <Widget>[];
 
     if (args.options.isNotEmpty) {
-      widgets.add(Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      // 整行可点选项（radio / checkbox 形态）：候选常带补充说明，
+      // 单行 chip 会把长文本截断丢失关键信息
+      widgets.add(Column(
         children: [
-          for (final option in args.options)
-            args.multiSelect
-                ? FilterChip(
-                    label: Text(option),
-                    selected: _picked.contains(option),
-                    onSelected: (selected) => setState(() {
-                      selected ? _picked.add(option) : _picked.remove(option);
-                    }),
-                  )
-                : ChoiceChip(
-                    label: Text(option),
-                    selected: false,
-                    onSelected: (_) => _answer(
-                      selected: [option],
-                      freeText: null,
-                    ),
-                  ),
+          for (var i = 0; i < args.options.length; i++) ...[
+            if (i > 0) const SizedBox(height: 6),
+            _buildOptionRow(context, args, args.options[i]),
+          ],
         ],
       ));
     }
@@ -297,6 +292,87 @@ class _AskUserCardState extends State<AskUserCard> {
       ));
     }
     return widgets;
+  }
+
+  /// 单个候选项整行：radio（单选，点击即答）/ checkbox（多选，勾选后确认）
+  Widget _buildOptionRow(
+    BuildContext context,
+    AskUserArgs args,
+    ({String label, String? description}) option,
+  ) {
+    final theme = Theme.of(context);
+    final selected = _picked.contains(option.label);
+    final accent = theme.colorScheme.primary;
+    final borderColor =
+        selected ? accent.withValues(alpha: 0.6) : theme.dividerColor;
+    final fillColor =
+        selected ? accent.withValues(alpha: 0.06) : Colors.transparent;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        if (args.multiSelect) {
+          setState(() {
+            selected ? _picked.remove(option.label) : _picked.add(option.label);
+          });
+        } else {
+          // 单选点击即答
+          _answer(selected: [option.label], freeText: null);
+        }
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: fillColor,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              args.multiSelect
+                  ? (selected
+                      ? Icons.check_box
+                      : Icons.check_box_outline_blank)
+                  : (selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked),
+              size: 18,
+              color: selected ? accent : accent.withValues(alpha: 0.55),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    option.label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                      height: 1.35,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                  if (option.description != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      option.description!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildSendButton(AskUserArgs args) {
@@ -431,20 +507,29 @@ class _AskUserCardState extends State<AskUserCard> {
     final widgets = <Widget>[];
     final selected = result.selected;
     if (selected.isNotEmpty) {
-      widgets.add(Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      // 已选内容可能是长文本（Chip 会溢出/截断），改用整行勾选样式
+      widgets.add(Column(
         children: [
-          for (final option in selected)
-            Chip(
-              label: Text(option),
-              avatar: Icon(
-                args.multiSelect ? Icons.check_box : Icons.check_circle,
-                size: 16,
-                color: theme.colorScheme.tertiary,
-              ),
-              visualDensity: VisualDensity.compact,
+          for (var i = 0; i < selected.length; i++) ...[
+            if (i > 0) const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  args.multiSelect ? Icons.check_box : Icons.check_circle,
+                  size: 16,
+                  color: theme.colorScheme.tertiary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    selected[i],
+                    style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
+                  ),
+                ),
+              ],
             ),
+          ],
         ],
       ));
     }

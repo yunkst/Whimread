@@ -318,6 +318,64 @@ bool isSkippableSystemText(String text) {
   return false;
 }
 
+/// 回合收尾诊断（游玩页「自动补选」兜底的判定输入）
+///
+/// 回合协议要求 GM 以 present_choices 收尾，但只是提示词约定：GM 若只演了
+/// 剧情就停手，回合会正常 finalize，玩家端一个选项都没有，只剩自由输入框。
+/// 这里按「最后一条玩家输入之后」的剧情段做纯判定：
+/// - [hasPlayerInput] 定稿链里出现过玩家输入（首回合即「开始游戏」消息）
+/// - [hasStoryAfterInput] 该输入之后有剧情产出（旁白/台词/插图/判定）
+/// - [hasChoicesAfterInput] 该输入之后有选项组（正常收尾）
+({bool hasPlayerInput, bool hasStoryAfterInput, bool hasChoicesAfterInput})
+    diagnoseTurnEnding(List<GameSegment> transcript) {
+  var lastInputIdx = -1;
+  for (var i = 0; i < transcript.length; i++) {
+    if (transcript[i] is GamePlayerInput) lastInputIdx = i;
+  }
+  var hasStory = false;
+  var hasChoices = false;
+  for (var i = lastInputIdx + 1; i < transcript.length; i++) {
+    switch (transcript[i]) {
+      case GameNarration() ||
+            GameDialogue() ||
+            GameSceneImage() ||
+            GameDiceRoll():
+        hasStory = true;
+      case GameChoices():
+        hasChoices = true;
+      case GamePlayerInput():
+        break;
+    }
+  }
+  return (
+    hasPlayerInput: lastInputIdx >= 0,
+    hasStoryAfterInput: hasStory,
+    hasChoicesAfterInput: hasChoices,
+  );
+}
+
+/// 是否应自动补一轮选项（纯判定，控制器在每个回合 finalize 后调用）
+///
+/// 「有剧情、无选项」才补；以下情况一律不动：
+/// - [agentRunning] 回合仍在跑（finalize 判定时本为 false，保留为防御）
+/// - [hasError] 回合失败——玩家需要的是重试，不是自动续跑
+/// - [cancelRequested] 玩家主动按了「停止」，绝不能替他重启
+/// - [autoNudgeCount] 已自动补过（每条玩家输入至多补 1 次，防无限续跑）
+bool shouldAutoNudgeChoices({
+  required bool hasStoryAfterInput,
+  required bool hasChoicesAfterInput,
+  required bool agentRunning,
+  required bool hasError,
+  required bool cancelRequested,
+  required int autoNudgeCount,
+}) =>
+    !agentRunning &&
+    !hasError &&
+    !cancelRequested &&
+    autoNudgeCount < 1 &&
+    hasStoryAfterInput &&
+    !hasChoicesAfterInput;
+
 /// 投影主函数
 ///
 /// [messages] 来自 AgentChatState.messages（定稿链）；[agentRunning] 为
@@ -374,13 +432,17 @@ List<GameSegment> projectGameTranscript(
               case 'speak':
                 final text = call.arguments['text']?.toString() ?? '';
                 final character =
-                    call.arguments['character']?.toString() ?? '';
+                    call.arguments['character']?.toString().trim() ?? '';
                 if (text.trim().isNotEmpty) {
-                  result.add(GameDialogue(
-                    character: character,
-                    text: text.trim(),
-                    avatarMediaId: avatarByName[character],
-                  ));
+                  // 角色名缺失（speak 未带 character，工具已返回纠错错误）：
+                  // 退化为旁白，避免渲染出只有空名字签的台词行
+                  result.add(character.isEmpty
+                      ? GameNarration(text.trim())
+                      : GameDialogue(
+                          character: character,
+                          text: text.trim(),
+                          avatarMediaId: avatarByName[character],
+                        ));
                 }
               case 'create_scene_image':
                 final prompt =

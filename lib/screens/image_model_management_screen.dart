@@ -40,8 +40,10 @@ class ImageModelManagementScreen extends ConsumerStatefulWidget {
 
 class _ImageModelManagementScreenState
     extends ConsumerState<ImageModelManagementScreen> {
-  /// 下载源（HuggingFace / HF Mirror；本页内存态，重进恢复默认）
-  String _baseUrl = LocalDreamBaseUrl.huggingface;
+  /// 下载源（HuggingFace / HF Mirror；本页内存态，重进恢复默认）。
+  /// 默认国内镜像——主要用户群在国内，直连 HuggingFace 常年超时
+  /// （hf-mirror.com 为其完整反代，模型包内容一致）。
+  String _baseUrl = LocalDreamBaseUrl.defaultUrl;
   bool _startingDownload = false;
 
   @override
@@ -406,10 +408,10 @@ class _CatalogEntryCard extends StatelessWidget {
             ],
             if (pausedRow != null && downloadingRow == null) ...[
               const SizedBox(height: 6),
-              Text('已暂停（点下载图标可重新开始）',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                  )),
+              Text('已暂停（点下载图标继续，从断点续传）',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                      )),
             ],
           ],
         ),

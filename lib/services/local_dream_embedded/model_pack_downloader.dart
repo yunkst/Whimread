@@ -18,6 +18,7 @@ import 'dart:isolate';
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart'
     show getApplicationDocumentsDirectory;
@@ -41,7 +42,19 @@ class LocalDreamModelPackDownloader {
 
   LocalDreamModelPackDownloader({required Ref ref, Dio? dio})
       : _ref = ref,
-        _dio = dio ?? Dio();
+        _dio = dio ??
+            Dio(BaseOptions(
+              // 反馈 #9：切后台后 socket 被系统静默掐断（vivo 冻结/杀进程、
+              // 网络切换），零超时的 await for 会永远等下去——进度条卡死、
+              // 状态停在 downloading、不报错。超时把静默死亡变成可续传的
+              // failed。receiveTimeout 是「两次数据事件之间」的间隔超时，
+              // 大文件慢速下载也不会误伤。
+              connectTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(seconds: 60),
+            ));
+
+  @visibleForTesting
+  bool hasActiveDownload(int modelId) => _cancelTokens.containsKey(modelId);
 
   void dispose() {
     _onChanged.close();
@@ -66,6 +79,31 @@ class LocalDreamModelPackDownloader {
     return true;
   }
 
+  /// 自愈：库里 downloading 但本进程**没有**进行中任务的孤儿行，直接续传。
+  ///
+  /// 覆盖启动对账管不到的场景——同进程内下载任务死掉但行状态没机会归位
+  /// （典型：切后台被系统冻结，恢复前台后任务已被超时终结）。app 回前台
+  /// 时调用（HomePage 生命周期 resumed）；有活跃任务的行跳过（幂等守卫
+  /// 兜底，不会双写同一 .part）。返回自愈的行数。
+  Future<int> resumeOrphanDownloads() async {
+    final repo = _ref.read(imageModelRepositoryProvider);
+    final downloading = await repo.getByStatus(ImageModelStatus.downloading);
+    var healed = 0;
+    for (final row in downloading) {
+      final id = row.id;
+      if (id == null || _cancelTokens.containsKey(id)) continue;
+      healed++;
+      LoggerService.instance.w(
+        '孤儿下载自愈：续传 "${row.name}" (id=$id)',
+        category: LogCategory.ai,
+        tags: ['local_dream_pack', 'orphan-heal'],
+      );
+      unawaited(startDownload(row));
+    }
+    if (healed > 0) _onChanged.add(null);
+    return healed;
+  }
+
   /// 模型包根目录（<应用文档目录>/local_dream_models/）
   static Future<String> modelsRootDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -77,24 +115,56 @@ class LocalDreamModelPackDownloader {
   /// 为一个目录条目创建占位 image_models 行（status=downloading）。
   /// [zipUrl] 为解析后的完整下载地址（含芯片后缀 / 镜像源）。
   /// [catalogId] 落库的目录条目 id（目录导入传空——它不对应 catalog 条目）。
+  ///
+  /// 同名的未就绪行（paused/failed/downloading）会被**复用**而不是新插：
+  /// 目录卡片对这类条目仍显示下载图标，若新插同名行会撞
+  /// image_models.name 唯一索引（历史报错「生图模型名重复」→
+  /// 「创建下载任务失败」），还会丢掉旧 .part 断点、留下重复记录。
+  /// 复用时把 sourceUrl 刷成当前所选源——切换下载源后重下由此生效
+  /// （hf-mirror 与官方内容一致，跨源断点续传安全）。
   Future<ImageModel> createDownloadingRow({
     required LocalDreamPackEntry entry,
     required String zipUrl,
     String? catalogId,
   }) async {
     final root = await modelsRootDir();
-    // 包目录用 Local Dream 的模型 id（重名冲突时加时间戳后缀）
+    final repo = _ref.read(imageModelRepositoryProvider);
+    final displayName = '${entry.name}（${entry.type.label}）';
     final now = DateTime.now();
+
+    if (zipUrl.isNotEmpty) {
+      final existing = await repo.getByName(displayName);
+      if (existing != null && !existing.status.isReady) {
+        // 包目录缺失时补建（用户手动清文件后的续传仍可用）
+        final packDir = Directory(existing.filePath);
+        if (!packDir.existsSync()) packDir.createSync(recursive: true);
+        await repo.save(existing.copyWith(
+          sourceUrl: zipUrl,
+          catalogId: catalogId ?? entry.id,
+          status: ImageModelStatus.downloading,
+          updatedAt: now,
+        ));
+        _onChanged.add(null);
+        return (await repo.getById(existing.id!))!;
+      }
+    }
+
+    // 同名行已就绪（正常会被目录卡「已添加」态拦住，兜底防 UNIQUE 崩）
+    var name = displayName;
+    if (await repo.getByName(name) != null) {
+      name = '$displayName ${now.millisecondsSinceEpoch}';
+    }
+
+    // 包目录用 Local Dream 的模型 id（重名冲突时加时间戳后缀）
     var packId = entry.id;
     if (Directory(p.join(root, packId)).existsSync()) {
       packId = '${entry.id}_${now.millisecondsSinceEpoch}';
     }
     final packDir = p.join(root, packId);
     Directory(packDir).createSync(recursive: true);
-    final repo = _ref.read(imageModelRepositoryProvider);
     final row = ImageModel(
       // NPU/CPU 变体同名（Local Dream 同款），加类型后缀保证本表 name 唯一
-      name: '${entry.name}（${entry.type.label}）',
+      name: name,
       description: '${entry.description} · 约 ${entry.approximateSize}',
       backendType: ImageModelBackendType.localDreamEmbedded,
       filePath: packDir,

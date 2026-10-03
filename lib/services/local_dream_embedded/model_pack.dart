@@ -108,14 +108,19 @@ class LocalDreamModelPack {
   }
 }
 
-/// 模型包下载 base URL（对齐 Local Dream 的双源切换：国内用镜像）
+/// 模型包下载 base URL（对齐 Local Dream 的双源切换；默认国内镜像）
 class LocalDreamBaseUrl {
+  /// 默认源：国内用户直连 huggingface.co 常年超时，hf-mirror.com 是其
+  /// 完整反代，模型包内容一致
+  static const String defaultUrl = hfMirror;
+
   static const String huggingface = 'https://huggingface.co/';
   static const String hfMirror = 'https://hf-mirror.com/';
 
+  /// 下载源候选（默认项排首位）
   static const List<(String, String)> choices = [
-    (huggingface, 'HuggingFace'),
-    (hfMirror, 'HF Mirror（国内镜像）'),
+    (hfMirror, 'HF Mirror（国内镜像，默认）'),
+    (huggingface, 'HuggingFace 官方（备用）'),
   ];
 }
 

@@ -22,6 +22,8 @@ import '../../models/agent_chat_message.dart';
 import '../../models/text_game.dart';
 import '../../services/novel_agent/agent_event.dart';
 import '../../services/novel_agent/agent_scenario.dart';
+import '../../services/novel_agent/scenarios/text_game_scenario.dart'
+    show kGameProtocolNudge;
 import '../../core/providers/agent_chat_state.dart';
 import '../../core/providers/database_providers.dart'
     show
@@ -77,10 +79,11 @@ class TextGamePlayState {
     this.error,
   });
 
-  /// 是否为从未开始的新游戏（显示「开始游戏」入口）
+  /// 是否为从未开始的新游戏（显示扉页/「开始游戏」入口）。
+  /// 首回合失败后也保持扉页（错误横幅叠加显示，开始按钮兼作重试入口），
+  /// 不能因 error 非空就掉进一片空白的剧情列表。
   bool get isEmptyGame =>
       !initializing &&
-      error == null &&
       !agentRunning &&
       transcript.isEmpty &&
       pendingSegments.isEmpty &&
@@ -124,6 +127,17 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
   String? _runId; // sessionId.toString()，过滤本局事件
   StreamSubscription<AgentEvent>? _eventSub;
   bool _disposed = false;
+
+  // ===== 回合收尾自动补选（协议兜底）记账 =====
+
+  /// 上一轮 _reproject 时的运行状态（检测回合 finalize 的下降沿）
+  bool _wasRunning = false;
+
+  /// 玩家本回合主动按过「停止」：自动补选绝不替玩家重启 agent
+  bool _cancelRequested = false;
+
+  /// 自本条玩家输入以来已自动补选的次数（至多 1 次，防无限续跑）
+  int _autoNudgeCount = 0;
 
   TextGamePlayController(this._ref, this._gameId) : super(const TextGamePlayState()) {
     _init();
@@ -324,6 +338,61 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
         clearGmAction: true,
       );
     }
+
+    // 回合 finalize（运行→空闲的下降沿）后做协议兜底检查
+    final wasRunning = _wasRunning;
+    _wasRunning = chatState.isLoading;
+    if (wasRunning && !chatState.isLoading) {
+      _maybeNudgeMissingChoices();
+    }
+  }
+
+  // ===== 回合收尾自动补选 =====
+
+  /// GM 有剧情产出但漏调 present_choices 收尾时，自动注入一条协议提醒
+  /// 消息让 GM 补上选项——否则回合正常结束而玩家端没有任何可选行动，
+  /// 只剩自由输入框（协议第 5 条只是提示词约定，无代码强制）。
+  ///
+  /// 安全阀（shouldAutoNudgeChoices）：失败回合不补（玩家要的是重试）、
+  /// 玩家取消的回合不补、每条玩家输入至多补 1 次（GM 持续不守协议时
+  /// 停手，交还给玩家）。
+  void _maybeNudgeMissingChoices() {
+    final d = diagnoseTurnEnding(state.transcript);
+    if (!shouldAutoNudgeChoices(
+      hasStoryAfterInput: d.hasStoryAfterInput,
+      hasChoicesAfterInput: d.hasChoicesAfterInput,
+      agentRunning: state.agentRunning,
+      hasError: state.error != null,
+      cancelRequested: _cancelRequested,
+      autoNudgeCount: _autoNudgeCount,
+    )) {
+      return;
+    }
+    final session = _session;
+    if (session == null) return;
+    _autoNudgeCount++;
+    final choiceCount = state.game?.settings.rules.choicesCount ?? 3;
+    // 脱离当前投影栈再发：sendMessage 会同步改会话状态并回调 _reproject，
+    // 直接调用会在 _reproject 内重入
+    scheduleMicrotask(() => unawaited(_sendProtocolNudge(
+          '$kGameProtocolNudge 本回合已输出剧情但没有调用 present_choices 收尾，'
+          '玩家端看不到任何可选行动。请立即调用 present_choices 提交 '
+          '$choiceCount 个后续选项：不要重复输出剧情，不要再输出旁白或台词。',
+        )));
+  }
+
+  /// 发送协议提醒消息（kGameProtocolNudge 前缀使投影器跳过渲染，
+  /// 玩家看到的是「剧情推进中」再次亮起 → GM 补上选项）
+  Future<void> _sendProtocolNudge(String content) async {
+    final session = _session;
+    if (session == null) return;
+    try {
+      await session.sendMessage(content: content);
+    } catch (_) {
+      // 兜底消息自身失败即静默放弃：玩家仍可自由输入或重试
+      return;
+    }
+    _reproject();
   }
 
   /// 运行中回合的非流式段：create_scene_image（生图占位）与已完成的
@@ -379,6 +448,9 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
     final session = _session;
     final trimmed = text.trim();
     if (session == null || trimmed.isEmpty) return;
+    // 新的玩家意图：解除取消标记并重开补选额度
+    _cancelRequested = false;
+    _autoNudgeCount = 0;
     state = state.copyWith(clearError: true);
     await session.sendMessage(content: trimmed);
     _reproject();
@@ -397,6 +469,9 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
     final session = _session;
     final anchor = segment.rollbackUiIndex;
     if (session == null || anchor == null) return false;
+    // 回溯即新的决定起点：解除取消标记、重开补选额度
+    _cancelRequested = false;
+    _autoNudgeCount = 0;
     final ok =
         await session.rollbackToMessage(anchor, contentCallback: (_) {});
     _reproject();
@@ -408,6 +483,8 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
 
   /// 中断当前回合（运行中 partial 落库存档）
   Future<void> cancelTurn() async {
+    // 标记取消：回合 finalize 后不做自动补选（不能替玩家重启）
+    _cancelRequested = true;
     await _session?.cancel();
     _reproject();
   }

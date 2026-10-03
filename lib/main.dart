@@ -63,6 +63,20 @@ Future<void> _recoverImageModelDownloads(ProviderContainer container) async {
   }
 }
 
+/// 回前台自愈：库里 downloading 但任务已死的孤儿行自动续传。
+/// 覆盖启动对账管不到的场景（同进程内被冻结后恢复），失败仅记日志。
+Future<void> _resumeOrphanImageModelDownloads(WidgetRef ref) async {
+  try {
+    await ref.read(localDreamPackDownloaderProvider).resumeOrphanDownloads();
+  } catch (e) {
+    LoggerService.instance.w(
+      '孤儿下载自愈失败: $e',
+      category: LogCategory.general,
+      tags: ['lifecycle', 'image-model', 'orphan-heal'],
+    );
+  }
+}
+
 /// 记录全局异常（带去重）。
 ///
 /// 4 层全局异常捕获可能对同一条异常触发多次回调，
@@ -615,7 +629,9 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
         LogReporterService.instance.flush();
         break;
       case AppLifecycleState.resumed:
-        // 应用恢复前台时，不自动恢复播放，让可见性检测器处理
+        // 切后台被系统冻结后恢复前台：库里 downloading 但任务已死的行
+        // 自动续传（启动对账只覆盖进程重启场景）
+        unawaited(_resumeOrphanImageModelDownloads(ref));
         break;
       case AppLifecycleState.inactive:
         break;

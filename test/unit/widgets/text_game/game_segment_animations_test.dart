@@ -127,6 +127,25 @@ void main() {
       expect(_richText('第一段。'), findsOneWidget);
       expect(_richText('你来了。'), findsOneWidget);
     });
+
+    testWidgets('speak 角色名未流到：按旁白渲染，不出空名字签',
+        (tester) async {
+      await tester.pumpWidget(_host(
+        GameStreamingPartsView(
+          parts: const [
+            GameStreamingPart(
+                toolCallId: 's2', name: 'speak', text: '你来了。'),
+          ],
+          showCaret: true,
+        ),
+      ));
+      // 光标是循环闪烁动画，不能 pumpAndSettle（永不静止）
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(find.byType(GameDialogueView), findsNothing);
+      expect(find.byType(GameNarrationView), findsOneWidget);
+      expect(_richText('你来了。'), findsOneWidget);
+    });
   });
 
   group('玩家输入气泡入场', () {

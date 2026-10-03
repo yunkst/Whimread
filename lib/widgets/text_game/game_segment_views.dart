@@ -1046,11 +1046,13 @@ class GameStreamingPartsView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final (i, p) in parts.indexed)
-          if (p.name == 'speak')
+          // 角色名尚未流到（speak 的 character 参数在 text 之后或更晚到达）
+          // 时先按旁白渲染，避免出现只有空名字签的台词行
+          if (p.name == 'speak' && (p.character?.trim().isNotEmpty ?? false))
             GameDialogueView(
-              character: p.character ?? '',
+              character: p.character!.trim(),
               text: p.text,
-              avatarMediaId: avatarByName[p.character],
+              avatarMediaId: avatarByName[p.character!.trim()],
               showCaret: showCaret && i == parts.length - 1,
             )
           else

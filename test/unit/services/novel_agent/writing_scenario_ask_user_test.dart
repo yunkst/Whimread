@@ -74,6 +74,37 @@ void main() {
           );
       expect(decode(result)['error'], 'invalid_args');
     });
+
+    test('options 为 {title, description} 对象 → 归一化通过校验（MiniMax 实测行为）',
+        () async {
+      final run = container.read(scenarioProvider).executeTool(
+            'ask_user',
+            {
+              'question': '主基调？',
+              'options': [
+                {'title': '后宫权斗', 'description': '以收编妃嫔为核心'},
+                {'label': '双线并进'},
+              ],
+            },
+            toolCallId: 'call_obj',
+          );
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (registry.pendingCount == 0) {
+        if (DateTime.now().isAfter(deadline)) fail('未注册挂起提问');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(
+        registry.answer(
+          scenarioId: 'writing',
+          toolCallId: 'call_obj',
+          selected: ['后宫权斗'],
+        ),
+        isTrue,
+      );
+      final result = decode(await run.timeout(const Duration(seconds: 5)));
+      expect(result['selected'], ['后宫权斗'],
+          reason: '对象选项不应导致校验失败或把 JSON 原样回传');
+    });
   });
 
   group('ask_user 收尾语义', () {

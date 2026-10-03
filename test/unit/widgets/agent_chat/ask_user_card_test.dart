@@ -71,6 +71,33 @@ void main() {
     expect(find.textContaining('已回答'), findsOneWidget);
   });
 
+  testWidgets('对象选项 {title, description}：归一为短语+说明两行展示，作答只回短语',
+      (tester) async {
+    List<String>? answered;
+    await tester.pumpWidget(
+      _wrap(
+        _call(arguments: {
+          'question': '游戏主基调？',
+          'options': [
+            {
+              'title': '后宫权斗（默认）',
+              'description': '以收编妃嫔、稳固皇权为核心',
+            },
+            {'label': '双线并进', 'description': '朝堂与后宫并重'},
+          ],
+        }),
+        onAnswer: (selected, freeText) => answered = selected,
+      ),
+    );
+    // 短语与说明都完整展示（不再有 {title: ...} 原样 JSON 字样）
+    expect(find.text('后宫权斗（默认）'), findsOneWidget);
+    expect(find.textContaining('以收编妃嫔'), findsOneWidget);
+    expect(find.textContaining('{title'), findsNothing);
+    // 点击短语行 → 只回传短语
+    await tester.tap(find.text('后宫权斗（默认）'));
+    expect(answered, ['后宫权斗（默认）']);
+  });
+
   testWidgets('多选：勾选 + 确认按钮提交所选', (tester) async {
     List<String>? answered;
     await tester.pumpWidget(
@@ -108,7 +135,7 @@ void main() {
     expect(answeredText, '林晚');
   });
 
-  testWidgets('已答态（completed）：渲染所选候选 chip', (tester) async {
+  testWidgets('已答态（completed）：所选内容整行勾选样式展示', (tester) async {
     await tester.pumpWidget(
       _wrap(
         _call(

@@ -78,10 +78,18 @@ class TextGameHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(textGamesProvider);
-    // 进行中徽标：text_game 场景会话的 isLoading（响应式）
+    // 进行中徽标：text_game 场景会话的 isLoading（响应式）。
+    // 场景会话是单例（同刻只玩一局），必须按 sessionId 归属到具体游戏——
+    // 直接把 isLoading 套到所有卡片上，会话切到别的游戏后徽标全错
     final gameChatState =
         ref.watch(scenarioSessionsProvider)[ScenarioIds.textGame];
     final running = gameChatState?.isLoading ?? false;
+    final runningSessionId = running
+        ? ref
+            .read(scenarioSessionsProvider.notifier)
+            .getIfExists(ScenarioIds.textGame)
+            ?.sessionId
+        : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -135,7 +143,8 @@ class TextGameHomeScreen extends ConsumerWidget {
                           final game = state.games[index];
                           return _GameCard(
                             game: game,
-                            running: running,
+                            running: running &&
+                                runningSessionId == game.chatSessionId,
                             onOpen: () {
                               Navigator.of(context).push(MaterialPageRoute(
                                 builder: (_) =>

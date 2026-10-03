@@ -241,6 +241,97 @@ void main() {
     expect(imported.row.catalogId, isEmpty);
   });
 
+  test('同名未就绪行复用：再点下载 = 续传（不撞唯一名、.part 保留、换源生效）',
+      () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    // 第一次用坏地址 → failed（目录卡片此时仍显示下载图标）
+    final failedRow = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/nope.zip',
+    );
+    await downloader.startDownload(failedRow);
+    expect((await repo.getById(failedRow.id!))!.status,
+        ImageModelStatus.failed);
+
+    // 模拟上次中断留下的 .part（断点）
+    final part = File('${failedRow.filePath}.zip.part');
+    part.writeAsBytesSync([1, 2, 3]);
+
+    // 再点下载（可同时已切换下载源）：必须复用旧行而不是新插同名行
+    final resumed = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    expect(resumed.id, failedRow.id, reason: '应复用原行，避免重复记录');
+    expect(resumed.sourceUrl, contains('/pack.zip'),
+        reason: 'sourceUrl 应刷成当前所选源');
+    expect(part.existsSync(), isTrue, reason: '.part 断点应保留以续传');
+    expect((await repo.getAll()).where((m) => m.id == failedRow.id).length, 1);
+
+    await downloader.startDownload(resumed);
+    expect((await repo.getById(failedRow.id!))!.status,
+        ImageModelStatus.ready);
+  });
+
+  test('同名已就绪行：再下同名任务自动改名兜底，不抛唯一名异常', () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    final first = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    await downloader.startDownload(first);
+    expect((await repo.getById(first.id!))!.status, ImageModelStatus.ready);
+
+    // 正常 UI 在「已添加」态隐藏入口，这里兜底保证不撞 UNIQUE 崩溃
+    final second = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    expect(second.id, isNot(first.id));
+    expect(second.name, isNot(first.name));
+    expect(second.name, startsWith(first.name));
+  });
+
+  test('resumeOrphanDownloads：孤儿 downloading 行自愈续传至 ready', () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    // 模拟切后台被冻结：行停在 downloading，但本进程无活跃任务
+    expect(downloader.hasActiveDownload(row.id!), isFalse);
+
+    final healed = await downloader.resumeOrphanDownloads();
+    expect(healed, 1, reason: '孤儿行应触发自愈续传');
+    expect(downloader.hasActiveDownload(row.id!), isTrue);
+
+    // 后台续传任务跑完 → ready（反馈 #9 卡死的场景在此闭环）
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    var status = (await repo.getById(row.id!))!.status;
+    while (status != ImageModelStatus.ready &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      status = (await repo.getById(row.id!))!.status;
+    }
+    expect(status, ImageModelStatus.ready);
+  });
+
+  test('resumeOrphanDownloads：有活跃任务时不重复启动（单请求守卫）', () async {
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    // 进行中的下载：startDownload 在首个 await 前同步注册 CancelToken
+    final task = downloader.startDownload(row);
+    expect(await downloader.resumeOrphanDownloads(), 0,
+        reason: '有活跃任务的行不能被自愈重复启动');
+    await task;
+    expect(packRequests, 1, reason: '自愈不得发出第二个请求');
+
+    // 任务结束后行已 ready，无 downloading 行可自愈
+    expect(await downloader.resumeOrphanDownloads(), 0);
+  });
+
   test('recoverInterruptedDownloads：downloading 行归位 paused', () async {
     final row = await downloader.createDownloadingRow(
       entry: entry(),

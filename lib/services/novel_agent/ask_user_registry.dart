@@ -44,6 +44,42 @@ class AskUserAnswer {
 
 enum AskUserAnswerStatus { answered, cancelled, timeout }
 
+/// 归一化 ask_user 的单个 option 项 → (label, description) 记录
+///
+/// LLM 实测（MiniMax-M3 等）常无视 schema 的 `items: string` 声明，把选项
+/// 传成 `{title: ..., description: ...}` 对象——这是合理诉求（候选短语 +
+/// 补充说明），故正式兼容两种形式：
+/// - 字符串 → 纯短语，无说明
+/// - 对象 → 按 label/title/name/text/value 取短语，按
+///   description/hint/detail/desc/subtitle 取说明；无可识别字段时把
+///   键值对拍平成一句话，保证内容不丢
+({String label, String? description}) normalizeAskUserOption(Object item) {
+  if (item is String) {
+    final trimmed = item.trim();
+    return (label: trimmed, description: null);
+  }
+  if (item is Map) {
+    String? pick(List<String> keys) {
+      for (final key in keys) {
+        final v = item[key];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+      }
+      return null;
+    }
+
+    final label = pick(const ['label', 'title', 'name', 'text', 'value']);
+    final description =
+        pick(const ['description', 'hint', 'detail', 'desc', 'subtitle']);
+    if (label != null) return (label: label, description: description);
+    final flattened = item.entries
+        .where((e) => e.value != null && e.value.toString().trim().isNotEmpty)
+        .map((e) => '${e.key}: ${e.value.toString().trim()}')
+        .join('，');
+    return (label: flattened, description: null);
+  }
+  return (label: item.toString().trim(), description: null);
+}
+
 /// 一次挂起的提问（executor 持有 await 其 [future]）
 class PendingAskUser {
   final String scenarioId;

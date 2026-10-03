@@ -9,6 +9,43 @@ import 'package:novel_app/services/novel_agent/ask_user_registry.dart';
 void main() {
   late AskUserRegistry registry;
 
+  group('normalizeAskUserOption（选项归一化）', () {
+    test('字符串 → 纯短语无说明', () {
+      final o = normalizeAskUserOption('后宫权斗');
+      expect(o.label, '后宫权斗');
+      expect(o.description, isNull);
+    });
+
+    test('{label, description} 对象 → 短语 + 说明', () {
+      final o = normalizeAskUserOption({
+        'label': '双线并进',
+        'description': '朝堂与后宫并重',
+      });
+      expect(o.label, '双线并进');
+      expect(o.description, '朝堂与后宫并重');
+    });
+
+    test('{title, description} 对象（MiniMax 实测形态）→ title 作短语', () {
+      final o = normalizeAskUserOption({
+        'title': '陈枫（皇帝开局）',
+        'description': '从傀儡皇帝开始',
+      });
+      expect(o.label, '陈枫（皇帝开局）');
+      expect(o.description, '从傀儡皇帝开始');
+    });
+
+    test('无可识别字段的对象 → 键值对拍平，内容不丢', () {
+      final o = normalizeAskUserOption({'foo': '甲', 'bar': '乙'});
+      expect(o.label, contains('foo: 甲'));
+      expect(o.label, contains('bar: 乙'));
+    });
+
+    test('空 label 的对象 → 归一为空串（被上层过滤）', () {
+      final o = normalizeAskUserOption({'label': '  '});
+      expect(o.label, isEmpty);
+    });
+  });
+
   PendingAskUser register({
     String scenarioId = 'writing',
     String toolCallId = 'call_1',

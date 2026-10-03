@@ -1052,7 +1052,7 @@ class AgentTools {
           '答案会作为本工具结果返回给你）。适用于会实质影响产出、且无法通过'
           '工具自行查到的关键决策，例如：写作方向/题材基调、叙事视角、'
           '章节改写范围、角色命运走向、配图风格等。使用要点：\n'
-          '- options 给出 2-6 个候选，每项一句短语；多选场景把 multi_select 设为 true\n'
+          '- options 给出 2-6 个候选；多选场景把 multi_select 设为 true\n'
           '- 默认允许用户在候选之外自由输入（allow_free_text=true）；'
           '纯开放式问题可不传 options\n'
           '- 不要用本工具问你能用工具查到的信息（书架列表、章节内容等），'
@@ -1066,8 +1066,12 @@ class AgentTools {
           },
           'options': {
             'type': 'array',
-            'description': '候选选项（每项一句短语，2-6 个为宜）。'
-                '用户可单选（默认）、多选（multi_select=true）或自由输入',
+            'description': '候选选项（2-6 个为宜）。每项支持两种形式：'
+                '① 短语字符串，如 "后宫权斗"；'
+                '② {"label": "后宫权斗", "description": "一句补充说明"} '
+                '对象——label 是候选短语，description 是展示给用户的补充'
+                '说明，两者都会原样显示。用户可单选（默认）、'
+                '多选（multi_select=true）或自由输入',
             'items': {'type': 'string'},
           },
           'multi_select': {

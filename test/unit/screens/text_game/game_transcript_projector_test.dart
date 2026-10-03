@@ -408,4 +408,140 @@ void main() {
       expect(parseSceneImageError(null), isNull);
     });
   });
+
+  group('speak 缺角色名降级', () {
+    test('speak 未带 character：退化为旁白，不渲染空名字签', () {
+      final messages = [
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('speak', {'text': '（无人称台词）'})),
+        ]),
+      ];
+      final seg = projectGameTranscript(messages, agentRunning: false).single;
+      expect(seg, isA<GameNarration>());
+      expect((seg as GameNarration).text, '（无人称台词）');
+    });
+
+    test('带 character 的 speak 正常渲染台词', () {
+      final messages = [
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('speak', {'character': '林昭', 'text': '你来了。'})),
+        ]),
+      ];
+      final seg = projectGameTranscript(messages, agentRunning: false).single;
+      expect(seg, isA<GameDialogue>());
+      expect((seg as GameDialogue).character, '林昭');
+    });
+  });
+
+  group('回合收尾诊断（自动补选兜底）', () {
+    test('正常收尾：有输入、有剧情、有选项 → 不补', () {
+      final d = diagnoseTurnEnding([
+        const GamePlayerInput('我推门而入'),
+        const GameNarration('屋内烛火摇曳。'),
+        const GameChoices(choices: [
+          GameChoice(label: '环视四周'),
+          GameChoice(label: '退出房间'),
+        ], active: false),
+      ]);
+      expect(d.hasPlayerInput, isTrue);
+      expect(d.hasStoryAfterInput, isTrue);
+      expect(d.hasChoicesAfterInput, isTrue);
+      expect(
+        shouldAutoNudgeChoices(
+          hasStoryAfterInput: d.hasStoryAfterInput,
+          hasChoicesAfterInput: d.hasChoicesAfterInput,
+          agentRunning: false,
+          hasError: false,
+          cancelRequested: false,
+          autoNudgeCount: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('GM 漏收尾：有剧情、无选项 → 应补', () {
+      final d = diagnoseTurnEnding([
+        const GamePlayerInput('开始游戏'),
+        const GameNarration('雨夜，你在城门口醒来。'),
+        const GameDialogue(character: '守卫', text: '站住！什么人？'),
+      ]);
+      expect(d.hasStoryAfterInput, isTrue);
+      expect(d.hasChoicesAfterInput, isFalse);
+      expect(
+        shouldAutoNudgeChoices(
+          hasStoryAfterInput: d.hasStoryAfterInput,
+          hasChoicesAfterInput: d.hasChoicesAfterInput,
+          agentRunning: false,
+          hasError: false,
+          cancelRequested: false,
+          autoNudgeCount: 0,
+        ),
+        isTrue,
+      );
+    });
+
+    test('输入后只有选项没有剧情：不补（无剧情可续）', () {
+      final d = diagnoseTurnEnding([
+        const GamePlayerInput('继续'),
+        const GameChoices(choices: [
+          GameChoice(label: '甲'),
+          GameChoice(label: '乙'),
+        ], active: false),
+      ]);
+      expect(d.hasStoryAfterInput, isFalse);
+      expect(
+        shouldAutoNudgeChoices(
+          hasStoryAfterInput: d.hasStoryAfterInput,
+          hasChoicesAfterInput: d.hasChoicesAfterInput,
+          agentRunning: false,
+          hasError: false,
+          cancelRequested: false,
+          autoNudgeCount: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('空链：无输入无剧情，不补', () {
+      final d = diagnoseTurnEnding(const []);
+      expect(d.hasPlayerInput, isFalse);
+      expect(d.hasStoryAfterInput, isFalse);
+      expect(
+        shouldAutoNudgeChoices(
+          hasStoryAfterInput: d.hasStoryAfterInput,
+          hasChoicesAfterInput: d.hasChoicesAfterInput,
+          agentRunning: false,
+          hasError: false,
+          cancelRequested: false,
+          autoNudgeCount: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('守卫各自否决：运行中 / 失败回合 / 玩家取消 / 已补过一次', () {
+      bool nudge({required bool agentRunning, required bool hasError,
+          required bool cancelRequested, required int autoNudgeCount}) =>
+          shouldAutoNudgeChoices(
+            hasStoryAfterInput: true,
+            hasChoicesAfterInput: false,
+            agentRunning: agentRunning,
+            hasError: hasError,
+            cancelRequested: cancelRequested,
+            autoNudgeCount: autoNudgeCount,
+          );
+      expect(nudge(
+          agentRunning: true, hasError: false, cancelRequested: false,
+          autoNudgeCount: 0), isFalse);
+      expect(nudge(
+          agentRunning: false, hasError: true, cancelRequested: false,
+          autoNudgeCount: 0), isFalse, reason: '失败回合玩家要的是重试');
+      expect(nudge(
+          agentRunning: false, hasError: false, cancelRequested: true,
+          autoNudgeCount: 0), isFalse, reason: '玩家按过停止，不能替他重启');
+      expect(nudge(
+          agentRunning: false, hasError: false, cancelRequested: false,
+          autoNudgeCount: 1), isFalse, reason: '每条玩家输入至多自动补 1 次');
+    });
+  });
 }

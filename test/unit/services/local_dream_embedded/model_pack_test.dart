@@ -111,6 +111,14 @@ void main() {
         isNull,
       );
     });
+
+    test('默认下载源 = 国内镜像（choices 排首位）', () {
+      // 主要用户群在国内，直连 huggingface.co 常年超时；
+      // 若有人想把默认切回官方源，先确认这是产品决策
+      expect(LocalDreamBaseUrl.defaultUrl, LocalDreamBaseUrl.hfMirror);
+      expect(LocalDreamBaseUrl.choices.first.$1,
+          LocalDreamBaseUrl.defaultUrl);
+    });
   });
 
   group('LocalDreamModelPack.missingFiles', () {

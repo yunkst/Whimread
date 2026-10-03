@@ -153,14 +153,31 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
     final parser = ToolArgParser(args);
     final (question, questionErr) = parser.requireString('question');
     if (questionErr != null) return questionErr;
-    final (optionsRaw, optionsErr) = parser.optionalStringList('options');
-    if (optionsErr != null) return optionsErr;
+    // options 宽松解析：LLM 可能传字符串，也可能传 {label, description}
+    // 对象（见 normalizeAskUserOption），统一归一为短语列表做校验；
+    // 原始参数不动——UI 渲染直接读 call.arguments（含说明文字）。
+    final rawOptions = args['options'];
+    var options = const <String>[];
+    if (rawOptions != null) {
+      if (rawOptions is! List) {
+        return jsonEncode({
+          'error': 'param_type_error',
+          'message': '参数 "options" 类型错误：期望 array，实际 '
+              '${rawOptions.runtimeType}',
+          'param': 'options',
+        });
+      }
+      options = rawOptions
+          .map((e) => normalizeAskUserOption(e))
+          .map((o) => o.label)
+          .where((label) => label.isNotEmpty)
+          .toList();
+    }
     final (multiSelectRaw, multiSelectErr) = parser.optionalBool('multi_select');
     if (multiSelectErr != null) return multiSelectErr;
     final (freeTextRaw, freeTextErr) = parser.optionalBool('allow_free_text');
     if (freeTextErr != null) return freeTextErr;
 
-    final options = optionsRaw ?? const <String>[];
     final multiSelect = multiSelectRaw ?? false;
     final allowFreeText = freeTextRaw ?? true;
 

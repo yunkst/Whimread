@@ -5,7 +5,8 @@
 /// - 剧情流 ListView：定稿投影（transcript）+ 运行中段（pendingSegments）
 ///   + 打字机内容（streamingParts），自动滚到底部
 /// - 底部：运行状态条（推进中/停止）→ 活动选项按钮 → 自由输入
-/// - 新游戏空态：居中「开始游戏」按钮
+/// - 新游戏扉页：标题 + 开场卡（开场情境/世界观，超一屏可滚动）+
+///   固定「开始游戏」按钮
 ///
 /// 离开页面不中断 agent（会话全局存活，回来重放）。
 library;
@@ -20,6 +21,7 @@ import '../../core/providers/text_game_providers.dart';
 import '../../models/text_game.dart';
 import '../../services/novel_agent/agent_scenario.dart';
 import '../../widgets/agent_chat/agent_scenario_config_dialog.dart';
+import '../../widgets/text_game/game_intro_view.dart';
 import '../../widgets/text_game/game_segment_views.dart';
 import '../../widgets/text_game/game_settings_sheet.dart';
 import 'game_transcript_projector.dart';
@@ -41,6 +43,9 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
 
   int _lastItemCount = 0;
   int _lastStreamingLen = 0;
+
+  /// 上一帧键盘高度（弹出时剧情流继续贴底）
+  double _lastViewInset = 0;
 
   /// 已播过揭晓动画的判定 toolCallId：ListView 滚动重建/历史回放时
   /// 据此直接静态展示，揭晓扫动只在结果首展时播一次
@@ -97,11 +102,17 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
         itemCount > _lastItemCount || streamingLen > _lastStreamingLen;
     _lastItemCount = itemCount;
     _lastStreamingLen = streamingLen;
-    if (!grew || !_scrollController.hasClients) return;
+    if (!grew) return;
+    _followBottom();
+  }
+
+  /// 若处于跟随状态（距底部较近）则滚到底（等一帧布局稳定后执行）。
+  /// 用户回看历史（离底部较远）时不打断。
+  void _followBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
       final position = _scrollController.position;
-      // 用户回看历史（离底部较远）时不打断；跟随状态下距底部始终很小
+      // 跟随状态下距底部始终很小
       if (position.maxScrollExtent - position.pixels > 480) return;
       _scrollController.animateTo(
         position.maxScrollExtent,
@@ -157,6 +168,12 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
         ) +
         state.gmThinking.length;
     _maybeScrollToBottom(items.length, streamingLen);
+
+    // 键盘弹出：Scaffold 收缩可视区，剧情流末条会被顶出屏幕。
+    // 跟随状态下继续贴底（与内容增长同一路径），回看历史时不打断
+    final viewInset = MediaQuery.of(context).viewInsets.bottom;
+    if (viewInset > _lastViewInset) _followBottom();
+    _lastViewInset = viewInset;
 
     return Scaffold(
       appBar: AppBar(
@@ -261,36 +278,18 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     }
   }
 
+  /// 新游戏扉页（GameIntroView）：开场情境/世界观可滚动，开始按钮固定底部
   Widget _buildEmptyGame(
     BuildContext context,
     TextGamePlayState state,
     TextGamePlayController controller,
   ) {
-    final theme = Theme.of(context);
     final game = state.game;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('「${game?.title ?? ''}」已就绪',
-              style: theme.textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(
-            game?.settings.opening.isNotEmpty == true
-                ? game!.settings.opening
-                : '你的故事等待开场',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.outline),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: controller.startGame,
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('开始游戏'),
-          ),
-        ],
-      ),
+    return GameIntroView(
+      title: game?.title ?? '',
+      opening: game?.settings.opening ?? '',
+      worldview: game?.settings.worldview ?? '',
+      onStart: controller.startGame,
     );
   }
 
