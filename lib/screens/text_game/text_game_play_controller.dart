@@ -244,6 +244,17 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
       }
       return;
     }
+    // 工具失败告终：narrate/speak 的打字机块立即剔除——台词在参数流式阶段
+    // 已经打出，而失败要等工具执行才知道；定稿投影（isFailedToolCall）要等
+    // 回合结束才接管，不剔的话玩家会看到失败台词先出现、结束时又消失
+    if (event is ToolCallEndEvent) {
+      if (_runId == null || event.runId != _runId) return;
+      final kept = dropFailedStoryStreamingPart(state.streamingParts, event);
+      if (!identical(kept, state.streamingParts)) {
+        state = state.copyWith(streamingParts: kept);
+      }
+      return;
+    }
     if (event is! ToolArgDeltaEvent) return;
     // 只认本局打标事件（游戏运行统一 runId=sessionId）
     if (_runId == null || event.runId != _runId) return;

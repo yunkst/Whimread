@@ -1,7 +1,8 @@
 /// 游戏剧情投影器测试
 ///
 /// 覆盖：协议到渲染段的完整映射 / 选项激活与已选标记 / 系统文本过滤 /
-/// 生图结果解析 / 概率判定段解析（分支/选中/失败/运行中）/ 空输入兜底。
+/// 生图结果解析 / 概率判定段解析（分支/选中/失败/运行中）/ 空输入兜底 /
+/// 失败工具调用过滤（定稿侧 isFailedToolCall + 直播侧打字机剔除）。
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -661,12 +662,13 @@ void main() {
     test('speak 校验失败 + 同文重调成功 → 只渲染成功那条', () {
       final segs = projectGameTranscript([
         AgentChatMessage.user('我看向她'),
-        // 第一次：角色名不在参战名单，工具返回纠错错误
+        // 第一次：角色名不在参战名单，工具返回纠错错误（状态 error）
         AgentChatMessage.assistantFromSegments([
           ToolCallSegment(_call(
             'speak',
             {'character': '虞贵妃', 'text': '七郎无罪，是臣妾教子无方。'},
             id: 's_fail',
+            status: AgentToolStatus.error,
             result: errUnknownCharacter,
           )),
         ]),
@@ -695,6 +697,7 @@ void main() {
             'narrate',
             {'text': '这段没能演成。'},
             id: 'n_fail',
+            status: AgentToolStatus.error,
             result: '{"error":"execution_failed","message":"工具异常"}',
           )),
         ]),
@@ -712,14 +715,14 @@ void main() {
       expect((segs[1] as GameNarration).text, '屋内烛火摇曳。');
     });
 
-    test('防误伤：结果坏 JSON / 运行中（无结果）→ 照常渲染', () {
+    test('防误伤：运行中（结果未产出）→ 照常渲染', () {
       final segs = projectGameTranscript([
         AgentChatMessage.assistantFromSegments([
           ToolCallSegment(_call(
             'narrate',
-            {'text': '结果解析坏了也要留着。'},
-            id: 'n_bad',
-            result: 'not-json{',
+            {'text': '正在写。'},
+            id: 'n_running',
+            status: AgentToolStatus.running,
           )),
           ToolCallSegment(_call(
             'speak',
@@ -731,23 +734,92 @@ void main() {
       ], agentRunning: true);
 
       expect(segs, hasLength(2));
-      expect((segs[0] as GameNarration).text, '结果解析坏了也要留着。');
+      expect((segs[0] as GameNarration).text, '正在写。');
       expect((segs[1] as GameDialogue).text, '还在判定中。');
     });
 
-    test('isFailedToolCall 四态判定', () {
+    test('isFailedToolCall 四态判定（失败信号取持久化状态）', () {
       expect(
-          isFailedToolCall(_call('speak', const {}, result: '{"ok":true}')), isFalse);
+          isFailedToolCall(_call('speak', const {}, result: '{"ok":true}')),
+          isFalse,
+          reason: 'completed 不是失败');
+      expect(
+          isFailedToolCall(
+              _call('speak', const {}, status: AgentToolStatus.running)),
+          isFalse,
+          reason: '运行中按未失败处理');
+      expect(
+          isFailedToolCall(
+              _call('speak', const {}, status: AgentToolStatus.rejected)),
+          isTrue,
+          reason: '已取消与 error 同为"没演成"');
       expect(
           isFailedToolCall(_call('speak', const {},
-              status: AgentToolStatus.running)),
-          isFalse);
-      expect(isFailedToolCall(_call('speak', const {}, result: null)), isFalse);
-      expect(
-          isFailedToolCall(_call('speak', const {}, result: 'garbage')), isFalse);
-      expect(
-          isFailedToolCall(_call('speak', const {}, result: errUnknownCharacter)),
+              status: AgentToolStatus.error, result: errUnknownCharacter)),
           isTrue);
+      expect(
+          isFailedToolCall(_call('speak', const {}, result: 'garbage')),
+          isFalse,
+          reason: '判定只读状态不解析结果 JSON，坏 JSON 不影响判定');
+    });
+  });
+
+  group('打字机直播剔除失败块（dropFailedStoryStreamingPart）', () {
+    const parts = [
+      GameStreamingPart(toolCallId: 'n_ok', name: 'narrate', text: '屋外雨声。'),
+      GameStreamingPart(
+          toolCallId: 'call_1', name: 'speak', text: '这句没演成。', character: '虞欢'),
+    ];
+
+    test('失败的 narrate/speak → 按 toolCallId 剔除对应块', () {
+      final kept = dropFailedStoryStreamingPart(
+        parts,
+        const ToolCallEndEvent(
+            'narrate', 'n_ok', '{"error":"execution_failed"}',
+            success: false),
+      );
+      expect(kept.map((p) => p.toolCallId), ['call_1']);
+    });
+
+    test('真实 id 帧晚到（块仍在 call_N 占位上）→ 按同名占位剔除', () {
+      final kept = dropFailedStoryStreamingPart(
+        parts,
+        const ToolCallEndEvent(
+            'speak', 'call_9zzz', '{"error":"unknown_character"}',
+            success: false),
+      );
+      expect(kept.map((p) => p.toolCallId), ['n_ok']);
+    });
+
+    test('成功工具与非叙事工具失败 → 块原样保留', () {
+      final same = dropFailedStoryStreamingPart(
+        parts,
+        const ToolCallEndEvent('narrate', 'n_ok', '{"ok":true}'),
+      );
+      expect(identical(same, parts), isTrue, reason: '无变化返回原列表省一次重建');
+
+      final imageKept = dropFailedStoryStreamingPart(
+        parts,
+        const ToolCallEndEvent(
+            'create_scene_image', 'n_ok', '{"error":"quota"}',
+            success: false),
+      );
+      expect(imageKept.map((p) => p.toolCallId), ['n_ok', 'call_1']);
+    });
+
+    test('占位兜底不误删真实 id 的同名块', () {
+      const mixed = [
+        GameStreamingPart(
+            toolCallId: 'call_0', name: 'narrate', text: '失败版。'),
+        GameStreamingPart(
+            toolCallId: 'call_x8Kd2', name: 'narrate', text: '重调成功版。'),
+      ];
+      final kept = dropFailedStoryStreamingPart(
+        mixed,
+        const ToolCallEndEvent('narrate', 'call_k9Q1', '{"error":"x"}',
+            success: false),
+      );
+      expect(kept.map((p) => p.toolCallId), ['call_x8Kd2']);
     });
   });
 }

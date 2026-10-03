@@ -131,12 +131,17 @@
   区分度）；create_scene_image → 插图卡；present_choices → 选项
   按钮组（只有最后一条可点；玩家输入精确命中 label 标记 ✓）；
   roll_random_event → 命运骰子卡。
-- **失败调用不进剧情流**：`isFailedToolCall`（完成态 + 结果 JSON 含 error）判定
-  narrate/speak 失败（`unknown_character` / `missing_character` / 工具异常）。
-  失败尝试视为"没演成"，GM 会按纠错提示重调，只渲染重调成功的那次——否则
-  同一句台词会以"失败版 + 重调版"显示两遍（现场日志：speak 失败 →
-  create_character → 同文重调成功）。插图与骰子例外：失败态本身是信息
-  （错误卡/判定失败），照常渲染。运行中与结果解析失败按未失败处理。
+- **失败调用不进剧情流（定稿 + 直播两侧同一语义）**：`isFailedToolCall`（读
+  持久化状态 `AgentToolStatus.error/rejected`，即 AgentLoop `!result.containsKey('error')`
+  落库的同一标志，不二次解析结果 JSON）判定 narrate/speak 失败
+  （`unknown_character` / `missing_character` / 工具异常）。失败尝试视为
+  "没演成"，GM 会按纠错提示重调，只渲染重调成功的那次——否则同一句台词
+  会以"失败版 + 重调版"显示两遍（现场日志：speak 失败 → create_character →
+  同文重调成功）。直播打字机侧由 `dropFailedStoryStreamingPart` 在
+  ToolCallEndEvent(success=false) 时立即剔除对应块（真实 id 帧晚到时按
+  同名 `call_N` 占位兜底），不等回合结束才自愈。插图与骰子例外：失败态
+  本身是信息（错误卡/判定失败），照常渲染。运行中（结果未产出）按未失败
+  处理。
 - **动画纪律：只为"本次到访新增的内容"播一次，历史永不重播**。游玩页在
   首次见到非空定稿链时播种（`_seedAnimationBookkeeping`）：链内已有的
   判定/选项 toolCallId 记为已播、记录链长度；回溯使链缩短时以当前长度

@@ -13,11 +13,12 @@
 /// - roll_random_event 工具调用 → [GameDiceRoll]（分支/选中从参数与 result 解析）
 /// - present_choices 工具调用 → [GameChoices]
 ///
-/// 失败调用不进剧情流：narrate/speak 若以 error 告终（[isFailedToolCall]，
-/// 如 speak 的 unknown_character / missing_character），该次尝试视为"没演成"，
+/// 失败调用不进剧情流：narrate/speak 若以失败告终（[isFailedToolCall]，如
+/// speak 的 unknown_character / missing_character），该次尝试视为"没演成"，
 /// GM 会按纠错提示重调——只渲染重调成功的那次，否则同一句台词会显示两遍
 /// （现场日志：speak 失败 → create_character → 同文重调成功）。插图与骰子
-/// 例外：它们的失败态本身是信息（错误卡/判定失败），照常渲染。
+/// 例外：它们的失败态本身是信息（错误卡/判定失败），照常渲染。直播打字机
+/// 侧同一语义由 [dropFailedStoryStreamingPart] 保证，不必等回合结束才自愈。
 ///
 /// 选项活性：只有「最后一条」GameChoices 是可点的（active），其后出现玩家
 /// 输入则转为历史；若玩家输入与某选项 label 精确一致，该选项标记 chosen。
@@ -34,7 +35,7 @@ import 'dart:convert';
 
 import '../../models/agent_chat_message.dart';
 import '../../services/novel_agent/agent_event.dart'
-    show AgentToolCall, AgentToolStatus;
+    show AgentToolCall, AgentToolStatus, ToolCallEndEvent;
 import '../../services/novel_agent/scenarios/text_game_scenario.dart'
     show kGameProtocolNudge, weightedPercent;
 
@@ -330,23 +331,52 @@ bool isSkippableSystemText(String text) {
   return false;
 }
 
-/// 工具调用是否以失败告终（完成态且结果 JSON 含 error 字段）
+/// 工具调用是否以失败告终（状态为 error / rejected，即"没演成"）
 ///
 /// 校验失败的 narrate/speak（如 speak 的 unknown_character）没有真正"演出"，
 /// GM 会按工具返回的纠错提示重调——失败尝试不进剧情流，否则同一句台词
 /// 会以"失败版 + 重调成功版"重复渲染两遍（用户反馈 #10/#11 现场日志：
 /// speak 失败 → create_character → 同文重调成功）。
-/// 运行中（无结果）与结果解析失败时按未失败处理，不误伤内容。
-bool isFailedToolCall(AgentToolCall call) {
-  if (call.status == AgentToolStatus.running) return false;
-  final raw = call.result;
-  if (raw == null || raw.isEmpty) return false;
-  try {
-    final decoded = jsonDecode(raw);
-    return decoded is Map && decoded.containsKey('error');
-  } catch (_) {
-    return false;
+///
+/// 失败信号读 [AgentToolCall.status] 这一个持久化标志：AgentLoop 的
+/// toolSuccess（JSON 结果含 `error` 即失败）经 ToolCallEndEvent 落库时同步
+/// 写成对应状态，这里读同一标志即可，不再二次解析结果 JSON——避免在 UI 层
+/// 复制一份执行器的错误约定形成双真理源。rejected（已取消）与 error 同为
+/// "未演出"。运行中（结果未产出）按未失败处理，不误伤内容。
+bool isFailedToolCall(AgentToolCall call) =>
+    call.status == AgentToolStatus.error ||
+    call.status == AgentToolStatus.rejected;
+
+/// narrate/speak 是否属于"剧情打字机"工具（与生图/骰子等工具卡区分）
+bool isStoryStreamTool(String name) => name == 'narrate' || name == 'speak';
+
+/// 流式占位 tool_call id：SSE 帧 id 缺失时由聚合层按 `call_$index` 合成，
+/// 真实 id（供应商下发）帧晚到时打字机块仍挂在占位上
+final RegExp _kPlaceholderToolCallId = RegExp(r'^call_\d+$');
+
+/// 打字机直播侧剔除失败的 narrate/speak 流式块（与 [isFailedToolCall] 同源语义）
+///
+/// 失败在工具执行时才确定，而台词文字在参数流式阶段已经打出——不剔除的话
+/// 玩家会先看到失败台词出现、回合结束被定稿投影滤掉又消失。成功块与非叙事
+/// 工具（生图/骰子，失败态本身是信息）原样保留。
+///
+/// 兜底：真实 id 帧晚于最后一个参数帧时，块还挂在 `call_N` 占位上（精确
+/// 匹配落空）——此时按同名 + 占位 id 剔除。GM 一轮一个叙事工具是常态，
+/// 极端并发下误删相邻占位块的风险可接受（其定稿版仍在消息链里，回合结束
+/// 投影自愈）。
+List<GameStreamingPart> dropFailedStoryStreamingPart(
+  List<GameStreamingPart> parts,
+  ToolCallEndEvent event,
+) {
+  if (event.success || !isStoryStreamTool(event.name)) return parts;
+  final kept = [...parts]
+    ..removeWhere((p) => p.toolCallId == event.toolCallId);
+  if (kept.length == parts.length) {
+    kept.removeWhere((p) =>
+        isStoryStreamTool(p.name) &&
+        _kPlaceholderToolCallId.hasMatch(p.toolCallId));
   }
+  return kept;
 }
 
 /// 回合收尾诊断（游玩页「自动补选」兜底的判定输入）
