@@ -576,17 +576,35 @@ class AgentLoop {
           }
         }
 
-        // 终止工具成功 → 回合到此交付，不再请求下一轮。放在全部结果入链
-        // 之后，保持 assistant(tool_calls) 与 tool 消息配对完整。
+        // 终止工具成功 → 回合原则上到此交付。但终止前必须先看一眼补充
+        // 输入队列：补充消息只在每轮 LLM 调用前 drain，若玩家在回合期间
+        // 发了消息（还在队列里），直接终止会让该消息随 finally 清队而
+        // 丢失——玩家看到自己发了言，GM 却毫无反应。有排队内容时注入并
+        // 继续下一轮（GM 对新输入做出反应、重新收尾），队列为空才终止。
         if (terminalToolHits.isNotEmpty) {
-          LoggerService.instance.i(
-              'Agent 循环因终止工具结束 (${terminalToolHits.join(', ')}, '
-              'scenario=${_scenario.id})',
+          final queued = (pendingInjections?.call() ?? const <String>[])
+              .where((t) => t.trim().isNotEmpty)
+              .toList();
+          if (queued.isEmpty) {
+            LoggerService.instance.i(
+                'Agent 循环因终止工具结束 (${terminalToolHits.join(', ')}, '
+                'scenario=${_scenario.id})',
+                category: LogCategory.ai,
+                tags: ['agent', 'loop', 'terminal_tool', _scenario.id]);
+            emit(const AgentDoneEvent());
+            RetrySignals.instance.clear();
+            return;
+          }
+          for (final text in queued) {
+            messages.add(ChatMessage(role: 'user', content: text));
+            LoggerService.instance.i(
+              'Agent 终止工具后注入补充 user: ${text.length} 字 '
+              '(round $round, scenario=${_scenario.id})',
               category: LogCategory.ai,
-              tags: ['agent', 'loop', 'terminal_tool', _scenario.id]);
-          emit(const AgentDoneEvent());
-          RetrySignals.instance.clear();
-          return;
+              tags: ['agent', 'loop', 'inject', 'terminal_tool', _scenario.id],
+            );
+          }
+          // 不 return：落入下方 round++ 继续下一轮
         }
 
         // 本轮成功执行（含工具调用）→ 进入下一轮，重置重试计数

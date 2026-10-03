@@ -149,6 +149,10 @@ abstract class AgentScenario {
   /// 规则：
   /// - 仅在工具**成功**时终止（返回 error 时要让 LLM 自行纠偏重调）
   /// - 本轮其余工具照常执行完毕、tool 结果全部入链后才结束（保持消息链配对）
+  /// - **补充输入优先**：终止前先 drain 运行中补充消息队列（补充消息只在
+  ///   每轮 LLM 调用前 drain，不在这里 drain 就会随运行结束被清队丢弃）；
+  ///   有排队内容说明玩家在回合期间又发了言 → 注入并继续下一轮，队列为空
+  ///   才真正终止
   /// - 默认空集由 [AgentScenarioCleanupMixin] 提供，子类按需 override
   Set<String> get terminalToolNames;
 

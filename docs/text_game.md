@@ -157,7 +157,11 @@
   动画只播一次：游玩页按 toolCallId 记账（onAnimated 回调后入
   _settledRollIds），pending 段结果一出即播（不等回合结束）。
 - 玩家输入（点选项 / 自由输入）都走 `session.sendMessage`；运行中输入走
-  现有 supplementary inject 队列。
+  现有 supplementary inject 队列（只在每轮 LLM 调用前 drain）。**与终止工具
+  的交互**：AgentLoop 在因 present_choices 终止前会先 drain 一次队列——有
+  排队内容说明玩家在回合期间又发了言，注入并继续下一轮（GM 对新输入做出
+  反应、重新收尾），队列为空才真正终止；否则补充消息会随运行结束被清队
+  丢弃（玩家看到自己发了言、GM 毫无反应）。
 - **扉页与跟随**：未开始的新游戏（含首回合失败重试）显示扉页
   `GameIntroView`——标题 + 开场情境/世界观可滚动卡片，「开始游戏」固定
   底部；键盘弹出时跟随状态下的剧情流继续贴底。管理页「剧情推进中」徽标

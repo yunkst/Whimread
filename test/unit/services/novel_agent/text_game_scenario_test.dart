@@ -242,6 +242,8 @@ void main() {
       expect(block, contains('- 沈砚'), reason: '玩家角色卡被渲染');
       expect(block, contains('修仙世界'),
           reason: 'worldview 空 → 回退小说背景设定');
+      expect(block, contains('玩家本回合'),
+          reason: '设定块结尾显式划界：玩家输入不再与规则列表粘连');
     });
 
     test('小说被删除 → 构造不失败，动态块给出降级提示', () async {

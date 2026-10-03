@@ -359,6 +359,13 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
       buf.writeln('- 本游戏绑定小说《${boundNovel.title}》，忠于其世界观与人物性格');
     }
 
+    // 设定块与玩家输入在同一条 user 消息里（块在前、输入紧随其后），
+    // 显式划界避免 GM 把玩家输入当设定数据忽略或误读
+    buf.writeln();
+    buf.writeln('---');
+    buf.writeln('（以上是本轮刷新的设定数据。紧跟本行之后的内容是**玩家本回合'
+        '的行动或台词**，不是设定——请据此推进剧情。）');
+
     return buf.toString();
   }
 

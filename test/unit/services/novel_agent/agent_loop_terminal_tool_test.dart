@@ -35,6 +35,9 @@ class _ScriptedLlm extends LlmProvider {
   final List<List<LlmStreamChunk>> rounds;
   int callCount = 0;
 
+  /// 每次调用的 messages 快照（供断言注入内容到达了下一轮载荷）
+  final List<List<ChatMessage>> calls = [];
+
   @override
   Stream<LlmStreamChunk> chatStreamWithTools({
     required List<ChatMessage> messages,
@@ -47,6 +50,7 @@ class _ScriptedLlm extends LlmProvider {
     if (callCount >= rounds.length) {
       throw StateError('轮次脚本已耗尽：循环多发起了第 ${callCount + 1} 轮请求');
     }
+    calls.add(List.of(messages));
     final frames = rounds[callCount];
     callCount++;
     yield* Stream.fromIterable(frames);
@@ -189,4 +193,55 @@ void main() {
     expect(llm.callCount, 2);
     expect(events.last, isA<AgentDoneEvent>());
   });
+
+  test('终止时队列有补充输入 → 注入并继续回合，不丢弃玩家发言', () async {
+    // 真实时序：补充消息只在每轮 LLM 调用前 drain，玩家在 present_choices
+    // 执行期间发的言此刻才进队列——若终止工具直接收尾，该输入会随运行
+    // 结束被清队丢弃（用户报告「agent 完全看不到自定义输入」的根因）。
+    final queue = <String>[];
+    final llm = _ScriptedLlm([
+      _choicesRound(),
+      _bareTextRound('收到，停下了。'),
+    ]);
+    final scenario = _TerminalWithLateInjectionScenario(queue);
+    final loop = AgentLoop(llm: llm, scenario: scenario);
+
+    final events = <AgentEvent>[];
+    await loop.run(
+      initialMessages: const [ChatMessage(role: 'user', content: '我推门而入')],
+      systemPrompt: 'sys',
+      emit: events.add,
+      pendingInjections: () {
+        final out = List<String>.from(queue);
+        queue.clear();
+        return out;
+      },
+    );
+
+    expect(llm.callCount, 2, reason: '有排队补充输入时回合必须继续一轮');
+    final round1 = llm.calls[1].map((m) => m.content ?? '').join('\n');
+    expect(round1, contains('我改主意了，先别动。'),
+        reason: '补充输入必须进入下一轮载荷，GM 才能看到');
+    expect(queue, isEmpty, reason: '注入后队列必须被 drain 干净');
+    expect(events.last, isA<AgentDoneEvent>());
+  });
+}
+
+/// present_choices 执行期间玩家发言的场景（模拟晚于本轮 drain 时机的补充输入）
+class _TerminalWithLateInjectionScenario extends _TerminalScenario {
+  _TerminalWithLateInjectionScenario(this.queue);
+  final List<String> queue;
+
+  @override
+  Future<String> executeTool(
+    String name,
+    Map<String, dynamic> args, {
+    void Function(int generatedChars)? onProgress,
+    String? toolCallId,
+  }) async {
+    final result =
+        await super.executeTool(name, args, toolCallId: toolCallId);
+    if (name == 'present_choices') queue.add('我改主意了，先别动。');
+    return result;
+  }
 }
