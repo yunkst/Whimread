@@ -163,6 +163,30 @@ class AgentLoop {
 
     int round = 0;
     int roundRetryCount = 0;
+
+    // 补充注入 drain（两个调用点共用）：每轮 LLM 调用前的轮顶，与终止工具
+    // 命中后的终止前检查——后者若不 drain，玩家在回合期间的发言会随 run
+    // 结束的 finally 清队而丢失。过滤空白、append messages；[logPrefix] 与
+    // [extraTags] 区分日志签名（现场反馈排障靠它区分注入时机）。
+    List<String> drainSupplementaryInjections(
+      String logPrefix, {
+      List<String> extraTags = const [],
+    }) {
+      final injected = (pendingInjections?.call() ?? const <String>[])
+          .where((t) => t.trim().isNotEmpty)
+          .toList();
+      for (final text in injected) {
+        messages.add(ChatMessage(role: 'user', content: text));
+        LoggerService.instance.i(
+          'Agent $logPrefix注入补充 user: ${text.length} 字 '
+          '(round $round, scenario=${_scenario.id})',
+          category: LogCategory.ai,
+          tags: ['agent', 'loop', 'inject', ...extraTags, _scenario.id],
+        );
+      }
+      return injected;
+    }
+
     while (round < _config.maxRounds) {
       // 检查点 A：进入新一轮前（例如上一轮工具执行后被取消）
       if (cancellationToken?.isCancelled == true) {
@@ -228,16 +252,7 @@ class AgentLoop {
         //     此处拉取并 append 到 messages，让本轮 LLM 调用看到。
         //     不打断上一轮（drain 只在两 round 边界执行）；不 emit
         //     InjectedUserInputEvent（UI 计数已在 service.injectUserMessage 完成）。
-        final injected = pendingInjections?.call() ?? const <String>[];
-        for (final text in injected) {
-          if (text.trim().isEmpty) continue;
-          messages.add(ChatMessage(role: 'user', content: text));
-          LoggerService.instance.i(
-            'Agent 注入补充 user: ${text.length} 字 (round $round, scenario=${_scenario.id})',
-            category: LogCategory.ai,
-            tags: ['agent', 'loop', 'inject', _scenario.id],
-          );
-        }
+        drainSupplementaryInjections('');
 
         // 0b. 上下文压缩检查（每轮 LLM 调用前）
         //     防止 messages 无限增长导致超出 LLM 上下文窗口。
@@ -563,15 +578,18 @@ class AgentLoop {
             emit(const AgentDoneEvent());
             return;
           }
-          final parallelMessages = await Future.wait(subagentCalls.map(
-            (call) => _executeSingleTool(call, emit, cancellationToken),
+          final parallelResults = await Future.wait(subagentCalls.map(
+            (call) async {
+              final (toolMessage, toolOk) =
+                  await _executeSingleTool(call, emit, cancellationToken);
+              return (call.name, toolMessage, toolOk);
+            },
           ));
-          for (final (toolMessage, toolOk) in parallelMessages) {
+          for (final (name, toolMessage, toolOk) in parallelResults) {
             messages.add(toolMessage);
             // 并行派发也守终止工具（防御：当前无场景这样声明）
-            if (toolOk &&
-                _scenario.terminalToolNames.contains('dispatch_subagent')) {
-              terminalToolHits.add('dispatch_subagent');
+            if (toolOk && _scenario.terminalToolNames.contains(name)) {
+              terminalToolHits.add(name);
             }
           }
         }
@@ -582,9 +600,10 @@ class AgentLoop {
         // 丢失——玩家看到自己发了言，GM 却毫无反应。有排队内容时注入并
         // 继续下一轮（GM 对新输入做出反应、重新收尾），队列为空才终止。
         if (terminalToolHits.isNotEmpty) {
-          final queued = (pendingInjections?.call() ?? const <String>[])
-              .where((t) => t.trim().isNotEmpty)
-              .toList();
+          final queued = drainSupplementaryInjections(
+            '终止工具后',
+            extraTags: const ['terminal_tool'],
+          );
           if (queued.isEmpty) {
             LoggerService.instance.i(
                 'Agent 循环因终止工具结束 (${terminalToolHits.join(', ')}, '
@@ -595,16 +614,8 @@ class AgentLoop {
             RetrySignals.instance.clear();
             return;
           }
-          for (final text in queued) {
-            messages.add(ChatMessage(role: 'user', content: text));
-            LoggerService.instance.i(
-              'Agent 终止工具后注入补充 user: ${text.length} 字 '
-              '(round $round, scenario=${_scenario.id})',
-              category: LogCategory.ai,
-              tags: ['agent', 'loop', 'inject', 'terminal_tool', _scenario.id],
-            );
-          }
-          // 不 return：落入下方 round++ 继续下一轮
+          // 有排队内容：不 return，落入下方 round++ 继续下一轮，
+          // GM 对新输入做出反应、重新收尾
         }
 
         // 本轮成功执行（含工具调用）→ 进入下一轮，重置重试计数
@@ -791,13 +802,13 @@ class AgentLoop {
   /// 共用同一段逻辑。**保持与原循环体 100% 一致行为**（含 onProgress 节流、
   /// JSON 解析容错、截断日志、toolSuccess 判断）。
   ///
-  /// 统一返回构造好的 [ChatMessage]（role: tool）。串行与并行路径都由
-  /// 调用方 append 到 messages（串行原地 add、并行收集后顺序 add），
-  /// 消除原 nullable 返回值 + `messagesToAppend` 双重语义的混乱。
   /// 执行单个工具并返回 (tool 消息, 是否成功)。
   ///
-  /// 成功标记供终止工具判定用（[AgentScenario.terminalToolNames]）：纯文本
-  /// 工具恒成功，JSON 工具按结果里有无 `error` 判。
+  /// 串行与并行路径共用本方法，tool 消息都由调用方 append 到 messages
+  /// （串行原地 add、并行收集后顺序 add）。成功标记供终止工具判定用
+  /// （[AgentScenario.terminalToolNames]）：纯文本工具恒成功，JSON 工具按
+  /// 结果里有无 `error` 判——该标志同时经 ToolCallEndEvent 落库为工具状态，
+  /// 是"调用是否失败"的唯一真理源（投影器等下游直接读状态，不重复解析）。
   Future<(ChatMessage, bool)> _executeSingleTool(
     ToolCall call,
     void Function(AgentEvent) emit,

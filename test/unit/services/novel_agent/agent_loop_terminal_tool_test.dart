@@ -9,6 +9,7 @@
 /// - 终止工具成功 → 立即 AgentDone，不再请求下一轮
 /// - 终止工具返回 error → 不终止，LLM 自行纠偏重调
 /// - 未声明终止工具的场景行为与引入该机制前一致
+/// - 终止时队列有补充输入 → 注入并继续回合，不丢弃玩家发言
 ///
 /// 运行:
 ///   flutter test test/unit/services/novel_agent/agent_loop_terminal_tool_test.dart
