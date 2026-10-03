@@ -11,16 +11,14 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants/build_config.dart';
 import '../../core/providers/managed_model_provider.dart';
 import '../../services/managed_models/managed_model_service.dart';
 import '../../utils/toast_utils.dart';
 import '../common/bottom_sheet_header.dart';
 import '../empty_states/empty_state_view.dart';
 
-/// 弹出底部抽屉;非托管包调用此函数会被静默忽略。
+/// 弹出底部抽屉选择 AI 模型。
 Future<void> showAgentModelPickerSheet(BuildContext context) async {
-  if (!kHasBundledBackend) return;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -28,20 +26,21 @@ Future<void> showAgentModelPickerSheet(BuildContext context) async {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
-    builder: (ctx) => const _AgentModelPickerSheet(),
+    builder: (ctx) => const AgentModelPickerSheet(),
   );
 }
 
-class _AgentModelPickerSheet extends ConsumerStatefulWidget {
-  const _AgentModelPickerSheet();
+/// 模型选择抽屉本体（[showAgentModelPickerSheet] 的内容；公开供测试直接驱动）
+class AgentModelPickerSheet extends ConsumerStatefulWidget {
+  const AgentModelPickerSheet();
 
   @override
-  ConsumerState<_AgentModelPickerSheet> createState() =>
+  ConsumerState<AgentModelPickerSheet> createState() =>
       _AgentModelPickerSheetState();
 }
 
 class _AgentModelPickerSheetState
-    extends ConsumerState<_AgentModelPickerSheet> {
+    extends ConsumerState<AgentModelPickerSheet> {
   @override
   void initState() {
     super.initState();

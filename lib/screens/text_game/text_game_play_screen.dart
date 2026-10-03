@@ -20,7 +20,7 @@ import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/providers/text_game_providers.dart';
 import '../../models/text_game.dart';
 import '../../services/novel_agent/agent_scenario.dart';
-import '../../widgets/agent_chat/agent_scenario_config_dialog.dart';
+import '../../widgets/agent_chat/model_picker_sheet.dart';
 import '../../widgets/text_game/game_intro_view.dart';
 import '../../widgets/text_game/game_segment_views.dart';
 import '../../widgets/text_game/game_settings_sheet.dart';
@@ -197,13 +197,10 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
           PopupMenuButton<String>(
             tooltip: '更多',
             onSelected: (value) {
-              if (value == 'ai_config') {
-                showDialog(
-                  context: context,
-                  builder: (_) => AgentScenarioConfigDialog(
-                    scenarioId: ScenarioIds.textGame,
-                  ),
-                );
+              if (value == 'model_picker') {
+                // LLM 由服务端托管、Key 不落客户端，「配置」无从谈起；
+                // 这个入口就是选模型（全局单值，对所有 Agent 场景生效）
+                showAgentModelPickerSheet(context);
               } else if (value == 'restart') {
                 _confirmRestart(context, game);
               } else if (value == 'delete') {
@@ -213,7 +210,7 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
             // 从未开始的新游戏没有可重开的剧情，不显示该项
             itemBuilder: (_) => [
               const PopupMenuItem(
-                  value: 'ai_config', child: Text('AI 模型配置')),
+                  value: 'model_picker', child: Text('AI 模型选择')),
               if (!state.isEmptyGame)
                 const PopupMenuItem(
                     value: 'restart', child: Text('重新开始')),

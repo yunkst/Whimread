@@ -15,7 +15,7 @@ import '../../models/text_game.dart';
 import '../../services/novel_agent/agent_scenario.dart';
 import '../../utils/format_utils.dart';
 import '../../widgets/agent_chat/agent_chat_launcher_entry.dart';
-import '../../widgets/agent_chat/agent_scenario_config_dialog.dart';
+import '../../widgets/agent_chat/model_picker_sheet.dart';
 import '../../widgets/empty_states/empty_state_view.dart';
 import '../../widgets/text_game/game_settings_sheet.dart';
 import 'text_game_play_screen.dart';
@@ -96,13 +96,11 @@ class TextGameHomeScreen extends ConsumerWidget {
         title: const Text('文字游戏'),
         actions: [
           IconButton(
-            tooltip: 'AI 模型配置',
+            // LLM 由服务端托管、Key 不落客户端，入口就是选模型（全局单值，
+            // 对所有 Agent 场景生效）
+            tooltip: 'AI 模型选择',
             icon: const Icon(Icons.tune),
-            onPressed: () => showDialog(
-              context: context,
-              builder: (_) =>
-                  const AgentScenarioConfigDialog(scenarioId: ScenarioIds.textGame),
-            ),
+            onPressed: () => showAgentModelPickerSheet(context),
           ),
         ],
       ),

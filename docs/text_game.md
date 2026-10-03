@@ -193,6 +193,23 @@
   提示；被删消息上未完成的生图任务完成时按 toolCallId 定位失败，安全
   no-op（消息已不存在）。
 
+## AI 模型入口（选模型，非「配置」）
+
+游玩页「更多 → AI 模型选择」与管理页 AppBar 调参图标，两个入口都直接开
+`showAgentModelPickerSheet` 模型切换抽屉（`AgentModelPickerSheet`，与 Agent
+Chat 内切换同款）。
+
+- 语义：LLM 走打包注入的托管后端，API Key 由服务端持有，客户端**只能选
+  不能配**——入口文案是「AI 模型选择」而非「AI 模型配置」。历史上这里挂的是
+  场景级自配 LLM 覆盖弹窗，托管模式下该机制不生效，弹窗只能显示一段托管
+  说明（点开啥也选不了），用户反馈「好奇怪，点开就一个弹窗」即源于此。
+- 目录来源 `GET {BACKEND_BASE_URL}/v1/models`（`managedModelProvider`，60s
+  缓存，抽屉打开时强刷）；每行展示模型名、基准徽标、相对基准的消耗倍数。
+  选中写 `managed_model_selection`（**全局单值，所有 Agent 场景生效**，
+  作用于后续请求），抽屉内即时生效。
+- 抽屉对非托管包静默忽略（`kHasBundledBackend` 早退），真机 define run 才能
+  看到；`model_picker_sheet_test` 直接 pump 抽屉本体覆盖三条行为。
+
 ## 重新开始（保留设定，重开一局）
 
 游玩页 AppBar「更多 → 重新开始」：清空本局全部剧情，回到扉页
