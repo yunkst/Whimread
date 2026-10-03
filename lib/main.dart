@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'screens/bookshelf_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/text_game/text_game_home_screen.dart';
-import 'screens/webview_browser_screen.dart';
+import 'core/navigation/home_tab.dart';
+import 'screens/home_tab_pages.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/resource_bootstrap/resource_bootstrap_screen.dart';
 import 'services/app_update_service.dart';
@@ -478,17 +476,12 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver {
-  /// 浏览器 Tab 索引（统一进 IndexedStack 后也用于场景切换判定）
-  static const int _browserTabIndex = HomeTabIndex.browser;
-
-  /// 文字游戏 Tab 索引
-  static const int _gameTabIndex = HomeTabIndex.textGame;
-
   void _onItemTapped(int index, WidgetRef ref) {
-    // 更新 Tab 索引（单一真相源：homeTabIndexNotifierProvider）。
-    // AI Agent 场景切换由 build() 中的 ref.listen(homeTabIndexNotifierProvider)
-    // 统一响应，此处不再直接写 currentAgentScenarioProvider，避免双写。
-    ref.read(homeTabIndexNotifierProvider.notifier).switchTo(index);
+    // NavigationBar 回调的是位置 → 映射回枚举；Tab 身份与顺序都在
+    // HomeTab 枚举里（core/navigation/home_tab.dart）。
+    ref
+        .read(homeTabNotifierProvider.notifier)
+        .switchTo(HomeTab.values[index]);
   }
 
   @override
@@ -635,18 +628,18 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    // 监听外部 Tab 切换请求。
-    // 用户点击底部导航时也会写回此 Provider，保持单一真相源。
-    final selectedIndex = ref.watch(homeTabIndexNotifierProvider);
+    // 当前选中的 Tab（枚举，非裸 int）。Tab 顺序/文案/图标定义在 HomeTab，
+    // 导航栏与页面栈都从它派生 → 二者不可能再错位。
+    final currentTab = ref.watch(homeTabNotifierProvider);
 
     // 响应外部/导航触发的 Tab 切换，执行副作用：
     // 切换 AI Agent 场景（文字游戏 Tab 不切场景——它有专属游玩页，
     // 不依赖聊天场景选择）
-    ref.listen<int>(homeTabIndexNotifierProvider, (previous, next) {
+    ref.listen<HomeTab>(homeTabNotifierProvider, (previous, next) {
       if (previous == null || previous == next) return;
-      if (next == _gameTabIndex) return;
+      if (next == HomeTab.textGame) return;
       ref.read(currentAgentScenarioProvider.notifier).state =
-          next == _browserTabIndex
+          next == HomeTab.browser
               ? ScenarioIds.webviewExtract
               : ScenarioIds.writing;
     });
@@ -654,51 +647,29 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     // 所有 Tab（含浏览器）统一使用 IndexedStack 保持状态：
     // 浏览器 Tab 此前每次切换都会销毁重建 WebView，导致浏览页面/历史丢失。
     // IndexedStack 会保留各 Tab 的 element 与 State，切换 Tab 不再销毁 WebView。
+    // children 与 destinations 均按 HomeTab.values 顺序生成（见
+    // screens/home_tab_pages.dart），顺序天然一致。
     return Scaffold(
       body: AgentFloatingShell(
         // 共享 FAB 的场景随当前 Tab 显式声明（issue #23）：
         // 从阅读页 pop 回浏览器 Tab 不会触发 _onItemTapped，读全局残留值
         // 会在浏览器 Tab 误开写作助手；Tab 切换经 setState 重建时同步更新。
-        scenarioId: selectedIndex == _browserTabIndex
+        scenarioId: currentTab == HomeTab.browser
             ? ScenarioIds.webviewExtract
             : ScenarioIds.writing,
         // 文字游戏 Tab 不展示聊天 FAB（游玩页与管理页有自己的入口）
-        showFloatingButton: selectedIndex != _gameTabIndex,
+        showFloatingButton: currentTab != HomeTab.textGame,
         child: IndexedStack(
-          index: selectedIndex,
-          children: [
-            const BookshelfScreen(),
-            // active 标记当前浏览器是否可见：
-            // 仅在可见时拦截系统返回手势，避免 offstage 状态下误拦截其他 Tab 的返回键。
-            WebViewBrowserScreen(active: selectedIndex == _browserTabIndex),
-            const TextGameHomeScreen(),
-            const SettingsScreen(),
-          ],
+          index: currentTab.index,
+          children: buildHomeTabPages(current: currentTab),
         ),
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
+        selectedIndex: currentTab.index,
         onDestinationSelected: (index) {
           _onItemTapped(index, ref);
         },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.book),
-            label: '书架',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.sports_esports),
-            label: '文字游戏',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.public),
-            label: '浏览器',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings),
-            label: '设置',
-          ),
-        ],
+        destinations: buildHomeTabDestinations(),
       ),
     );
   }

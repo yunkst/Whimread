@@ -32,6 +32,7 @@ import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/novel_agent_service.dart';
 
 import '../../helpers/test_database_setup.dart';
+import 'package:novel_app/utils/cancellation_token.dart';
 
 /// 直接从容器拿 Ref，用于构造独立的 ScenarioSession（不经过
 /// scenarioSessionsProvider，避免 fire-and-forget hydrate 的不确定性）。
@@ -122,6 +123,10 @@ class _MockNovelAgentService implements NovelAgentService {
 
   @override
   bool isRunningFor(String scenarioId) => false;
+  /// 取消令牌：mock 不做令牌簿记（cancelFor 直接放行 completer），恒为 null
+  @override
+  CancellationToken? tokenFor(String scenarioId) => null;
+
 
   @override
   Stream<AgentEvent> get events => _controller.stream;

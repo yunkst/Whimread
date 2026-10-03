@@ -63,6 +63,16 @@ $task
         'message': '子 Agent 不能调用 dispatch_subagent。',
       });
     }
+    // 双重保险：ask_user 也不在子 Agent 可调工具里（AgentTools.filterTools
+    // 已剔除）——子 Agent 在后台运行，没有聊天 UI 可渲染问题、无人可答，
+    // 挂起会直到超时才放行，等同于浪费一轮。
+    if (name == 'ask_user') {
+      return jsonEncode({
+        'error': 'forbidden_tool',
+        'message': '子 Agent 不能调用 ask_user（无法与用户交互）。'
+            '需要用户拍板的问题请在总结里写明，交给父 Agent 转问。',
+      });
+    }
     // 白名单校验
     if (!allowedTools.contains(name)) {
       return jsonEncode({

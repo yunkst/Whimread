@@ -9,7 +9,8 @@
 /// - 解决：跨会话续聊工具结果丢失、压缩后无法重建、owner 对齐漂移。
 ///
 /// UI 渲染由 [ScenarioSession._projectUiMessages] 把 agent messages 投影为
-/// [AgentChatMessage]（含 TextSegment / ToolCallSegment），UI 层无需感知本模型。
+/// [AgentChatMessage]（含 TextSegment / ToolCallSegment，同一回合的连续
+/// assistant 消息合并为一条），UI 层无需感知本模型。
 library;
 
 import 'dart:convert';

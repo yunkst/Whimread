@@ -280,6 +280,8 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
         return '正在生成场景插图…';
       case 'update_game_state':
         return '正在记录剧情状态…';
+      case 'roll_random_event':
+        return '正在进行概率判定…';
       default:
         return null;
     }
@@ -348,9 +350,21 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
               result.add(GameChoices(
                 choices: choices,
                 active: false, // 回合结束后由定稿投影接管激活
+                toolCallId: call.id,
               ));
             }
           }
+        case 'roll_random_event':
+          // live=true：结果一出即播揭晓动画（不等回合结束）；未出结果时
+          // 呈轮转等待态。回合 finalize 后由定稿投影接管（live=false）
+          final completed = call.status != AgentToolStatus.running;
+          result.add(rollDiceRollSegment(
+            call.id,
+            call.arguments,
+            completed: completed,
+            resultJson: call.result,
+            live: true,
+          ));
         default:
           break;
       }

@@ -3,7 +3,7 @@
 /// 此文件提供UI状态管理相关的 Providers。
 ///
 /// **功能域**:
-/// - [HomeTabIndex] / [HomeTabIndexNotifier] - 底部导航 Tab 状态管理
+/// - [HomeTabNotifier] - 底部导航 Tab 状态管理
 ///
 /// **架构原则**:
 /// - UI层只触发事件（调用Notifier方法）
@@ -12,44 +12,29 @@ library;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../navigation/home_tab.dart';
+
 part 'ui_providers.g.dart';
 
 // ==================== Home Tab Switcher ====================
 
-/// 底部导航 Tab 索引常量
-///
-/// 集中管理 HomePage IndexedStack 的 Tab 索引，方便跨页面引用。
-class HomeTabIndex {
-  const HomeTabIndex._();
-
-  /// 书架
-  static const int bookshelf = 0;
-
-  /// 文字游戏
-  static const int textGame = 1;
-
-  /// 浏览器
-  static const int browser = 2;
-
-  /// 设置
-  static const int settings = 3;
-}
-
 /// 当前选中的底部导航 Tab
 ///
-/// HomePage 监听此 Provider 切换 Tab；其他页面（如书架空状态引导）
-/// 可通过 ref.read(homeTabIndexNotifierProvider.notifier).state = ... 切换 Tab。
+/// 状态是 [HomeTab] 枚举而非裸 int：Tab 的顺序/文案/图标定义在枚举里，
+/// 页面栈与导航栏都由它派生，任何地方不再出现魔法索引。
+/// HomePage 监听此 Provider 切换 Tab；其他页面可通过
+/// `ref.read(homeTabNotifierProvider.notifier).state = ...` 切换 Tab。
 @riverpod
-class HomeTabIndexNotifier extends _$HomeTabIndexNotifier {
+class HomeTabNotifier extends _$HomeTabNotifier {
   @override
-  int build() {
-    return HomeTabIndex.bookshelf;
+  HomeTab build() {
+    return HomeTab.bookshelf;
   }
 
   /// 跳转到指定 Tab
-  void switchTo(int index) {
-    if (state != index) {
-      state = index;
+  void switchTo(HomeTab tab) {
+    if (state != tab) {
+      state = tab;
     }
   }
 }

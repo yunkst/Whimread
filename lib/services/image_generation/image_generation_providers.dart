@@ -15,6 +15,7 @@ import '../../models/image_model.dart';
 import '../media/media_proxy.dart';
 import '../local_dream_embedded/engine_manager.dart';
 import 'image_generation_backend.dart';
+import '../logger_service.dart';
 import 'image_generation_service.dart';
 import 'local_dream_embedded_backend.dart';
 
@@ -44,6 +45,13 @@ final localDreamReadinessProvider =
   final manager = ref.watch(localDreamEmbeddedEngineManagerProvider);
   final binary = await manager.isBinaryAvailable();
   final qnn = await manager.isQnnRuntimeReady();
+  // 自检结果只显示在提示条上，日志无痕迹；engine_not_ready 的排查要靠它
+  // 判断是缺引擎二进制还是缺 QNN 运行库。
+  LoggerService.instance.i(
+    '引擎自检：binary=$binary，qnn=$qnn',
+    category: LogCategory.ai,
+    tags: const ['local_dream_engine', 'readiness'],
+  );
   return (binary: binary, qnn: qnn);
 });
 

@@ -57,32 +57,48 @@ class AgentSystemPrompt {
         '自动进入该角色图集。需要换头像时，从返回结果里挑一张，'
         '把它的 mediaId 经 update_character 的 avatarMediaId 设置。');
     buffer.writeln('8. 修改操作完成后向用户汇报。');
+    buffer.writeln('9. 关键决策先问再动手：当某个会实质影响产出的决策'
+        '（题材方向/基调、叙事视角、改写范围、角色命运走向、配图风格等）'
+        '无法通过工具查到用户偏好时，调用 ask_user 向用户确认后再继续。'
+        '问题要具体、一次问清；options 给 2-6 个候选（可并选的用 '
+        'multi_select），用户也能自由输入。不要用 ask_user 问你能自己查到'
+        '的事（书架、章节、角色等），也不要连环追问。');
     buffer.writeln();
     buffer.writeln('## 文字游戏');
     buffer.writeln('用户想玩文字游戏（互动小说）时，你负责在对话里与用户探讨'
         '设定并创建游戏。游戏本身在「文字游戏」页游玩（你创建后由用户前往，'
         '游戏中的剧情不经过本对话）。**文字游戏必须绑定一本小说以共享角色卡**'
-        '——角色卡（含头像、近况）建在该小说的 characters 表下，游戏与写作'
-        '共用。流程：');
+        '——参战角色就是该小说 characters 表下的角色卡，按**名字**引用'
+        '（你只能通过 list_characters 拿到名字，看不到内部 id）。流程：');
     buffer.writeln('1. 确定绑定小说：用户提到某本已有小说（或当前工作小说）时，'
-        '用 list_novels 查 id 直接绑定，从它的 background_setting / characters '
-        '提取世界观与人物做提案；用户从零开新玩法时，先用 create_novel 建一本'
-        '轻量小说壳（标题 + 背景设定），再绑定它。');
-    buffer.writeln('2. 逐项探讨并确认：世界观背景（改编已有小说可省略，'
-        '直接用小说的背景设定）、开场情境、登场角色（2-6 个）、玩家角色、'
-        '叙事风格、内容边界、每回合选项数量（2-4）、场景插图策略（auto=关键'
-        '场景自动配图 / manual=仅手动）。一次提出你的完整提案让用户确认或'
-        '修改，不要反复追问每一个字段。');
-    buffer.writeln('3. 用户确认后落角色卡：在该小说下用 create_character '
-        '创建全部登场角色卡与玩家角色卡（玩家角色的 occupation 填身份、'
-        'backgroundStory 填初始目标；角色卡内容会被记录版本，务必与用户'
-        '确认过的设定一致）。');
-    buffer.writeln('4. 调用 create_text_game：传 title / source_novel_id / '
-        'opening / character_ids（登场角色的 characterId 列表）/'
-        'player_character_id（玩家角色卡 id），其余可选。创建成功后告知用户：'
-        '到底部「文字游戏」页点击游戏即可开始。');
-    buffer.writeln('5. 用户反悔要改设定时调用 update_text_game（可整体替换'
-        '参战名单）；list_text_games 可查已有游戏。');
+        '用 list_novels 查到它的 id（记下来，create_text_game 要传 '
+        'source_novel_id）并 select_novel 切换过去；用户从零开新玩法时，'
+        '直接 create_novel 建一本轻量小说壳（标题 + 背景设定，自动切换为'
+        '当前小说并记下它的 id）。');
+    buffer.writeln('2. 吃透小说（提案前必做）：get_background_setting 读背景'
+        '设定、get_outline 读大纲，必要时 list_chapters 后抽读与开局相关的'
+        '关键章节，梳理出世界观规则、剧情时间线与人物关系。改编已有小说时，'
+        '把与开局时间点相关的剧情背景提炼进世界观/开场提案'
+        '（"如果某事没有发生"类玩法尤其需要原作走向做参照），不要只复述'
+        '设定原文。');
+    buffer.writeln('3. 逐项探讨并确认：世界观背景（改编已有小说可省略，'
+        '直接用小说的背景设定）、开场情境、玩家角色、叙事风格、内容边界、'
+        '每回合选项数量（2-4）、场景插图策略（auto=关键场景自动配图 / '
+        'manual=仅手动）。一次提出你的完整提案让用户确认或修改，不要反复'
+        '追问每一个字段。');
+    buffer.writeln('4. 补齐角色卡：list_characters 对照小说人物，缺卡的主要'
+        '人物用 create_character 创建完整角色卡（occupation/personality/'
+        'appearanceFeatures/speechStyle/backgroundStory 尽量填全——它们会'
+        '直接进 GM 上下文，决定扮演质量），并创建玩家角色卡；已有卡但信息'
+        '单薄的用 update_character 补全。角色卡内容会被记录版本，务必与'
+        '你对小说的理解及用户确认过的设定一致。');
+    buffer.writeln('5. 调用 create_text_game：传 title / source_novel_id / '
+        'opening / player_character_name（玩家角色名），其余可选。参战名单'
+        '不用传，默认该小说全部角色卡入列（角色过多想聚焦时才传 '
+        'character_names 圈定）。创建成功后告知用户：到底部「文字游戏」页'
+        '点击游戏即可开始。');
+    buffer.writeln('6. 用户反悔要改设定时调用 update_text_game（可按角色名'
+        '增删参战名单）；list_text_games 可查已有游戏。');
     buffer.writeln();
 
     // 注入经验记忆（编号 [N] 形式，供 patch_memory 工具用编号定位）

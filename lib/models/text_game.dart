@@ -72,8 +72,9 @@ class GameRules {
 /// 游戏设定（settings_json 的结构化视图）
 ///
 /// 角色卡共享小说 characters 表，不在此快照拷贝：
-/// - [characterIds] 参战名单（characters.id，创建时由 agent 从小说角色挑选，
-///   游戏中 GM 建新角色会自动追加）；动态上下文只渲染名单内角色
+/// - [characterIds] 参战名单（characters.id；创建时缺省取绑定小说全部
+///   角色卡，可显式圈定子集，游戏中 GM 建新角色会自动追加）；
+///   动态上下文只渲染名单内角色
 /// - [playerCharacterId] 玩家角色卡 id（characters 表一行，其 currentState
 ///   即玩家当前状态，同样进版本管理）
 /// - [worldNotes] 世界与剧情线状态条目（任务/势力动向/未解悬念，一行一条；

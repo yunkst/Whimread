@@ -9,6 +9,7 @@ import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/agent_chat_message.dart';
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'chapter_rewrite_entry_card.dart';
+import 'ask_user_card.dart';
 import 'media_gallery_card.dart';
 import 'subagent_tool_card.dart';
 import '../../screens/subagent_detail_screen.dart';
@@ -239,8 +240,22 @@ class AgentMessageBubble extends ConsumerWidget {
                 bottom: isLast ? 0 : 4,
               ),
               // dispatch_subagent 走 SubagentToolCard（任务 10），点击跳转详情页（任务 11）。
+              // ask_user 走 AskUserCard：问题读自参数，作答经 ScenarioSession
+              // 完成挂起的提问；awaitingAnswer 用 isStreaming 判定本轮是否存活。
               // 其他工具走 AgentToolCallCard：onRetry 由 dialog 注入，UI 端只判 running 决定是否显示按钮。
-              child: s.call.name == 'dispatch_subagent'
+              child: s.call.name == 'ask_user'
+                  ? AskUserCard(
+                      call: s.call,
+                      awaitingAnswer: isStreaming,
+                      onAnswer: (selected, freeText) => ref
+                          .read(currentSessionProvider)
+                          ?.answerAskUser(
+                            s.call.id,
+                            selected: selected,
+                            freeText: freeText,
+                          ),
+                    )
+                  : s.call.name == 'dispatch_subagent'
                   ? SubagentToolCard(
                       sessionId: sessionId,
                       toolCallId: s.call.id,

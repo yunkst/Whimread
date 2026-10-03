@@ -389,22 +389,6 @@ class MockScenarioSession extends _i1.Mock implements _i2.ScenarioSession {
       ) as _i5.Future<void>);
 
   @override
-  void updateToolMessageContent(
-    String? toolCallId,
-    String? content,
-  ) =>
-      super.noSuchMethod(
-        Invocation.method(
-          #updateToolMessageContent,
-          [
-            toolCallId,
-            content,
-          ],
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
   _i5.Future<void> cancel() => (super.noSuchMethod(
         Invocation.method(
           #cancel,

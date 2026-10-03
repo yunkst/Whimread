@@ -23,6 +23,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_app/core/providers/database_providers.dart'
@@ -124,8 +125,44 @@ StateLedgerResult applyStateLedger(
   return result;
 }
 
+/// 概率判定的一个分支（roll_random_event 参数项）
+class WeightedEvent {
+  /// 结果短标签（GM 据此演出分支）
+  final String label;
+
+  /// 相对权重（正数；按总和归一化为概率）
+  final double weight;
+
+  const WeightedEvent({required this.label, required this.weight});
+}
+
+/// 按权重抽取一个分支（纯函数，便于边界测试）
+///
+/// [point] 取值域 [0, totalWeight)，逐项累加权重落入首个超过 point 的分支。
+WeightedEvent pickWeightedEvent(List<WeightedEvent> events, double point) {
+  var acc = 0.0;
+  for (final e in events) {
+    acc += e.weight;
+    if (point < acc) return e;
+  }
+  return events.last; // 浮点兜底：point 落在区间右端时归最后一项
+}
+
+/// 权重归一化为百分比文案（整数不带小数，否则保留 1 位）
+String weightedPercent(double weight, double total) {
+  if (total <= 0) return '0%';
+  final pct = weight / total * 100;
+  final s = pct == pct.roundToDouble()
+      ? pct.toStringAsFixed(0)
+      : pct.toStringAsFixed(1);
+  return '$s%';
+}
+
 class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   final Ref _ref;
+
+  /// 概率判定的随机源（测试可注入固定序列）
+  final Random _random;
 
   /// 当前游戏（factory 每次运行按 textGameId 重新加载，设定即时生效）
   final TextGame game;
@@ -135,8 +172,6 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
 
   /// 参战角色卡（characters 表行，含玩家角色卡；factory 按参战名单加载）
   final List<Character> cast;
-
-  TextGameScenario(this._ref, this.game, {required this.novel, required this.cast});
 
   /// 玩家角色卡（未设置/名单缺卡时为 null）
   Character? get _playerCard {
@@ -152,6 +187,14 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   List<Character> get _npcCards => cast
       .where((c) => c.id != game.settings.playerCharacterId)
       .toList();
+
+  TextGameScenario(
+    this._ref,
+    this.game, {
+    required this.novel,
+    required this.cast,
+    Random? random,
+  }) : _random = random ?? Random();
 
   @override
   String get id => ScenarioIds.textGame;
@@ -173,6 +216,7 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
           createSceneImageToolDefinition,
         updateGameStateToolDefinition,
         createGameCharacterToolDefinition,
+        rollRandomEventToolDefinition,
       ];
 
   /// 静态系统提示词：只放 GM 身份与输出协议（整个 run 周期内不变，
@@ -221,6 +265,11 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         '返回即已拿到图片，不要重复调用同一场景。'
         'prompt 用英文外貌/构图描述'
         '（可参考角色 facePrompts/bodyPrompts/appearanceFeatures）。');
+    buf.writeln('9. 概率判定：剧情出现不确定性分岔（战斗能否获胜、行动能否成功、'
+        '机关是否触发、随机遭遇等）时，调用 roll_random_event：events 列出'
+        '全部分支（含失败/意外分支）与相对权重，随机结果返回后即为既定事实——'
+        '必须照此推进剧情，不得改写或重复判定，然后用 narrate/speak 演出结果。'
+        '确定性剧情不要滥用判定。');
 
     return buf.toString();
   }
@@ -375,6 +424,8 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         return await _executeUpdateGameState(args);
       case 'create_character':
         return await _executeCreateCharacter(args);
+      case 'roll_random_event':
+        return _executeRollEvent(args);
       default:
         return jsonEncode({
           'error': 'unknown_tool',
@@ -748,6 +799,86 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
     });
   }
 
+  /// 概率判定：按权重随机抽取一个分支作为既定事实返回。
+  ///
+  /// 参数校验从严（错误信息引导 GM 自纠）：分支 2-6 个、label 非空、
+  /// weight 为正数（宽容解析字符串数字，缺省 1）。结果即锁定——note 明示
+  /// 不得改写/重判，日志留档每次判定的分支与权重供回溯。
+  Future<String> _executeRollEvent(Map<String, dynamic> args) async {
+    final reason = (args['reason'] as String?)?.trim() ?? '';
+    final raw = args['events'];
+    if (raw is! List || raw.isEmpty) {
+      return jsonEncode({
+        'error': 'missing_events',
+        'message': 'events 不能为空：列出全部分支（2-6 个，含失败/意外分支）'
+            '与相对权重后再调用',
+      });
+    }
+    final events = <WeightedEvent>[];
+    for (var i = 0; i < raw.length; i++) {
+      final item = raw[i];
+      final label = (item is Map ? item['label'] : item)?.toString().trim() ?? '';
+      if (label.isEmpty) {
+        return jsonEncode({
+          'error': 'invalid_event',
+          'message': '第 ${i + 1} 个分支缺少 label，请补全每个分支的结果标签'
+              '（如「战斗胜利」）后重新调用',
+        });
+      }
+      final rawWeight = item is Map ? item['weight'] : null;
+      final weight = rawWeight == null
+          ? 1.0
+          : rawWeight is num
+              ? rawWeight.toDouble()
+              : double.tryParse('$rawWeight');
+      if (weight == null || weight <= 0) {
+        return jsonEncode({
+          'error': 'invalid_weight',
+          'message': '分支「$label」的 weight 必须是正数（相对权重，如 70 与 30 '
+              '表示七三开），省略视为 1',
+        });
+      }
+      events.add(WeightedEvent(label: label, weight: weight));
+    }
+    if (events.length < 2) {
+      return jsonEncode({
+        'error': 'too_few_events',
+        'message': '至少 2 个分支才有随机意义（当前 ${events.length} 个）。'
+            '请把失败/意外分支也列入 events，如 胜利(70) + 失败(30)',
+      });
+    }
+    if (events.length > 6) {
+      return jsonEncode({
+        'error': 'too_many_events',
+        'message': '最多 6 个分支（当前 ${events.length} 个），请合并同类结果',
+      });
+    }
+
+    final total = events.fold<double>(0, (s, e) => s + e.weight);
+    final picked = pickWeightedEvent(events, _random.nextDouble() * total);
+
+    LoggerService.instance.i(
+      '概率判定: game=${game.id}'
+      '${reason.isEmpty ? "" : " reason=$reason"} '
+      'branches=${events.map((e) => "${e.label}:${e.weight}").join("/")} '
+      '→ ${picked.label}',
+      category: LogCategory.ai,
+      tags: ['agent', 'scenario', 'text_game', 'roll_random_event'],
+    );
+    return jsonEncode({
+      'ok': true,
+      'selected': picked.label,
+      'selectedPercent': weightedPercent(picked.weight, total),
+      'branches': [
+        for (final e in events)
+          {'label': e.label, 'weight': e.weight, 'percent': weightedPercent(e.weight, total)},
+      ],
+      'note': '随机判定完成：本回合剧情必须按「${picked.label}」推进，'
+          '不得改写，也不要重复判定换结果。请用 narrate/speak 演出该结果，'
+          '最后仍需 present_choices 收尾。',
+    });
+  }
+
   @override
   Future<String?> onNoToolCalls(List<ChatMessage> messages) async {
     if (_protocolNudged) return null;
@@ -924,6 +1055,52 @@ const Map<String, dynamic> updateGameStateToolDefinition = {
               '记入版本历史便于回溯',
         },
       },
+    },
+  },
+};
+
+/// 概率判定工具：多分支事件按相对权重随机抽取一个结果
+const Map<String, dynamic> rollRandomEventToolDefinition = {
+  'type': 'function',
+  'function': {
+    'name': 'roll_random_event',
+    'description':
+        '概率判定：对剧情中的不确定性分岔（战斗能否获胜、行动能否成功、'
+        '机关是否触发、随机遭遇等）按权重随机抽取一个结果。\n'
+        'events 列出全部分支（含失败/意外分支）与相对权重，系统归一化后'
+        '抽取一个分支返回。weight 只需相对比例正确，不必加总为 100'
+        '（如 70 与 30 即七三开）。\n'
+        '⚠️ 结果返回后即为既定事实：必须照此推进剧情，不得改写，也不要'
+        '重复调用试图换结果。确定性剧情不要调用本工具。',
+    'parameters': {
+      'type': 'object',
+      'properties': {
+        'events': {
+          'type': 'array',
+          'description': '所有可能分支（2-6 个，必须包含失败/意外分支）。'
+              'weight 为相对权重（正数，省略视为 1 即等概率）',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'label': {
+                'type': 'string',
+                'description': '分支结果短标签（如「战斗胜利」「机关触发」）',
+              },
+              'weight': {
+                'type': 'number',
+                'description': '相对权重（正数，如 70 与 30 表示七三开）',
+              },
+            },
+            'required': ['label'],
+          },
+        },
+        'reason': {
+          'type': 'string',
+          'description': '一句话说明为什么判定（如「主角强闯山门禁制」），'
+              '记入日志便于回溯',
+        },
+      },
+      'required': ['events'],
     },
   },
 };

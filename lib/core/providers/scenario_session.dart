@@ -4,7 +4,9 @@
 /// - 内部以 agent 视角的 `List<ChatMessage>`（_agentMessages）为真理源，
 ///   含完整 ReAct 链（system/user/assistant/tool）。
 /// - DB 直接存 agent ChatMessage（chat_messages 表 v32），hydrate 时 1:1 还原。
-/// - UI 通过 _projectUiMessages 把 agent messages 投影为 AgentChatMessage（含 segments）。
+/// - UI 通过 _projectUiMessages 把 agent messages 投影为 AgentChatMessage
+///   （含 segments）；同一回合（相邻 user 之间）的连续 assistant 消息合并为
+///   一条，与流式气泡结构对齐。
 /// - 落库时机：user 消息即时落库；assistant 回合（含 tool 调用/结果）在
 ///   AgentDoneEvent/cancel 时从 _pendingSegments 重建并批量落库。
 /// - 压缩 / retry / rollback 以内存为基准原子重写 DB（replaceMessages 单事务），保证内存与 DB 一致。
@@ -39,6 +41,7 @@ import 'current_novel_provider.dart';
 import 'database_providers.dart';
 import 'agent_chat_state.dart';
 import 'agent_session_persistence.dart';
+import 'ask_user_providers.dart';
 import 'reading_context_providers.dart';
 import 'subagent_providers.dart';
 import 'webview_providers.dart';
@@ -206,9 +209,12 @@ class ScenarioSession {
   /// 规则：
   /// - system：压缩提示（[上下文压缩|...]）→ AgentChatRole.marker；
   ///   其余 system（sys_prompt 等）跳过。
-  /// - user：直接转 AgentChatMessage.user
-  /// - assistant：收集紧跟其后、toolCallId 匹配的 tool 消息作为 ToolCallSegment
-  /// - tool：已被前一个 assistant 吸收，跳过
+  /// - user：直接转 AgentChatMessage.user，同时充当回合边界。
+  /// - assistant：同一回合（相邻两条 user 之间）的连续 assistant 消息合并为
+  ///   一条 AgentChatMessage，segments 按时序拼接（text → tool → text → …），
+  ///   与流式态 _pendingSegments 的结构一致，避免回合结束时一个气泡被
+  ///   LLM 协议的轮次边界拆成多个气泡。
+  /// - tool：已被前一个 assistant 吸收，跳过。
   @visibleForTesting
   static List<AgentChatMessage> projectUiMessagesForTest(List<ChatMessage> msgs) =>
       _projectUiMessages(msgs);
@@ -216,28 +222,42 @@ class ScenarioSession {
   static List<AgentChatMessage> _projectUiMessages(
       List<ChatMessage> agentMsgs) {
     final ui = <AgentChatMessage>[];
+
+    /// 当前回合的 segments 累积（两条 user / marker 之间）；null = 无进行中回合
+    List<AgentChatSegment>? turnSegments;
+
+    void flushTurn() {
+      final segs = turnSegments;
+      turnSegments = null;
+      if (segs == null || segs.isEmpty) return;
+      ui.add(AgentChatMessage.assistantFromSegments(segs));
+    }
+
     for (var i = 0; i < agentMsgs.length; i++) {
       final m = agentMsgs[i];
       switch (m.role) {
         case 'system':
-          // 压缩提示 system → marker；其余 system（sys_prompt 等）仍 continue
+          // 压缩提示 system → marker（同时切断当前回合合并组）；
+          // 其余 system（sys_prompt 等）仍 continue
           final note = CompactionNoteParser.parse(m.content ?? '');
           if (note != null) {
+            flushTurn();
             ui.add(AgentChatMessage.compactionMarker(note));
           }
           continue;
         case 'user':
+          flushTurn();
           ui.add(AgentChatMessage.userFromSegments(
               _parseUserSegments(m.content ?? '')));
           break;
         case 'assistant':
-          final segments = <AgentChatSegment>[];
+          final segs = turnSegments ??= <AgentChatSegment>[];
           if (m.content != null && m.content!.isNotEmpty) {
-            segments.add(TextSegment(m.content!));
+            segs.add(TextSegment(m.content!));
           }
           for (final tc in m.toolCalls ?? const <ToolCall>[]) {
             final toolMsg = _findToolResult(agentMsgs, i, tc.id);
-            segments.add(ToolCallSegment(AgentToolCall(
+            segs.add(ToolCallSegment(AgentToolCall(
               id: tc.id,
               name: tc.name,
               arguments: tc.arguments,
@@ -247,7 +267,6 @@ class ScenarioSession {
               result: toolMsg?.content,
             )));
           }
-          ui.add(AgentChatMessage.assistantFromSegments(segments));
           break;
         case 'tool':
           // 已被 assistant 吸收
@@ -256,6 +275,7 @@ class ScenarioSession {
           break;
       }
     }
+    flushTurn();
     return ui;
   }
 
@@ -545,6 +565,32 @@ class ScenarioSession {
     await _beginAgentRun(agentContent);
   }
 
+  /// ask_user 工具的 UI 作答入口
+  ///
+  /// 聊天卡片（AskUserCard）把用户点选/输入的结果投递给挂起的提问：
+  /// 委托给 [askUserRegistryProvider] 完成对应 Completer，WritingScenario
+  /// 的 ask_user 分支随即以答案 JSON 作为 tool result 返回，run 继续。
+  /// 无匹配挂起项（已答过 / 已取消 / 会话重建后失效）返回 false。
+  bool answerAskUser(
+    String toolCallId, {
+    List<String>? selected,
+    String? freeText,
+  }) {
+    final ok = _ref.read(askUserRegistryProvider).answer(
+          scenarioId: scenarioId,
+          toolCallId: toolCallId,
+          selected: selected,
+          freeText: freeText,
+        );
+    LoggerService.instance.i(
+      'ScenarioSession [$scenarioId] ask_user 作答 toolCallId=$toolCallId '
+      'ok=$ok',
+      category: LogCategory.ai,
+      tags: ['session', 'ask_user', ok ? 'answered' : 'missed', scenarioId],
+    );
+    return ok;
+  }
+
   /// 启动一轮 Agent 回合
   Future<void> _beginAgentRun(String userInput) async {
     _isTokenCancelled = false;
@@ -689,6 +735,16 @@ class ScenarioSession {
         'ScenarioSession [$scenarioId] 拒绝重试 dispatch_subagent',
         category: LogCategory.ai,
         tags: ['session', 'retry_tool', 'subagent_rejected', scenarioId],
+      );
+      return;
+    }
+    // 防御：ask_user 不走本路径——历史提问没有"重问用户"的意义
+    // （用户当轮已答过或已取消，重新提问只会插入一条孤儿 tool 消息）
+    if (toolName == 'ask_user') {
+      LoggerService.instance.w(
+        'ScenarioSession [$scenarioId] 拒绝重试 ask_user',
+        category: LogCategory.ai,
+        tags: ['session', 'retry_tool', 'ask_user_rejected', scenarioId],
       );
       return;
     }
@@ -1238,18 +1294,23 @@ class ScenarioSession {
     }
 
     // UI index → agent index：在 _agentMessages 中找到对应 uiMsgs[index] 的位置。
-    // _uiMessages 包含 user 和 assistant（system/tool 被跳过/吸收），
-    // 所以需要在 agent 列表中按投影顺序匹配，而不是只匹配 user。
+    // _uiMessages 包含 user 和 assistant 回合（system/tool 被跳过/吸收，
+    // 且同一回合的连续 assistant 消息合并为一条 UI 消息），因此按投影分组计数：
+    // assistant 只有在不处于「上一条可见消息也是 assistant」的合并运行中时
+    // 才算新的 UI 条目。
     int agentIdx = -1;
     int uiCount = 0;
+    bool inAssistantRun = false;
     for (int i = 0; i < _agentMessages.length; i++) {
       final role = _agentMessages[i].role;
       if (role == 'system' || role == 'tool') continue;
+      if (role == 'assistant' && inAssistantRun) continue;
       if (uiCount == index) {
         agentIdx = i;
         break;
       }
       uiCount++;
+      inAssistantRun = role == 'assistant';
     }
     if (agentIdx < 0) return false;
 

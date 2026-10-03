@@ -149,7 +149,10 @@ class WebViewControllerNotifier extends StateNotifier<InAppWebViewController?> {
 
   /// 资源加载错误
   void handleError(WebResourceError error) {
-    LoggerService.instance.e(
+    // 浏览器 Tab 的资源错误多为环境态（断网 / DNS 解析失败 / 连接被拒），
+    // 不代表应用故障。记 warning 而非 error：ERROR 会进反馈的错误归类，
+    // 一页十来条离线噪音会淹没真正的崩溃（历史反馈 300 条里占 17 条）。
+    LoggerService.instance.w(
       'WebView 资源加载错误: ${error.description} (type: ${error.type})',
       category: LogCategory.network,
       tags: ['webview', 'resource-error'],

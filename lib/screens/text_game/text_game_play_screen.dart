@@ -42,6 +42,42 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
   int _lastItemCount = 0;
   int _lastStreamingLen = 0;
 
+  /// 已播过揭晓动画的判定 toolCallId：ListView 滚动重建/历史回放时
+  /// 据此直接静态展示，揭晓扫动只在结果首展时播一次
+  final Set<String> _settledRollIds = {};
+
+  /// 已播过入场动画的选项组 toolCallId（同上，只播一次记账）
+  final Set<String> _settledChoiceIds = {};
+
+  /// 首次见到非空定稿链时的长度：此前的内容都是历史（含页面重入回放），
+  /// 之后新增的玩家输入才播入场动画。-1 = 未播种
+  int _seededTranscriptLen = -1;
+
+  /// 历史播种：页面进入时定稿链里已有的内容一律视为已播过，
+  /// 保证动画只为"本次到访期间新出现的内容"播放，历史永不重播
+  void _seedAnimationBookkeeping(List<GameSegment> transcript) {
+    // 回溯重选使定稿链缩短 → 以当前长度重新起算
+    if (_seededTranscriptLen >= 0) {
+      if (transcript.length < _seededTranscriptLen) {
+        _seededTranscriptLen = transcript.length;
+      }
+      return;
+    }
+    if (transcript.isEmpty) return; // 新游戏空链，等内容出现再播种
+    _seededTranscriptLen = transcript.length;
+    for (final seg in transcript) {
+      switch (seg) {
+        case GameDiceRoll():
+          _settledRollIds.add(seg.toolCallId);
+        case GameChoices():
+          final id = seg.toolCallId;
+          if (id != null) _settledChoiceIds.add(id);
+        default:
+          break;
+      }
+    }
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -94,14 +130,17 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
 
     // 剧情条目：定稿 + 运行中段 + 打字机（Listenable builder 由整体重建驱动）
     final showGmThinking = ref.watch(gmThinkingVisibleProvider);
+    _seedAnimationBookkeeping(state.transcript);
     final items = <Widget>[
-      for (final seg in state.transcript) _buildSegment(context, seg),
+      for (var i = 0; i < state.transcript.length; i++)
+        _buildSegment(context, state.transcript[i], i),
       for (final seg in state.pendingSegments)
-        _buildSegment(context, seg),
+        _buildSegment(context, seg, -1),
       if (state.streamingParts.isNotEmpty)
         GameStreamingPartsView(
           parts: state.streamingParts,
           avatarByName: state.avatarByName,
+          showCaret: state.agentRunning,
         ),
       if (showGmThinking &&
           (state.gmThinking.isNotEmpty || state.gmAction != null))
@@ -184,7 +223,7 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     );
   }
 
-  Widget _buildSegment(BuildContext context, GameSegment seg) {
+  Widget _buildSegment(BuildContext context, GameSegment seg, int index) {
     switch (seg) {
       case GameNarration():
         return GameNarrationView(text: seg.text);
@@ -192,11 +231,26 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
         return GameDialogueView(character: seg.character, text: seg.text);
       case GameSceneImage():
         return GameSceneImageView(segment: seg);
+      case GameDiceRoll():
+        final canAnimate = seg.toolCompleted &&
+            seg.error == null &&
+            seg.selectedLabel != null &&
+            !_settledRollIds.contains(seg.toolCallId);
+        return GameDiceRollView(
+          segment: seg,
+          animate: canAnimate,
+          onAnimated: () => _settledRollIds.add(seg.toolCallId),
+        );
       case GamePlayerInput():
-        return GamePlayerInputView(text: seg.text);
+        // 播种长度之后新增的输入才播入场动画（历史/回放直接静态）
+        return GamePlayerInputView(
+          text: seg.text,
+          animate: _seededTranscriptLen >= 0 && index >= _seededTranscriptLen,
+        );
       case GameChoices():
         // 活动选项固定渲染在输入区上方（_buildComposer），剧情流内不重复渲染；
         // 历史选项只读展示（置灰），带锚点的提供「回溯到这一步」。
+        // 历史实例不播入场动画——活动组的动画由 composer 实例承担
         if (seg.active) return const SizedBox.shrink();
         return GameChoicesView(
           choices: seg,
@@ -280,10 +334,11 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('剧情推进中…',
+            child: Text('剧情推进中',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.outline)),
           ),
+          const _EllipsisDots(),
           TextButton(
             onPressed: controller.cancelTurn,
             child: const Text('停止'),
@@ -302,20 +357,29 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     final manualImage = state.game?.settings.rules.imagePolicy ==
         GameImagePolicy.manual;
 
-    // 活动选项（最后一条且 active）放在输入区上方
+    // 活动选项（最后一条且 active）放在输入区上方；首次出现播错峰入场
+    // （按 toolCallId 记账，播完标记；历史/页面重入不重播）
     final activeChoices = state.transcript
         .whereType<GameChoices>()
         .where((c) => c.active)
         .toList();
     final choicesWidget = activeChoices.isEmpty
         ? const SizedBox.shrink()
-        : GameChoicesView(
-            choices: activeChoices.last,
-            onSelected: (c) {
-              _focusNode.unfocus();
-              controller.sendChoice(c);
-            },
-          );
+        : Builder(builder: (context) {
+            final seg = activeChoices.last;
+            final id = seg.toolCallId;
+            return GameChoicesView(
+              choices: seg,
+              onSelected: (c) {
+                _focusNode.unfocus();
+                controller.sendChoice(c);
+              },
+              animate: id != null && !_settledChoiceIds.contains(id),
+              onAnimated: () {
+                if (id != null) _settledChoiceIds.add(id);
+              },
+            );
+          });
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -458,6 +522,53 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     if (session != null && session.sessionId == game.chatSessionId) {
       await session.cancel();
     }
+  }
+}
+
+/// 动态省略号（三点依次明灭，配合"剧情推进中"的推进感）
+class _EllipsisDots extends StatefulWidget {
+  const _EllipsisDots();
+
+  @override
+  State<_EllipsisDots> createState() => _EllipsisDotsState();
+}
+
+class _EllipsisDotsState extends State<_EllipsisDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.outline;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < 3; i++)
+          FadeTransition(
+            opacity: Tween<double>(begin: 0.25, end: 1).animate(
+              CurvedAnimation(
+                parent: _ctrl,
+                curve: Interval(i * 0.28, (i * 0.28 + 0.45).clamp(0.0, 1.0)),
+              ),
+            ),
+            child: Container(
+              width: 4,
+              height: 4,
+              margin: const EdgeInsets.only(left: 3),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          ),
+      ],
+    );
   }
 }
 

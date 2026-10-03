@@ -5,9 +5,11 @@
 /// 行（游戏侧设定，chatSessionId 关联）。创建后 invalidate textGamesProvider，
 /// 管理页（底部「文字游戏」Tab）实时可见。
 ///
-/// 统一模型：游戏必须绑定小说（source_novel_id 必填）以共享角色卡——参战
-/// 名单（character_ids）与玩家角色（player_character_id）都是 characters 表
-/// 的行 id（先经 create_character 建卡），settings_json 不再快照拷贝角色。
+/// 统一模型：游戏必须绑定小说（source_novel_id 必填，list_novels 可查）以
+/// 共享角色卡。参战名单**缺省 = 绑定小说全部角色卡**（agent 的职责是在
+/// 创建前把该小说的主要人物与玩家角色的完整角色卡建好），character_names
+/// 仅用于角色过多时圈定子集；角色真实 id 有意不对模型暴露
+/// （list_characters 只返回名字），本执行器在绑定小说内把名字解析回行 id。
 /// 游玩不走本执行器：text_game 场景有自己的回合工具（TextGameScenario）。
 library;
 
@@ -16,6 +18,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers/text_game_providers.dart';
+import '../../../models/character.dart';
 import '../../../models/chat_session.dart';
 import '../../../models/text_game.dart';
 import '../../../services/logger_service.dart';
@@ -32,6 +35,10 @@ class TextGameExecutor {
   TextGameExecutor(this.ref);
 
   /// 创建文字游戏（设定必须已与用户确认；必须绑定小说）
+  ///
+  /// 绑定小说用 source_novel_id；参战名单缺省 = 绑定小说全部角色卡
+  /// （agent 创建前负责把主要人物与玩家角色的完整角色卡建好），
+  /// character_names 仅用于显式圈定子集；玩家角色按名字引用且必填。
   Future<String> createTextGame(Map<String, dynamic> args) async {
     final title = (args['title'] as String?)?.trim() ?? '';
     final worldview = (args['worldview'] as String?)?.trim() ?? '';
@@ -41,8 +48,8 @@ class TextGameExecutor {
     final choicesCountRaw = args['choicesCount'];
     final imagePolicyRaw = args['imagePolicy'] as String?;
     final sourceNovelId = _parseId(args['source_novel_id']);
-    final sourceNovelTitle = (args['source_novel_title'] as String?)?.trim();
-    final playerCharacterId = _parseId(args['player_character_id']);
+    final playerCharacterName =
+        (args['player_character_name'] as String?)?.trim() ?? '';
 
     if (title.isEmpty) {
       return _error('missing_title', 'title 不能为空');
@@ -57,7 +64,7 @@ class TextGameExecutor {
       return _error('missing_opening', 'opening 不能为空（玩家的开场情境）');
     }
 
-    // 校验小说存在，并取真实标题兜底展示名
+    // 校验小说存在（角色卡解析也限定在这本小说内）
     final novelRepo = ref.read(novelRepositoryProvider);
     final novel = await novelRepo.getNovelById(sourceNovelId);
     if (novel == null) {
@@ -65,37 +72,60 @@ class TextGameExecutor {
           '小说 id=$sourceNovelId 不存在。可先调用 list_novels 查看书架小说，'
           '或用 create_novel 创建。');
     }
-    final resolvedNovelUrl = novel.url;
 
-    // 参战名单：characters 表行 id，必须都属于绑定小说
-    final characterIds = <int>[];
-    if (args['character_ids'] is List) {
-      for (final raw in (args['character_ids'] as List)) {
-        final id = raw is num ? raw.toInt() : int.tryParse('$raw');
-        if (id != null && !characterIds.contains(id)) characterIds.add(id);
-      }
-    }
-    if (characterIds.isEmpty) {
-      return _error(
-          'missing_characters',
-          'character_ids 不能为空。先用 create_character 在该小说下创建角色卡'
-          '（含玩家角色），再传入其 characterId。');
-    }
-    if (playerCharacterId == null) {
-      return _error('missing_player_character',
-          'player_character_id 不能为空：先用 create_character 创建玩家角色卡，'
-          '再传入其 characterId。');
-    }
-
+    // 参战名单：缺省 = 绑定小说全部角色卡（agent 创建前应已补齐完整角色卡）；
+    // 显式传名字 = 圈定子集（角色过多时聚焦主要角色），名字必须都存在
     final charRepo = ref.read(characterRepositoryProvider);
-    for (final id in {...characterIds, playerCharacterId}) {
-      final card = await charRepo.getCharacter(id);
-      if (card == null || card.novelUrl != resolvedNovelUrl) {
-        return _error('invalid_character',
-            '角色卡 id=$id 不存在或不属于小说「${novel.title}」。'
-            '请传该小说下 create_character 返回的 characterId。');
+    final allCards = await charRepo.getCharacters(novel.url);
+    final cardByName = <String, Character>{};
+    for (final card in allCards) {
+      cardByName.putIfAbsent(card.name, () => card);
+    }
+
+    final requestedNames = <String>[];
+    if (args['character_names'] is List) {
+      for (final raw in (args['character_names'] as List)) {
+        final name = raw?.toString().trim() ?? '';
+        if (name.isNotEmpty && !requestedNames.contains(name)) {
+          requestedNames.add(name);
+        }
       }
     }
+
+    final characterIds = <int>[];
+    if (requestedNames.isNotEmpty) {
+      for (final name in requestedNames) {
+        final card = cardByName[name];
+        if (card?.id == null) {
+          return _error('character_not_found',
+              '小说「${novel.title}」下不存在名为「$name」的角色卡。'
+              '先用 list_characters 核对现有角色名，缺的用 create_character '
+              '创建后再引用。');
+        }
+        if (!characterIds.contains(card!.id)) characterIds.add(card.id!);
+      }
+    } else {
+      for (final card in allCards) {
+        if (card.id != null && !characterIds.contains(card.id)) {
+          characterIds.add(card.id!);
+        }
+      }
+    }
+
+    if (playerCharacterName.isEmpty) {
+      return _error('missing_player_character',
+          'player_character_name 不能为空：先 create_character 为该小说创建'
+          '玩家角色卡，再按名字引用。');
+    }
+
+    final playerCard = cardByName[playerCharacterName];
+    if (playerCard?.id == null) {
+      return _error('player_character_not_found',
+          '小说「${novel.title}」下不存在名为「$playerCharacterName」的玩家'
+          '角色卡。先用 create_character 为该小说创建完整角色卡（含玩家角色，'
+          '名字须一致），再创建游戏。');
+    }
+    final playerCharacterId = playerCard!.id!;
     if (!characterIds.contains(playerCharacterId)) {
       characterIds.add(playerCharacterId);
     }
@@ -139,8 +169,8 @@ class TextGameExecutor {
     try {
       gameId = await repo.create(TextGame(
         title: title,
-        sourceNovelId: sourceNovelId,
-        sourceNovelTitle: sourceNovelTitle ?? novel.title,
+        sourceNovelId: novel.id,
+        sourceNovelTitle: novel.title,
         settings: settings,
         chatSessionId: sessionId,
         createdAt: DateTime.now(),
@@ -160,7 +190,7 @@ class TextGameExecutor {
     ref.invalidate(textGamesProvider);
     LoggerService.instance.i(
       '创建文字游戏: gameId=$gameId sessionId=$sessionId title=$title '
-      'novelId=$sourceNovelId cast=${characterIds.length}',
+      'novelId=${novel.id} cast=${characterIds.length}',
       category: LogCategory.ai,
       tags: ['agent', 'tool', 'create_text_game', 'success'],
     );
@@ -192,7 +222,8 @@ class TextGameExecutor {
     });
   }
 
-  /// 修改游戏设定（只传的字段生效；角色卡本身走 create/update_character）
+  /// 修改游戏设定（只传的字段生效；角色卡本身走 create/update_character，
+  /// 参战名单与玩家角色按角色名引用，在绑定小说内解析为行 id）
   Future<String> updateTextGame(Map<String, dynamic> args) async {
     final gameId = _parseId(args['game_id']);
     if (gameId == null) {
@@ -205,42 +236,58 @@ class TextGameExecutor {
           '游戏 id=$gameId 不存在，可先调用 list_text_games 查看现有游戏');
     }
 
-    // 参战名单参数解析：增量（add/remove）与整体替换互斥
-    final newCastRaw = args['character_ids'];
-    final addCastRaw = args['add_character_ids'];
-    final removeCastRaw = args['remove_character_ids'];
-    final newPlayerId = _parseId(args['player_character_id']);
+    // 参战名单参数解析：增量（add/remove）与整体替换互斥，均按角色名引用
+    final newCastRaw = args['character_names'];
+    final addCastRaw = args['add_character_names'];
+    final removeCastRaw = args['remove_character_names'];
+    final newPlayerName =
+        (args['player_character_name'] as String?)?.trim() ?? '';
     final hasReplace = newCastRaw is List;
     final hasIncremental = addCastRaw is List || removeCastRaw is List;
     if (hasReplace && hasIncremental) {
       return _error('conflicting_cast_args',
-          'character_ids（整体替换）与 add/remove_character_ids（增量调整）'
+          'character_names（整体替换）与 add/remove_character_names（增量调整）'
           '不能同时传，请二选一');
     }
 
-    // 显式传入的角色 id 先行校验归属（多次 await 的校验窗口与写回分离）
-    if (hasReplace || hasIncremental || newPlayerId != null) {
-      final involved = <int>{
-        ..._parseIdList(newCastRaw),
-        ..._parseIdList(addCastRaw),
-        if (newPlayerId != null) newPlayerId,
-      };
-      if (involved.isNotEmpty) {
-        final novel = await ref
-            .read(novelRepositoryProvider)
-            .getNovelById(game.sourceNovelId ?? -1);
-        if (novel == null) {
-          return _error('novel_not_found', '绑定的小说已不存在，无法校验角色归属');
-        }
-        final charRepo = ref.read(characterRepositoryProvider);
-        for (final id in involved) {
-          final card = await charRepo.getCharacter(id);
-          if (card == null || card.novelUrl != novel.url) {
-            return _error('invalid_character',
-                '角色卡 id=$id 不存在或不属于小说「${novel.title}」');
-          }
+    // 显式传入的角色名先在绑定小说内解析为行 id（多次 await 的校验窗口与
+    // 写回分离）；移除名单里的未知名字宽容处理（视为无操作）
+    var resolvedNewCast = const <int>[];
+    var resolvedAddCast = const <int>[];
+    var resolvedRemoveCast = const <int>[];
+    int? newPlayerId;
+    if (hasReplace || hasIncremental || newPlayerName.isNotEmpty) {
+      final novel = await ref
+          .read(novelRepositoryProvider)
+          .getNovelById(game.sourceNovelId ?? -1);
+      if (novel == null) {
+        return _error('novel_not_found', '绑定的小说已不存在，无法校验角色归属');
+      }
+      final cards = await ref
+          .read(characterRepositoryProvider)
+          .getCharacters(novel.url);
+      final cardIdByName = <String, int>{};
+      for (final card in cards) {
+        if (card.id != null) cardIdByName.putIfAbsent(card.name, () => card.id!);
+      }
+      for (final name
+          in [..._parseNameList(newCastRaw), ..._parseNameList(addCastRaw)]) {
+        if (!cardIdByName.containsKey(name)) {
+          return _error('character_not_found',
+              '小说「${novel.title}」下不存在名为「$name」的角色卡。'
+              '先用 list_characters 核对现有角色名，缺的用 create_character '
+              '创建。');
         }
       }
+      if (newPlayerName.isNotEmpty && !cardIdByName.containsKey(newPlayerName)) {
+        return _error('player_character_not_found',
+            '小说「${novel.title}」下不存在名为「$newPlayerName」的玩家角色卡。'
+            '先 create_character 创建（名字须一致），再引用。');
+      }
+      resolvedNewCast = _resolveNameIds(newCastRaw, cardIdByName);
+      resolvedAddCast = _resolveNameIds(addCastRaw, cardIdByName);
+      resolvedRemoveCast = _resolveNameIds(removeCastRaw, cardIdByName);
+      if (newPlayerName.isNotEmpty) newPlayerId = cardIdByName[newPlayerName];
     }
 
     // 校验通过后再读最新行打 patch：游玩中的并发写入（update_game_state
@@ -273,21 +320,20 @@ class TextGameExecutor {
     if (hasReplace || hasIncremental || newPlayerId != null) {
       List<int> characterIds;
       if (hasReplace) {
-        characterIds = _parseIdList(newCastRaw);
+        characterIds = resolvedNewCast;
       } else if (hasIncremental) {
         characterIds = [...s.characterIds];
-        for (final id in _parseIdList(addCastRaw)) {
+        for (final id in resolvedAddCast) {
           if (!characterIds.contains(id)) characterIds.add(id);
         }
-        final removedIds = _parseIdList(removeCastRaw);
-        characterIds.removeWhere(removedIds.contains);
+        characterIds.removeWhere(resolvedRemoveCast.contains);
       } else {
         characterIds = [...s.characterIds];
       }
       final playerId = newPlayerId ?? s.playerCharacterId;
       if (playerId == null) {
         return _error('missing_player_character',
-            'player_character_id 不能为空（当前游戏未设置玩家角色）');
+            'player_character_name 不能为空（当前游戏未设置玩家角色）');
       }
       if (!characterIds.contains(playerId)) {
         if (newPlayerId != null) {
@@ -295,7 +341,7 @@ class TextGameExecutor {
         } else {
           return _error('player_cannot_be_removed',
               '玩家角色（id=$playerId）不能移出参战名单；'
-              '如需更换玩家请传 player_character_id');
+              '如需更换玩家请传 player_character_name');
         }
       }
       settings = settings.copyWith(
@@ -316,14 +362,21 @@ class TextGameExecutor {
     });
   }
 
-  /// 解析 id 列表参数（宽容：数字或数字字符串，去重保序）
-  List<int> _parseIdList(Object? raw) => raw is List
+  /// 解析角色名列表参数（宽容：非字符串也 toString，空名跳过，去重保序）
+  List<String> _parseNameList(Object? raw) => raw is List
       ? raw
-          .map((e) => e is num ? e.toInt() : int.tryParse('$e'))
-          .whereType<int>()
+          .map((e) => e?.toString().trim() ?? '')
+          .where((e) => e.isNotEmpty)
           .toSet()
           .toList()
       : const [];
+
+  /// 名字 → 行 id（绑定小说内解析；未知名字跳过，配合先行校验使用）
+  List<int> _resolveNameIds(Object? raw, Map<String, int> cardIdByName) =>
+      _parseNameList(raw)
+          .map((name) => cardIdByName[name])
+          .whereType<int>()
+          .toList();
 
   /// 宽容解析单个整数 id（LLM 偶尔把 id 传成 "3" 这类字符串数字，
   /// 原始 `as int?` 强转会抛 TypeError，错误信息是英文原文难以自纠）

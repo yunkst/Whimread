@@ -16,13 +16,13 @@ import 'package:novel_app/services/novel_agent/agent_tools.dart';
 
 void main() {
   group('AgentTools.allTools — 基础验证', () {
-    test('应该有 30 个工具（2026-10 新增文字游戏创建/列表/更新）', () {
-      expect(AgentTools.allTools.length, 30, reason: '所有工具数应为 30（2026-09 移除 create_image_to_video 后，'
+    test('应该有 31 个工具（2026-10 新增 ask_user）', () {
+      expect(AgentTools.allTools.length, 31, reason: '所有工具数应为 31（2026-09 移除 create_image_to_video 后，'
           'list/select/create novel + read/list/search chapter + create/update/rewrite/delete chapter + '
           'list/update/create/delete character + get_background_setting/update_background_setting + '
           'update_outline/write_outline/get_outline + set_novel_cover + prompt tags + '
           'list_text2img_models + create_images + create_text_game/list_text_games/update_text_game + '
-          'dispatch_subagent）');
+          'dispatch_subagent + ask_user）');
     });
 
     test('每个工具都有 type=function', () {
@@ -223,6 +223,35 @@ void main() {
 
     test('set_novel_cover — 需要 mediaId（null 表示清空封面）', () {
       verifyToolSchema('set_novel_cover', required: ['mediaId']);
+    });
+
+    test('ask_user — 需要 question，options/multi_select/allow_free_text 可选', () {
+      verifyToolSchema('ask_user',
+          required: ['question'],
+          optional: ['options', 'multi_select', 'allow_free_text']);
+    });
+
+    test('ask_user — options 是 string 数组，multi_select/allow_free_text 是 boolean', () {
+      final tool = AgentTools.findTool('ask_user');
+      final props = tool!['function']['parameters']['properties']
+          as Map<String, dynamic>;
+      final options = props['options'] as Map<String, dynamic>;
+      expect(options['type'], 'array');
+      expect((options['items'] as Map<String, dynamic>)['type'], 'string');
+      expect((props['multi_select'] as Map<String, dynamic>)['type'],
+          'boolean');
+      expect((props['allow_free_text'] as Map<String, dynamic>)['type'],
+          'boolean');
+    });
+
+    test('filterTools — 强制剔除 dispatch_subagent 和 ask_user（子 Agent 不可用）', () {
+      final filtered = AgentTools.filterTools(
+          ['list_novels', 'dispatch_subagent', 'ask_user']);
+      final names = filtered
+          .map((t) => t['function']['name'] as String)
+          .toSet();
+      expect(names, {'list_novels'},
+          reason: 'dispatch_subagent 与 ask_user 都不应出现在子 Agent 工具面');
     });
   });
 

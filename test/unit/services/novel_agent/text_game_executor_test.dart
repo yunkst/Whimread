@@ -1,7 +1,8 @@
 /// TextGameExecutor（create/list/update_text_game）测试
 ///
-/// 覆盖：必绑小说 + 共享角色卡引用（character_ids/player_character_id 校验
-/// 归属）/ 创建联动落库（chat_session + text_game 双行）/ 参数校验 /
+/// 覆盖：必绑小说（source_novel_id）/ 参战名单缺省取绑定小说全部角色卡、
+/// 显式传名圈定子集（名字在绑定小说内解析为行 id，取不到即报错）/
+/// 创建联动落库（chat_session + text_game 双行）/ 参数校验 /
 /// 同名允许（仅日志）/ 列表 / 部分字段更新 / 参战名单替换 / 未知 id。
 library;
 
@@ -41,7 +42,7 @@ void main() {
     ]);
     executor = container.read(_executorProvider);
 
-    // 绑定小说 + 角色卡（含另一本小说的干扰卡）
+    // 绑定小说 + 角色卡（含另一本小说的干扰角色）
     final novelRepo =
         container.read(novelRepositoryProvider) as NovelRepository;
     await novelRepo.createNovel(
@@ -70,8 +71,8 @@ void main() {
         'title': '流云试炼',
         'source_novel_id': novelId,
         'opening': '山雨欲来，主角立于山门之前',
-        'character_ids': [npcId, npc2Id],
-        'player_character_id': playerId,
+        // 参战名单缺省 = 绑定小说全部角色卡；仅显式传名时圈定子集
+        'player_character_name': '沈砚',
         'worldview': '', // 空 = 回退小说背景设定
         'narrativeStyle': '古龙式短句',
         'contentBoundary': '无露骨内容',
@@ -79,7 +80,7 @@ void main() {
         'imagePolicy': 'manual',
       };
 
-  test('create_text_game：会话与游戏双行落库，引用角色卡', () async {
+  test('create_text_game：会话与游戏双行落库，缺省参战名单取全部角色卡', () async {
     final out = jsonDecode(await executor.createTextGame(validArgs()))
         as Map<String, dynamic>;
     expect(out['success'], true);
@@ -87,8 +88,8 @@ void main() {
 
     final game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
     expect(game.title, '流云试炼');
+    // 绑定小说由 source_novel_id 指定，标题自动取小说真实标题
     expect(game.sourceNovelId, novelId);
-    // 标题缺省取小说真实标题
     expect(game.sourceNovelTitle, '流云志');
     expect(game.status, TextGameStatus.active);
     expect(game.chatSessionId, greaterThan(0));
@@ -100,16 +101,27 @@ void main() {
     expect(session!.scenarioId, 'text_game');
     expect(session.title, '流云试炼');
 
-    // 设定：参战名单引用角色卡 id；choicesCount 钳制到 4
+    // 设定：未传参战名单 → 绑定小说全部角色卡入列；choicesCount 钳制到 4
     final s = game.settings;
-    expect(s.characterIds, containsAll([npcId, npc2Id]));
+    expect(s.characterIds, containsAll([npcId, npc2Id, playerId]));
     expect(s.playerCharacterId, playerId);
     expect(s.rules.choicesCount, 4);
     expect(s.rules.imagePolicy, GameImagePolicy.manual);
     expect(s.rules.narrativeStyle, '古龙式短句');
   });
 
-  test('create_text_game：必填与归属校验返回引导错误', () async {
+  test('create_text_game：显式传 character_names 圈定子集', () async {
+    final out = jsonDecode(await executor.createTextGame(validArgs()
+      ..['character_names'] = ['林昭'])) as Map<String, dynamic>;
+    expect(out['success'], true);
+    final gameId = out['gameId'] as int;
+    final game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
+    // 只留林昭，白芷不入列；玩家自动入名单
+    expect(game.settings.characterIds, [npcId, playerId]);
+    expect(game.settings.playerCharacterId, playerId);
+  });
+
+  test('create_text_game：必填与名字解析校验返回引导错误', () async {
     final noTitle = await executor
         .createTextGame(validArgs()..remove('title'));
     expect(noTitle, contains('missing_title'));
@@ -122,22 +134,23 @@ void main() {
         .createTextGame(validArgs()..['source_novel_id'] = 999);
     expect(badNovel, contains('novel_not_found'));
 
-    final noCast = await executor
-        .createTextGame(validArgs()..remove('character_ids'));
-    expect(noCast, contains('missing_characters'));
-
     final noPlayer = await executor
-        .createTextGame(validArgs()..remove('player_character_id'));
+        .createTextGame(validArgs()..remove('player_character_name'));
     expect(noPlayer, contains('missing_player_character'));
 
-    // 外乡人属于另一本小说 → invalid_character
-    final otherChar = (await container
-            .read(characterRepositoryProvider)
-            .getCharacters('他山志'))
-        .first;
-    final foreign = await executor.createTextGame(validArgs()
-      ..['character_ids'] = [npcId, otherChar.id]);
-    expect(foreign, contains('invalid_character'));
+    // 绑定小说下没有的角色名 → character_not_found
+    final unknownName = await executor
+        .createTextGame(validArgs()..['character_names'] = ['林昭', '柳七']);
+    expect(unknownName, contains('character_not_found'));
+
+    final unknownPlayer = await executor
+        .createTextGame(validArgs()..['player_character_name'] = '柳七');
+    expect(unknownPlayer, contains('player_character_not_found'));
+
+    // 外乡人属于另一本小说：名字解析限定在绑定小说内 → 同样找不到
+    final foreign = await executor
+        .createTextGame(validArgs()..['character_names'] = ['林昭', '外乡人']);
+    expect(foreign, contains('character_not_found'));
   });
 
   test('同名游戏允许创建（不阻断）', () async {
@@ -183,7 +196,7 @@ void main() {
     expect(game.sourceNovelId, novelId);
   });
 
-  test('update_text_game：替换参战名单与玩家角色', () async {
+  test('update_text_game：按角色名替换参战名单与玩家角色', () async {
     final created =
         jsonDecode(await executor.createTextGame(validArgs())) as Map<String, dynamic>;
     final gameId = created['gameId'] as int;
@@ -191,8 +204,8 @@ void main() {
     // 只留林昭，玩家换成林昭（自动入名单）
     final out = jsonDecode(await executor.updateTextGame({
       'game_id': gameId,
-      'character_ids': [npcId],
-      'player_character_id': npcId,
+      'character_names': ['林昭'],
+      'player_character_name': '林昭',
     })) as Map<String, dynamic>;
     expect(out['success'], true);
 
@@ -201,15 +214,15 @@ void main() {
     expect(game.settings.playerCharacterId, npcId);
   });
 
-  test('update_text_game：增量调整参战名单（add/remove），玩家不可移出', () async {
+  test('update_text_game：按角色名增量调整参战名单，玩家不可移出', () async {
     final created =
         jsonDecode(await executor.createTextGame(validArgs())) as Map<String, dynamic>;
     final gameId = created['gameId'] as int;
 
-    // 追加白芷（npc2Id 已在名单）→ 先移除再加回，验证两个方向
+    // 先移除白芷再追加回来，验证两个方向
     final remove = jsonDecode(await executor.updateTextGame({
       'game_id': gameId,
-      'remove_character_ids': [npc2Id],
+      'remove_character_names': ['白芷'],
     })) as Map<String, dynamic>;
     expect(remove['success'], true);
     var game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
@@ -218,7 +231,7 @@ void main() {
 
     final add = jsonDecode(await executor.updateTextGame({
       'game_id': gameId,
-      'add_character_ids': [npc2Id],
+      'add_character_names': ['白芷'],
     })) as Map<String, dynamic>;
     expect(add['success'], true);
     game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
@@ -227,17 +240,31 @@ void main() {
     // 移除玩家角色 → 引导错误
     final removePlayer = await executor.updateTextGame({
       'game_id': gameId,
-      'remove_character_ids': [playerId],
+      'remove_character_names': ['沈砚'],
     });
     expect(removePlayer, contains('player_cannot_be_removed'));
 
     // 整体替换与增量互斥
     final conflict = await executor.updateTextGame({
       'game_id': gameId,
-      'character_ids': [npcId],
-      'add_character_ids': [npc2Id],
+      'character_names': ['林昭'],
+      'add_character_names': ['白芷'],
     });
     expect(conflict, contains('conflicting_cast_args'));
+
+    // 追加绑定小说下不存在的角色名 → character_not_found
+    final unknownAdd = await executor.updateTextGame({
+      'game_id': gameId,
+      'add_character_names': ['柳七'],
+    });
+    expect(unknownAdd, contains('character_not_found'));
+
+    // 移除不存在的名字宽容处理（视为无操作）
+    final removeUnknown = jsonDecode(await executor.updateTextGame({
+      'game_id': gameId,
+      'remove_character_names': ['柳七'],
+    })) as Map<String, dynamic>;
+    expect(removeUnknown['success'], true);
   });
 
   test('update_text_game：未知 id / 缺 game_id 报错', () async {

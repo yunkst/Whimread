@@ -238,6 +238,13 @@ class _ImageModelManagementScreenState
     final zipUrl =
         entry.resolveZipUrl(baseUrl: _baseUrl, socSuffix: socSuffix);
     if (zipUrl == null) {
+      // 目录里能看到 NPU 包却下不了，说明「探测说无 NPU」与用户认知冲突，
+      // 与反馈 #8 同款矛盾点。warning 级随反馈上传，便于核对探测结果。
+      LoggerService.instance.w(
+        'NPU 模型包下载被拦截：pack=${entry.id}，socSuffix=$socSuffix',
+        category: LogCategory.ai,
+        tags: const ['image', 'npu', 'download-block'],
+      );
       ToastUtils.showError('当前设备无可用 NPU 源', context: context);
       return;
     }

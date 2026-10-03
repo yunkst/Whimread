@@ -131,7 +131,19 @@ class MediaExecutor with ToolExecutorHelpers {
           count: count,
           aspectRatio: aspectRatio,
         );
-    if (!outcome.ok) return jsonEncode(outcome.errorJson!);
+    if (!outcome.ok) {
+      // 失败详情只回给 Agent 的话，日志里什么都没有（历史反馈「生图失败」
+      // 就是这么查不到原因的）。用 warning 级——LogReporterService 默认只
+      // 上传 warning+，用户反馈时才带得回来。
+      LoggerService.instance.w(
+        'Agent 生图失败：model=$modelName，'
+        'error=${outcome.errorJson?['error']}，'
+        'message=${outcome.errorJson?['message']}',
+        category: LogCategory.ai,
+        tags: const ['image', 'generate', 'agent-failed'],
+      );
+      return jsonEncode(outcome.errorJson!);
+    }
     final result = outcome.result!;
 
     // ---------- 角色图集入集 ----------

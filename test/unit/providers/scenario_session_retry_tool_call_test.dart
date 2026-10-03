@@ -32,6 +32,7 @@ import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/novel_agent_service.dart';
 
 import '../../helpers/test_database_setup.dart';
+import 'package:novel_app/utils/cancellation_token.dart';
 
 // ---------------------------------------------------------------------------
 // MockNovelAgentService — 与 scenario_session_test 同款，仅用于让 ScenarioSession
@@ -50,6 +51,10 @@ class _MockNovelAgentService implements NovelAgentService {
 
   @override
   bool isRunningFor(String scenarioId) => _running[scenarioId] == true;
+  /// 取消令牌：mock 不做令牌簿记（cancelFor 直接放行 completer），恒为 null
+  @override
+  CancellationToken? tokenFor(String scenarioId) => null;
+
 
   @override
   Stream<AgentEvent> get events => _controller.stream;

@@ -108,6 +108,10 @@ class _MediaViewState extends ConsumerState<MediaView>
 
   /// 双阈值迟滞：只在跨越阈值时才翻转状态，0.1~0.5 区间保持上一态。
   void _onVisibilityChanged(VisibilityInfo info) {
+    // visibility_detector 用周期 Timer 分发回调，计时器触发时 State 可能
+    // 已 dispose——release 下 setState 会走到 _element! 空断言处崩溃
+    // （历史崩溃：Null check operator used on a null value @ setState）
+    if (!mounted) return;
     final next = mediaPlayHysteresis(
       current: _visible,
       fraction: info.visibleFraction,

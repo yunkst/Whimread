@@ -59,6 +59,8 @@ class AgentTools {
     _updateTextGame,
     // ===== 子 Agent =====
     _dispatchSubagent,
+    // ===== 用户交互 =====
+    _askUser,
   ];
 
   /// 查找工具定义（带日志）
@@ -77,10 +79,13 @@ class AgentTools {
   /// 按白名单过滤工具定义（供 SubagentScenario 使用）
   ///
   /// - 自动剔除 `dispatch_subagent`（强制单层嵌套，子 Agent 不能再派子 Agent）
+  /// - 自动剔除 `ask_user`（子 Agent 无聊天 UI，提问无人可答）
   /// - 忽略不存在的工具名
   /// - 空白名单返回空列表
   static List<Map<String, dynamic>> filterTools(List<String> allowed) {
-    final allowedSet = allowed.toSet()..remove('dispatch_subagent');
+    final allowedSet = allowed.toSet()
+      ..remove('dispatch_subagent')
+      ..remove('ask_user');
     if (allowedSet.isEmpty) return const <Map<String, dynamic>>[];
     return allTools
         .where((t) => allowedSet.contains(t['function']['name']))
@@ -961,11 +966,14 @@ class AgentTools {
       'name': 'create_text_game',
       'description':
           '根据与用户确认好的设定创建一个文字游戏（互动小说）。'
-          '文字游戏必须绑定一本小说以共享角色卡：用户指定书架小说（list_novels '
-          '查 id），或先用 create_novel 建轻量小说壳。角色卡（登场角色 + 玩家'
-          '角色）先经 create_character 在该小说下创建，再传 id 引用——不拷贝'
-          '角色设定。调用前提：世界观、玩家角色、登场角色、规则已与用户逐项'
-          '探讨并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
+          '文字游戏必须绑定一本小说以共享角色卡：source_novel_id 传绑定小说的 id'
+          '（list_novels 查），或先用 create_novel 建轻量小说壳。'
+          '调用前提：① 已通读绑定小说的背景设定与大纲（get_background_setting '
+          '/ get_outline，必要时抽读关键章节），对世界观、剧情脉络与人物关系'
+          '有充分理解；② 该小说的主要人物与玩家角色已有完整角色卡（缺的先 '
+          'create_character 创建，信息尽量填全）。参战角色**按角色名引用**，'
+          '你无需关心其内部 id。调用前世界观、玩家角色、规则已与用户逐项探讨'
+          '并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
       'parameters': <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -976,29 +984,26 @@ class AgentTools {
           'source_novel_id': {
             'type': 'integer',
             'description':
-                '绑定的小说 id（list_novels 返回的 id，必填）。参战角色卡必须'
-                '都属于这本小说；自定义玩法就先用 create_novel 建一本轻量小说壳',
-          },
-          'source_novel_title': {
-            'type': 'string',
-            'description': '来源小说标题（供展示；缺省自动取小说真实标题）',
+                '绑定的小说 id（list_novels 返回的 id，必填）。参战角色卡都'
+                '属于这本小说；自定义玩法就先用 create_novel 建一本轻量小说壳',
           },
           'opening': {
             'type': 'string',
             'description': '开场情境（50-150 字）：玩家开局所处的场景与处境',
           },
-          'character_ids': {
+          'player_character_name': {
+            'type': 'string',
+            'description':
+                '玩家角色名（绑定小说下已有完整角色卡的角色名；其「当前状态」'
+                '会在游玩中随剧情演化）',
+          },
+          'character_names': {
             'type': 'array',
             'description':
-                '参战角色卡 id 列表（该小说下 create_character 返回的 '
-                'characterId；2-6 个为宜，含主要配角，不含玩家角色）',
-            'items': {'type': 'integer'},
-          },
-          'player_character_id': {
-            'type': 'integer',
-            'description':
-                '玩家角色卡 id（该小说下 create_character 创建的玩家角色；'
-                '其「当前状态」会在游玩中随剧情演化）',
+                '参战角色名列表（可选）。缺省 = 绑定小说全部角色卡入列；仅当'
+                '该小说角色很多、想聚焦主要角色时才传（2-6 个为宜，不含玩家'
+                '角色），名字须为该小说下已存在的角色卡名',
+            'items': {'type': 'string'},
           },
           'worldview': {
             'type': 'string',
@@ -1026,8 +1031,55 @@ class AgentTools {
                 'manual=仅玩家手动要求时生成',
           },
         },
-        'required': ['title', 'source_novel_id', 'opening', 'character_ids',
-          'player_character_id'],
+        'required': ['title', 'source_novel_id', 'opening',
+          'player_character_name'],
+      },
+    },
+  };
+
+  // ===== 用户交互 =====
+
+  /// ask_user — 向用户提问并暂停等待回答
+  ///
+  /// 阻塞语义：executeTool 内 await 用户作答（见 WritingScenario 分支），
+  /// 用户点选/输入后答案作为 tool result 回灌 LLM，循环继续。
+  static const _askUser = {
+    'type': 'function',
+    'function': {
+      'name': 'ask_user',
+      'description':
+          '向用户提问并暂停等待回答（用户会看到问题，点选候选或自行输入，'
+          '答案会作为本工具结果返回给你）。适用于会实质影响产出、且无法通过'
+          '工具自行查到的关键决策，例如：写作方向/题材基调、叙事视角、'
+          '章节改写范围、角色命运走向、配图风格等。使用要点：\n'
+          '- options 给出 2-6 个候选，每项一句短语；多选场景把 multi_select 设为 true\n'
+          '- 默认允许用户在候选之外自由输入（allow_free_text=true）；'
+          '纯开放式问题可不传 options\n'
+          '- 不要用本工具问你能用工具查到的信息（书架列表、章节内容等），'
+          '也不要在同一轮连续追问多次',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'question': {
+            'type': 'string',
+            'description': '要问用户的问题，一句话说清背景与要决策的点',
+          },
+          'options': {
+            'type': 'array',
+            'description': '候选选项（每项一句短语，2-6 个为宜）。'
+                '用户可单选（默认）、多选（multi_select=true）或自由输入',
+            'items': {'type': 'string'},
+          },
+          'multi_select': {
+            'type': 'boolean',
+            'description': 'true=允许多选；默认 false 单选',
+          },
+          'allow_free_text': {
+            'type': 'boolean',
+            'description': '是否允许用户在选项之外自定义输入，默认 true',
+          },
+        },
+        'required': ['question'],
       },
     },
   };
@@ -1072,26 +1124,26 @@ class AgentTools {
             'enum': ['auto', 'manual'],
             'description': '新插图策略',
           },
-          'character_ids': {
+          'character_names': {
             'type': 'array',
-            'description': '替换参战角色卡 id 列表（须都属于绑定小说的角色卡；'
-                '与 add/remove_character_ids 互斥）',
-            'items': {'type': 'integer'},
+            'description': '整体替换参战角色名列表（绑定小说下已存在的角色卡名；'
+                '与 add/remove_character_names 互斥）',
+            'items': {'type': 'string'},
           },
-          'add_character_ids': {
+          'add_character_names': {
             'type': 'array',
-            'description': '向参战名单追加角色卡 id（增量，与 character_ids 互斥）',
-            'items': {'type': 'integer'},
+            'description': '向参战名单追加角色名（增量，与 character_names 互斥）',
+            'items': {'type': 'string'},
           },
-          'remove_character_ids': {
+          'remove_character_names': {
             'type': 'array',
-            'description': '从参战名单移除角色卡 id（玩家角色不可移除；'
-                '与 character_ids 互斥）',
-            'items': {'type': 'integer'},
+            'description': '从参战名单移除角色名（玩家角色不可移除；'
+                '与 character_names 互斥）',
+            'items': {'type': 'string'},
           },
-          'player_character_id': {
-            'type': 'integer',
-            'description': '替换玩家角色卡 id（须属于绑定小说）',
+          'player_character_name': {
+            'type': 'string',
+            'description': '替换玩家角色名（绑定小说下已存在的角色卡名）',
           },
         },
         'required': ['game_id'],

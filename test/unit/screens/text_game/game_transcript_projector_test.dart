@@ -1,7 +1,7 @@
 /// 游戏剧情投影器测试
 ///
 /// 覆盖：协议到渲染段的完整映射 / 选项激活与已选标记 / 系统文本过滤 /
-/// 生图结果解析 / 空输入兜底。
+/// 生图结果解析 / 概率判定段解析（分支/选中/失败/运行中）/ 空输入兜底。
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -293,6 +293,103 @@ void main() {
       ];
       final segs = projectGameTranscript(messages, agentRunning: false);
       expect(segs, hasLength(1));
+    });
+
+    group('roll_random_event → GameDiceRoll', () {
+      Map<String, dynamic> rollArgs() => {
+            'reason': '主角强闯山门禁制',
+            'events': [
+              {'label': '闯关成功', 'weight': 70},
+              {'label': '闯关失败', 'weight': 30},
+            ],
+          };
+
+      test('已完成判定：分支/百分比/选中项/缘由解析', () {
+        final messages = [
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'roll_random_event',
+              rollArgs(),
+              id: 'tcR1',
+              result:
+                  '{"ok":true,"selected":"闯关失败","selectedPercent":"30%",'
+                  '"branches":[],"note":"..."}',
+            )),
+          ]),
+        ];
+        final seg =
+            projectGameTranscript(messages, agentRunning: false).single
+                as GameDiceRoll;
+        expect(seg.toolCallId, 'tcR1');
+        expect(seg.reason, '主角强闯山门禁制');
+        expect(seg.branches.map((b) => b.label), ['闯关成功', '闯关失败']);
+        expect(seg.branches.map((b) => b.percent), ['70%', '30%']);
+        expect(seg.selectedLabel, '闯关失败');
+        expect(seg.selectedPercent, '30%');
+        expect(seg.error, isNull);
+        expect(seg.toolCompleted, isTrue);
+      });
+
+      test('运行中判定：无选中、未完成（pending 动画轮转 / 定稿降级）', () {
+        final messages = [
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'roll_random_event',
+              rollArgs(),
+              id: 'tcR2',
+              status: AgentToolStatus.running,
+            )),
+          ]),
+        ];
+        final seg =
+            projectGameTranscript(messages, agentRunning: true).single
+                as GameDiceRoll;
+        expect(seg.toolCompleted, isFalse);
+        expect(seg.selectedLabel, isNull);
+        expect(seg.branches, hasLength(2), reason: '分支在参数里，运行中即可渲染');
+        expect(seg.selectedPercent, isNull);
+      });
+
+      test('判定失败：解析错误信息', () {
+        final messages = [
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'roll_random_event',
+              rollArgs(),
+              id: 'tcR3',
+              result: '{"error":"invalid_weight","message":"weight 必须是正数"}',
+            )),
+          ]),
+        ];
+        final seg =
+            projectGameTranscript(messages, agentRunning: false).single
+                as GameDiceRoll;
+        expect(seg.error, 'weight 必须是正数');
+        expect(seg.selectedLabel, isNull);
+      });
+
+      test('分支解析宽容：字符串权重 / 缺 label 跳过 / 缺 weight 等概率', () {
+        final branches = parseRollBranches([
+          {'label': '甲', 'weight': '20'},
+          {'weight': 99},
+          {'label': '乙'},
+          {'label': '丙', 'weight': -3},
+        ]);
+        expect(branches.map((b) => b.label), ['甲', '乙', '丙']);
+        expect(branches.map((b) => b.weight), [20.0, 1.0, 1.0]);
+        // 总权重 20+1+1=22（weight=99 那项无 label 被跳过，-3 归一为 1）
+        expect(branches.map((b) => b.percent), ['90.9%', '4.5%', '4.5%']);
+
+        expect(parseRollBranches(null), isEmpty);
+        expect(parseRollBranches('not a list'), isEmpty);
+      });
+
+      test('结果解析兜底：坏 JSON / 空结果', () {
+        expect(parseRollResult(null).selected, isNull);
+        expect(parseRollResult('not json').selected, isNull);
+        expect(parseRollResult('{"error":"x","message":"坏"}').error, '坏');
+        expect(parseRollResult('{"ok":true}').selected, isNull);
+      });
     });
   });
 

@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/image_model.dart';
 import '../../../services/image_generation/image_generation_providers.dart';
 import '../../../services/local_dream_embedded/model_pack.dart';
+import '../../../services/logger_service.dart';
 import '../../../widgets/media/media_view.dart';
 
 class ImageGenTestSheet extends ConsumerStatefulWidget {
@@ -76,6 +77,18 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
             );
     sw.stop();
     if (!mounted) return;
+    if (!outcome.ok) {
+      // 手动测试失败只在 UI 显示一句话，日志无痕迹——反馈上来没法查
+      // （engine_not_ready / generation_failed 的根因全在 message 里）
+      LoggerService.instance.w(
+        '生图测试失败：model=${widget.model.name}，'
+        'error=${outcome.errorJson?['error']}，'
+        'message=${outcome.errorJson?['message']}，'
+        '耗时=${sw.elapsedMilliseconds}ms',
+        category: LogCategory.ai,
+        tags: const ['image', 'generate', 'manual-failed'],
+      );
+    }
     setState(() {
       _generating = false;
       _elapsedLabel = '耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)} s';

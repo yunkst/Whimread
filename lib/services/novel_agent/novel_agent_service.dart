@@ -108,6 +108,14 @@ class NovelAgentService {
   /// 是否有指定场景正在运行
   bool isRunningFor(String scenarioId) => _runningByScenario[scenarioId] == true;
 
+  /// 取某场景当前 run 的取消令牌（无运行返回 null）
+  ///
+  /// 供需要"挂起中也要能被取消唤醒"的工具使用——如 ask_user：
+  /// executor register 一个回调，用户点停止（cancelFor → token.cancel）
+  /// 时把挂起的 Completer 放行为 cancelled，避免协程永久挂起。
+  CancellationToken? tokenFor(String scenarioId) =>
+      _tokensByScenario[scenarioId];
+
   /// 是否有任何场景正在运行
   bool get isRunning => _runningByScenario.values.any((v) => v);
 

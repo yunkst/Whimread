@@ -10,6 +10,7 @@
 /// - narrate 工具调用 → [GameNarration]
 /// - speak 工具调用 → [GameDialogue]
 /// - create_scene_image 工具调用 → [GameSceneImage]（媒体从 tool result 解析）
+/// - roll_random_event 工具调用 → [GameDiceRoll]（分支/选中从参数与 result 解析）
 /// - present_choices 工具调用 → [GameChoices]
 ///
 /// 选项活性：只有「最后一条」GameChoices 是可点的（active），其后出现玩家
@@ -23,7 +24,7 @@ import 'dart:convert';
 import '../../models/agent_chat_message.dart';
 import '../../services/novel_agent/agent_event.dart' show AgentToolStatus;
 import '../../services/novel_agent/scenarios/text_game_scenario.dart'
-    show kGameProtocolNudge;
+    show kGameProtocolNudge, weightedPercent;
 
 /// 一个选项
 class GameChoice {
@@ -79,6 +80,62 @@ class GameSceneImage extends GameSegment {
   });
 }
 
+/// 概率判定的一个分支（展示用：标签 + 权重 + 归一化百分比）
+class GameRollBranch {
+  final String label;
+  final double weight;
+
+  /// 权重归一化后的百分比文案（如 "70%"）
+  final String percent;
+
+  const GameRollBranch({
+    required this.label,
+    required this.weight,
+    required this.percent,
+  });
+}
+
+/// 概率判定段（roll_random_event 工具调用 → 命运骰子卡）
+///
+/// 判定是同步工具（调用即出结果）：result 已出时 [selectedLabel] 非空；
+/// [toolCompleted] false = 本回合仍在判定（live 轮转动画）；
+/// [live] false = 定稿链里的未完成判定（回合中断残留，静态降级展示）。
+class GameDiceRoll extends GameSegment {
+  final String toolCallId;
+  final String reason;
+  final List<GameRollBranch> branches;
+
+  /// 抽中的分支标签（null = 运行中未定 / 判定失败）
+  final String? selectedLabel;
+
+  /// 判定失败信息（工具返回 error）
+  final String? error;
+
+  /// 工具是否已结束
+  final bool toolCompleted;
+
+  /// 是否处于运行中的回合（pending 投影 true；定稿链 false）
+  final bool live;
+
+  const GameDiceRoll({
+    required this.toolCallId,
+    required this.reason,
+    required this.branches,
+    this.selectedLabel,
+    this.error,
+    this.toolCompleted = true,
+    this.live = false,
+  });
+
+  /// 选中分支的百分比文案（未定/失败为 null）
+  String? get selectedPercent {
+    for (final b in branches) {
+      if (b.label == selectedLabel) return b.percent;
+    }
+    return null;
+  }
+}
+
 /// 回合选项
 class GameChoices extends GameSegment {
   final List<GameChoice> choices;
@@ -94,11 +151,16 @@ class GameChoices extends GameSegment {
   /// null = 无锚点（当前活动选项 / 运行中预览），不可回溯。
   final int? rollbackUiIndex;
 
+  /// 来源 present_choices 工具调用的 id（入场动画只播一次的记账键；
+  /// 运行中预览/测试构造可能为 null）
+  final String? toolCallId;
+
   const GameChoices({
     required this.choices,
     required this.active,
     this.chosenLabel,
     this.rollbackUiIndex,
+    this.toolCallId,
   });
 }
 
@@ -174,6 +236,79 @@ String? parseSceneImageError(String? toolResultJson) {
   return null;
 }
 
+/// 解析 roll_random_event 参数里的分支列表（宽容：缺 label 跳过，
+/// 非法权重按 1 计），权重归一化为百分比文案
+List<GameRollBranch> parseRollBranches(Object? raw) {
+  if (raw is! List) return const [];
+  final parsed = <(String, double)>[];
+  for (final item in raw) {
+    final label =
+        (item is Map ? item['label'] : item)?.toString().trim() ?? '';
+    if (label.isEmpty) continue;
+    final rawWeight = item is Map ? item['weight'] : null;
+    final weight = rawWeight == null
+        ? 1.0
+        : rawWeight is num
+            ? rawWeight.toDouble()
+            : double.tryParse('$rawWeight');
+    parsed.add((label, weight != null && weight > 0 ? weight : 1.0));
+  }
+  if (parsed.isEmpty) return const [];
+  final total = parsed.fold<double>(0, (s, e) => s + e.$2);
+  return [
+    for (final (label, weight) in parsed)
+      GameRollBranch(
+        label: label,
+        weight: weight,
+        percent: weightedPercent(weight, total),
+      ),
+  ];
+}
+
+/// 构造概率判定段（定稿投影与运行中 pending 投影共用）
+///
+/// [completed] 工具是否已结束；[resultJson] 工具结果（未结束传 null）。
+/// [live] true = 运行中回合（轮转动画），false = 定稿链（静态展示）。
+GameDiceRoll rollDiceRollSegment(
+  String toolCallId,
+  Map<String, dynamic> arguments, {
+  required bool completed,
+  String? resultJson,
+  bool live = false,
+}) {
+  final parsed = parseRollResult(completed ? resultJson : null);
+  return GameDiceRoll(
+    toolCallId: toolCallId,
+    reason: arguments['reason']?.toString().trim() ?? '',
+    branches: parseRollBranches(arguments['events']),
+    selectedLabel: parsed.selected,
+    error: parsed.error,
+    toolCompleted: completed,
+    live: live,
+  );
+}
+
+/// 解析 roll_random_event 工具结果（成功 → 选中分支；error → 失败信息）
+({String? selected, String? error}) parseRollResult(String? toolResultJson) {
+  if (toolResultJson == null || toolResultJson.isEmpty) {
+    return (selected: null, error: null);
+  }
+  try {
+    final decoded = jsonDecode(toolResultJson);
+    if (decoded is Map<String, dynamic>) {
+      if (decoded['ok'] == true && decoded['selected'] is String) {
+        return (selected: decoded['selected'] as String, error: null);
+      }
+      if (decoded.containsKey('error')) {
+        return (selected: null, error: decoded['message']?.toString() ?? '判定失败');
+      }
+    }
+  } catch (_) {
+    // 坏数据按未定处理
+  }
+  return (selected: null, error: null);
+}
+
 /// 判断文本是否为应跳过的系统文本（协议提醒 / 图片占位）
 bool isSkippableSystemText(String text) {
   final t = text.trim();
@@ -217,6 +352,7 @@ List<GameSegment> projectGameTranscript(
             active: false,
             chosenLabel: hit ? text : null,
             rollbackUiIndex: msgIdx,
+            toolCallId: choices.toolCallId,
           );
           lastChoicesIdx = null;
         }
@@ -256,6 +392,15 @@ List<GameSegment> projectGameTranscript(
                   toolResultJson: completed ? call.result : null,
                   toolCompleted: completed,
                 ));
+              case 'roll_random_event':
+                result.add(rollDiceRollSegment(
+                  call.id,
+                  call.arguments,
+                  completed: call.status != AgentToolStatus.running,
+                  resultJson: call.status == AgentToolStatus.running
+                      ? null
+                      : call.result,
+                ));
               case 'present_choices':
                 final choices = parseGameChoices(call.arguments['choices']);
                 if (choices.isNotEmpty) {
@@ -263,6 +408,7 @@ List<GameSegment> projectGameTranscript(
                   result.add(GameChoices(
                     choices: choices,
                     active: false, // 先置 false，循环结束后统一激活最后一条
+                    toolCallId: call.id,
                   ));
                 }
               default:
@@ -283,6 +429,7 @@ List<GameSegment> projectGameTranscript(
     result[lastChoicesIdx] = GameChoices(
       choices: choices.choices,
       active: !agentRunning,
+      toolCallId: choices.toolCallId,
     );
   }
   return result;

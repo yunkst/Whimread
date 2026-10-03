@@ -4,10 +4,12 @@
 /// （不含设定数据）/ 动态上下文设定块（角色卡渲染 + 世界观回退）/
 /// narrate / speak / present_choices 校验 / update_game_state 写角色卡
 /// currentState（版本记录 source=text_game）/ 游戏内 create_character
-/// （建卡入名单）/ onNoToolCalls 协议提醒。
+/// （建卡入名单）/ roll_random_event 概率判定（权重抽取 + 参数校验）/
+/// onNoToolCalls 协议提醒。
 library;
 
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,7 +22,6 @@ import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/models/text_game.dart';
 import 'package:novel_app/repositories/novel_repository.dart';
 import 'package:novel_app/repositories/text_game_repository.dart';
-import 'package:novel_app/services/dsl_engine/llm_provider.dart' show ChatMessage;
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario_factory.dart';
 import 'package:novel_app/services/novel_agent/scenarios/text_game_scenario.dart';
@@ -33,13 +34,30 @@ TextGameScenario _scenario({
   TextGame? game,
   Novel? novel,
   List<Character> cast = const [],
+  Random? random,
 }) =>
     TextGameScenario(
       _FakeRef(),
       game ?? _game(),
       novel: novel,
       cast: cast,
+      random: random,
     );
+
+/// 固定随机序列：nextDouble 恒返回 [value]（概率判定的可复现断言）
+class _FixedRandom implements Random {
+  final double value;
+  const _FixedRandom(this.value);
+
+  @override
+  double nextDouble() => value;
+
+  @override
+  int nextInt(int max) => 0;
+
+  @override
+  bool nextBool() => false;
+}
 
 /// 内存游戏对象（无 DB；角色引用用占位 id）
 TextGame _game({GameImagePolicy imagePolicy = GameImagePolicy.auto}) =>
@@ -241,7 +259,7 @@ void main() {
   });
 
   group('工具面', () {
-    test('6 个回合工具（含生图/状态回写/游戏内建卡）', () {
+    test('7 个回合工具（含生图/状态回写/游戏内建卡/概率判定）', () {
       final names =
           _scenario().tools.map((t) => t['function']['name'] as String).toSet();
       expect(names, {
@@ -251,7 +269,17 @@ void main() {
         'create_scene_image',
         'update_game_state',
         'create_character',
+        'roll_random_event',
       });
+    });
+
+    test('manual 策略不含生图工具，其余工具仍在', () {
+      final names = _scenario(game: _game(imagePolicy: GameImagePolicy.manual))
+          .tools
+          .map((t) => t['function']['name'] as String)
+          .toSet();
+      expect(names, isNot(contains('create_scene_image')));
+      expect(names, contains('roll_random_event'));
     });
   });
 
@@ -271,6 +299,7 @@ void main() {
       expect(prompt, contains('create_scene_image'));
       expect(prompt, contains('update_game_state'));
       expect(prompt, contains('create_character'), reason: '游戏内建新角色指引');
+      expect(prompt, contains('roll_random_event'), reason: '概率判定指引');
       expect(prompt, contains('同步'));
       expect(prompt, contains('重大且持久'), reason: '状态回写的触发阈值');
       // 设定数据不得出现在静态提示词（保证前缀稳定可缓存）
@@ -416,6 +445,118 @@ void main() {
       final s = _scenario();
       final out = await s.executeTool('list_novels', {});
       expect(out, contains('unknown_tool'));
+    });
+  });
+
+  group('roll_random_event 概率判定', () {
+    List<Map<String, dynamic>> branches() => const [
+          {'label': '战斗胜利', 'weight': 70},
+          {'label': '战斗失败', 'weight': 30},
+        ];
+
+    test('纯函数边界：权重 70/30，point 落点决定分支', () {
+      final events = [
+        const WeightedEvent(label: '胜利', weight: 70),
+        const WeightedEvent(label: '失败', weight: 30),
+      ];
+      expect(pickWeightedEvent(events, 0).label, '胜利');
+      expect(pickWeightedEvent(events, 69.9).label, '胜利');
+      expect(pickWeightedEvent(events, 70).label, '失败');
+      expect(pickWeightedEvent(events, 99.999).label, '失败');
+      // 三分支等权重
+      final three = [
+        const WeightedEvent(label: 'a', weight: 1),
+        const WeightedEvent(label: 'b', weight: 1),
+        const WeightedEvent(label: 'c', weight: 1),
+      ];
+      expect(pickWeightedEvent(three, 2).label, 'c');
+    });
+
+    test('正常判定：固定随机 0.0 → 命中首个分支，百分比归一化', () async {
+      final s = _scenario(random: const _FixedRandom(0.0));
+      final out = jsonDecode(await s.executeTool('roll_random_event', {
+        'events': branches(),
+        'reason': '主角挑战守山弟子',
+      })) as Map<String, dynamic>;
+      expect(out['ok'], true);
+      expect(out['selected'], '战斗胜利');
+      expect(out['selectedPercent'], '70%');
+      expect((out['branches'] as List), hasLength(2));
+      expect((out['branches'] as List)[1]['percent'], '30%');
+      expect(out['note'], contains('战斗胜利'));
+      expect(out['note'], contains('不得改写'));
+    });
+
+    test('固定随机 0.99 → 落点越过首个分支权重，命中后者', () async {
+      final s = _scenario(random: const _FixedRandom(0.99));
+      final out = jsonDecode(
+          await s.executeTool('roll_random_event', {'events': branches()}))
+          as Map<String, dynamic>;
+      expect(out['selected'], '战斗失败');
+    });
+
+    test('权重省略视为 1（等概率）；字符串数字权重宽容解析', () async {
+      final s = _scenario(random: const _FixedRandom(0.0));
+      final equal = jsonDecode(await s.executeTool('roll_random_event', {
+        'events': [
+          {'label': '发现密道'},
+          {'label': '一无所获'},
+        ],
+      })) as Map<String, dynamic>;
+      expect(equal['ok'], true);
+      expect(equal['selectedPercent'], '50%');
+
+      final stringWeight = jsonDecode(await s.executeTool('roll_random_event', {
+        'events': [
+          {'label': '触发陷阱', 'weight': '20'},
+          {'label': '安全通过', 'weight': '80'},
+        ],
+      })) as Map<String, dynamic>;
+      expect(stringWeight['ok'], true);
+      expect(stringWeight['selected'], '触发陷阱');
+      expect(stringWeight['selectedPercent'], '20%');
+    });
+
+    test('参数校验：缺 events / 单分支 / 超量 / 非法权重 / 缺 label', () async {
+      final s = _scenario();
+      final missing = await s.executeTool('roll_random_event', {});
+      expect(missing, contains('missing_events'));
+
+      final few = await s.executeTool('roll_random_event', {
+        'events': [
+          {'label': '只有一个', 'weight': 5},
+        ],
+      });
+      expect(few, contains('too_few_events'));
+
+      final many = await s.executeTool('roll_random_event', {
+        'events': List.generate(7, (i) => {'label': '分支$i'}),
+      });
+      expect(many, contains('too_many_events'));
+
+      final badWeight = await s.executeTool('roll_random_event', {
+        'events': [
+          {'label': '胜利', 'weight': 0},
+          {'label': '失败', 'weight': -1},
+        ],
+      });
+      expect(badWeight, contains('invalid_weight'));
+
+      final badParse = await s.executeTool('roll_random_event', {
+        'events': [
+          {'label': '胜利', 'weight': '很多'},
+          {'label': '失败', 'weight': 1},
+        ],
+      });
+      expect(badParse, contains('invalid_weight'));
+
+      final noLabel = await s.executeTool('roll_random_event', {
+        'events': [
+          {'weight': 1},
+          {'label': '失败', 'weight': 1},
+        ],
+      });
+      expect(noLabel, contains('invalid_event'));
     });
   });
 
@@ -624,7 +765,7 @@ void main() {
     });
 
     test('create_character：建卡入名单 + 版本记录', () async {
-      final (s, game, _, __) = await makeScenario();
+      final (s, game, _, _) = await makeScenario();
       final out = jsonDecode(await s.executeTool('create_character', {
         'name': '韩铁匠',
         'identity': '铁匠',

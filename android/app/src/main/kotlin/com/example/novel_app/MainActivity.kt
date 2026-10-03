@@ -35,6 +35,7 @@ class MainActivity : FlutterActivity() {
                 "sign" -> DeviceAttestation.signChallenge(call, result)
                 "hasKey" -> result.success(DeviceAttestation.hasKey())
                 "androidId" -> result.success(DeviceAttestation.getAndroidId(this))
+                "socInfo" -> result.success(readSocInfo())
                 else -> result.notImplemented()
             }
         }
@@ -68,6 +69,16 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+    }
+
+    /// SoC 型号探测（Local Dream getDeviceSoc 同款语义）：Build.SOC_MODEL
+    /// 字段仅 API 31+ 存在，低版本访问会 NoSuchFieldError，必须先判版本。
+    /// 返回 null（含 SOC_MODEL 为空的机型）时 Dart 侧按无 NPU 处理。
+    private fun readSocInfo(): Map<String, String>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val socModel = Build.SOC_MODEL
+        if (socModel.isBlank()) return null
+        return mapOf("socModel" to socModel)
     }
 
     private fun installApk(filePath: String): Boolean {
