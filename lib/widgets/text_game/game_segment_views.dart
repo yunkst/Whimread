@@ -48,7 +48,11 @@ class GameNarrationView extends StatelessWidget {
   }
 }
 
-/// 台词段（小圆头像 + 彩色角色名标签 + 对白文本）
+/// 台词段（对话气泡：彩色角色名 + 角色头像 + 底色气泡）
+///
+/// 与旁白纯文本刻意拉开区分度（用户反馈 #10：人物行动/对话/旁白分不清）：
+/// 台词永远带名字签和气泡底色，旁白始终是无装饰的阅读段落——玩家扫一眼
+/// 就知道"谁在说话"。协议侧同步约束：speak 只放直接引语，动作神态走 narrate。
 class GameDialogueView extends StatelessWidget {
   final String character;
   final String text;
@@ -87,12 +91,15 @@ class GameDialogueView extends StatelessWidget {
     final theme = Theme.of(context);
     final nameColor = _nameColor(context);
     final hasAvatar = avatarMediaId != null && avatarMediaId!.isNotEmpty;
+    // 头像 24 + 间距 6：无头像时气泡与名字签左对齐，有头像时与名字文本对齐
+    final bubbleIndent = hasAvatar ? 30.0 : 0.0;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               if (hasAvatar)
                 Container(
@@ -116,21 +123,41 @@ class GameDialogueView extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 2),
-          Text.rich(
-            TextSpan(
-              text: text,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                height: 1.6,
-                color: theme.colorScheme.onSurface,
+          const SizedBox(height: 3),
+          Padding(
+            padding: EdgeInsets.only(left: bubbleIndent),
+            child: Container(
+              // 不设 width：气泡按文本收缩（上限 0.82 屏宽），短台词不撑满
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.82,
               ),
-              children: [
-                if (showCaret)
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: _TypewriterCaret(color: theme.colorScheme.primary),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerLow,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: Text.rich(
+                TextSpan(
+                  text: text,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    height: 1.6,
+                    color: theme.colorScheme.onSurface,
                   ),
-              ],
+                  children: [
+                    if (showCaret)
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child:
+                            _TypewriterCaret(color: theme.colorScheme.primary),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],

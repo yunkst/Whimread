@@ -544,4 +544,112 @@ void main() {
           autoNudgeCount: 1), isFalse, reason: '每条玩家输入至多自动补 1 次');
     });
   });
+
+  group('回合关闭截断（present_choices 之后不渲染）', () {
+    List<GameSegment> projectTailRepeat() => projectGameTranscript([
+          AgentChatMessage.user('我推门而入'),
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call('narrate', {'text': '第一段剧情。'}, id: 'n1')),
+          ]),
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'present_choices',
+              {
+                'choices': [
+                  {'label': '拔剑'},
+                  {'label': '后退'},
+                ]
+              },
+              id: 'c1',
+              result: '{"ok":true}',
+            )),
+          ]),
+          // ↓↓ 以下是 GM 被续跑钩子推出来的重复内容（用户反馈 #10 的现场）
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call('narrate', {'text': '第一段剧情。'}, id: 'n2')),
+          ]),
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'speak',
+              {'character': '林昭', 'text': '你来了。'},
+              id: 's2',
+            )),
+          ]),
+          AgentChatMessage.assistantFromSegments([const TextSegment('好的。')]),
+          AgentChatMessage.user('$kGameProtocolNudge 本回合没有调用任何工具…'),
+          AgentChatMessage.assistantFromSegments([
+            ToolCallSegment(_call(
+              'present_choices',
+              {
+                'choices': [
+                  {'label': '拔剑'},
+                  {'label': '后退'},
+                ]
+              },
+              id: 'c2',
+              result: '{"ok":true}',
+            )),
+          ]),
+        ], agentRunning: false);
+
+    test('选项之后的重复剧情/台词/第二组选项全部不渲染', () {
+      final segs = projectTailRepeat();
+      expect(segs, hasLength(3), reason: '输入 + 旁白 + 选项，各一份');
+      expect((segs[1] as GameNarration).text, '第一段剧情。');
+      final choices = segs[2] as GameChoices;
+      expect(choices.choices.map((c) => c.label), ['拔剑', '后退']);
+      expect(choices.toolCallId, 'c1', reason: '保留首个选项组，后来的丢弃');
+      expect(choices.active, isTrue);
+    });
+
+    test('下一条玩家输入重新开启回合（截断不跨回合）', () {
+      final segs = projectGameTranscript([
+        AgentChatMessage.user('第一回合'),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'present_choices',
+            {
+              'choices': [
+                {'label': '甲'},
+                {'label': '乙'},
+              ]
+            },
+            id: 'c1',
+            result: '{"ok":true}',
+          )),
+        ]),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('narrate', {'text': '回合尾巴。'}, id: 'n2')),
+        ]),
+        AgentChatMessage.user('第二回合'),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('narrate', {'text': '新剧情。'}, id: 'n3')),
+        ]),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'present_choices',
+            {
+              'choices': [
+                {'label': '丙'},
+                {'label': '丁'},
+              ]
+            },
+            id: 'c2',
+            result: '{"ok":true}',
+          )),
+        ]),
+      ], agentRunning: false);
+
+      expect(segs, hasLength(5));
+      expect((segs[0] as GamePlayerInput).text, '第一回合');
+      expect((segs[1] as GameChoices).toolCallId, 'c1');
+      expect((segs[1] as GameChoices).active, isFalse, reason: '已有后续输入');
+      expect((segs[1] as GameChoices).rollbackUiIndex, 3,
+          reason: '回溯锚点指向下一条玩家输入');
+      expect((segs[2] as GamePlayerInput).text, '第二回合');
+      expect((segs[3] as GameNarration).text, '新剧情。');
+      expect((segs[4] as GameChoices).toolCallId, 'c2');
+      expect((segs[4] as GameChoices).active, isTrue);
+    });
+  });
 }

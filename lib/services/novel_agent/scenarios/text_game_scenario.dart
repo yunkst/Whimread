@@ -14,8 +14,11 @@
 ///   source='text_game'，带原因 → 角色卡版本历史可溯源可回滚）
 ///
 /// 回合协议（系统提示词中约束 + 工具校验兜底）：
-/// - 旁白 → `narrate(text)`；角色台词 → `speak(character, text)`
-/// - 回合必以 `present_choices(choices)` 收尾（2-4 项）
+/// - 旁白（环境/时间/动作/神态描写）→ `narrate(text)`；角色台词 →
+///   `speak(character, text)`，text 只放直接引语（台词与描写分离，
+///   玩家端两种段渲染样式不同）
+/// - 回合必以 `present_choices(choices)` 收尾（2-4 项）；它是终止工具
+///   （[terminalToolNames]），调用成功 AgentLoop 即结束本回合，不逼 GM 续写
 /// - 剧情内容禁止裸文本输出；onNoToolCalls 注入一次协议提醒
 ///
 /// narrate/speak 在 [streamableToolNames] 白名单中：AgentLoop 把参数流式
@@ -205,6 +208,12 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   @override
   Set<String> get streamableToolNames => const {'narrate', 'speak'};
 
+  /// present_choices 是交付型终止工具：选项提交给玩家即回合结束。
+  /// 不终止的话 AgentLoop 会继续请求下一轮，onNoToolCalls 的协议提醒会
+  /// 逼着 GM 把剧情重演一遍（玩家端看到重复内容 + 第二组选项）。
+  @override
+  Set<String> get terminalToolNames => const {'present_choices'};
+
   @override
   List<Map<String, dynamic>> get tools => [
         narrateToolDefinition,
@@ -241,9 +250,11 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
 
     buf.writeln();
     buf.writeln('## 输出协议（必须严格遵守）');
-    buf.writeln('1. 所有剧情内容必须通过工具输出：旁白与环境/动作描写用 '
-        'narrate(text=...)；角色台词用 speak(character=..., text=...)。'
-        '禁止不调用工具直接输出正文。');
+    buf.writeln('1. 所有剧情内容必须通过工具输出，且台词与描写严格分离：'
+        '旁白（环境、时间过渡、角色的动作/神态/心理等第三人称描写）用 '
+        'narrate(text=...)；角色台词用 speak(character=..., text=...)，'
+        'text 只写角色说的话本身（含必要的语气词/称呼），不要把动作神态'
+        '塞进台词。禁止不调用工具直接输出正文。');
     buf.writeln('2. text 参数放在所有参数的最后输出（利于玩家端流式渲染）。');
     buf.writeln('3. 每段旁白、每句台词单独调用一次工具；一回合可连续调用多次。');
     buf.writeln('4. 单回合节奏：1-3 段旁白 + 适量台词，总长 300-600 字，不要拖沓。');
@@ -905,8 +916,8 @@ const Map<String, dynamic> narrateToolDefinition = {
   'function': {
     'name': 'narrate',
     'description':
-        '输出一段旁白：环境描写、动作描写、剧情推进、时间过渡等。'
-        '每段旁白单独调用一次；一回合可多次调用。',
+        '输出一段旁白：环境描写、时间过渡、剧情推进，以及角色的动作、'
+        '神态、心理等第三人称描写。每段旁白单独调用一次；一回合可多次调用。',
     'parameters': {
       'type': 'object',
       'properties': {
@@ -925,8 +936,10 @@ const Map<String, dynamic> speakToolDefinition = {
   'function': {
     'name': 'speak',
     'description':
-        '输出一位登场角色的台词（可夹杂动作神态描写）。'
-        'character 必须是登场角色之一；每句台词单独调用一次。',
+        '输出一位登场角色的台词。text 只放角色说的话本身（直接引语，'
+        '可含语气词/称呼）；该角色的动作、神态、心理描写一律改用 narrate '
+        '单独输出，不要混进台词。character 必须是登场角色之一；'
+        '每句台词单独调用一次。',
     'parameters': {
       'type': 'object',
       'properties': {

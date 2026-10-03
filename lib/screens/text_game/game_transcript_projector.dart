@@ -17,6 +17,11 @@
 /// 输入则转为历史；若玩家输入与某选项 label 精确一致，该选项标记 chosen。
 /// 历史选项组带 rollbackUiIndex 锚点（其后那条玩家输入的位置），供游玩页
 /// 实现「回溯到这一步重新选择」。
+///
+/// 回合关闭截断：每回合（最后一条玩家输入之后）首个 present_choices 即回合
+/// 终点，其后同回合的旁白/台词/插图/判定/重复选项一律不渲染——GM 在选项
+/// 之后被续跑钩子逼出的重复内容（用户反馈 #10）不进剧情流，历史脏数据
+/// 重放时同样自愈。
 library;
 
 import 'dart:convert';
@@ -391,6 +396,10 @@ List<GameSegment> projectGameTranscript(
   final result = <GameSegment>[];
   // 记录最后一个 GameChoices 的索引与其后出现的玩家输入文本
   int? lastChoicesIdx;
+  // 回合关闭标记：本回合（自最后一条玩家输入起）已出现 present_choices。
+  // 协议下选项即回合终点，其后同回合的任何内容都是违规尾巴（GM 被续跑
+  // 钩子逼出的重复剧情/第二组选项）——不渲染，历史脏数据在此自愈。
+  bool turnClosed = false;
 
   for (var msgIdx = 0; msgIdx < messages.length; msgIdx++) {
     final msg = messages[msgIdx];
@@ -400,6 +409,7 @@ List<GameSegment> projectGameTranscript(
         if (isSkippableSystemText(text)) break;
         final seg = GamePlayerInput(text);
         result.add(seg);
+        turnClosed = false;
         // 该输入使之前所有选项失效，并可能精确命中最后一个选项；
         // 同时把本输入的位置记录为该选项组的回溯锚点
         if (lastChoicesIdx != null) {
@@ -416,6 +426,8 @@ List<GameSegment> projectGameTranscript(
         }
 
       case AgentChatRole.assistant:
+        // 回合已收尾：present_choices 之后同回合的内容不渲染（自愈重复）
+        if (turnClosed) break;
         for (final seg in msg.segments) {
           if (seg is TextSegment) {
             if (!isSkippableSystemText(seg.content)) {
@@ -472,6 +484,7 @@ List<GameSegment> projectGameTranscript(
                     active: false, // 先置 false，循环结束后统一激活最后一条
                     toolCallId: call.id,
                   ));
+                  turnClosed = true; // 回合终点：其后内容不再渲染
                 }
               default:
                 break; // 未知工具不渲染（未来扩展）

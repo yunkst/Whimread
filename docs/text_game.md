@@ -41,10 +41,10 @@
 
 | 工具 | 作用 | 执行 |
 |---|---|---|
-| `narrate(text)` | 旁白/环境/动作描写 | 参数即内容，返回 `{ok:true}` |
-| `speak(character, text)` | 登场角色台词 | 校验角色在参战名单（名字或别名） |
+| `narrate(text)` | 旁白（环境/时间/剧情推进 + 角色动作/神态/心理描写） | 参数即内容，返回 `{ok:true}` |
+| `speak(character, text)` | 登场角色台词（**纯直接引语**，动作神态走 narrate） | 校验角色在参战名单（名字或别名） |
 | `create_scene_image(prompt)` | 关键场景插图 | **异步**：入队立即返回，完成后自动插入 |
-| `present_choices(choices[2-4])` | 结束回合，交给玩家 | 校验数量 |
+| `present_choices(choices[2-4])` | 结束回合，交给玩家 | 校验数量；**终止工具**：成功即 AgentLoop 结束回合 |
 | `update_game_state(character_name?, target?, add_facts, remove_facts?, reason?)` | 状态账本回写 | 三类目标：角色（传 name）/ 玩家（省略）/ 世界与剧情线（target="world"）；add/remove 条目，单条 ≤60 字、每目标 ≤8 条；remove 按包含匹配，未命中/超限在返回值引导 |
 | `create_character(name, ...)` | 剧情引入新角色 | 落小说角色卡 + 自动入参战名单（同名卡复用） |
 | `roll_random_event(events[2-6], reason?)` | 概率判定：多分支随机 outcome | 按相对权重归一化随机抽取一个分支（weight 省略=1 等概率）；结果即锁定，返回 note 明示不得改写/重判；每次判定落日志（分支+权重+结果） |
@@ -54,17 +54,26 @@
    台词气泡、选项按钮）。`onNoToolCalls` 钩子注入一次协议提醒兜底
    （前缀 `【协议提醒】`，游玩页投影器过滤不渲染）。
 2. **每回合必以 present_choices 收尾**；玩家始终可自由输入补充行动。
-   提示词约定之外有代码兜底：回合 finalize 后若「最后一条玩家输入之后
-   有剧情、无选项」（`diagnoseTurnEnding`），游玩页自动注入一条
-   `【协议提醒】` 前缀消息让 GM 补上选项（`shouldAutoNudgeChoices` 守卫：
-   失败回合不补、玩家按过「停止」绝不重启、每条玩家输入至多补 1 次）。
-3. **状态账本**：角色/玩家的重大持久变化（致残/突破/关键物品得失/立场质变）
+   两层代码兜底：
+   - **终止工具**（`AgentScenario.terminalToolNames` = {`present_choices`}）：
+     该工具成功即回合终点，AgentLoop 跑完本轮工具、入链后立即
+     `AgentDoneEvent`，不再请求下一轮（工具返回 error 时不终止，交给 LLM
+     纠偏重调）。缺这一层时 GM 交完选项会被 onNoToolCalls 的提醒推着续写，
+     把同一段剧情重演一遍并二次提交选项（用户反馈 #10 的现场）。
+   - **投影器回合截断**：每回合首个 `present_choices` 之后同回合的
+     旁白/台词/插图/判定/重复选项一律不渲染——历史脏数据重放时同样自愈。
+   - 另有「自动补选」：`diagnoseTurnEnding` + `shouldAutoNudgeChoices`
+     守卫（失败回合不补、玩家按过「停止」绝不重启、每条玩家输入至多补 1 次）。
+3. **台词与描写分离**：`speak.text` 只放角色说的话本身（含语气词/称呼），
+   角色的动作/神态/心理一律走 `narrate`——两者渲染样式不同（台词=带头像与
+   底色气泡，旁白=无装饰阅读段落），混写会让玩家分不清谁在说话。
+4. **状态账本**：角色/玩家的重大持久变化（致残/突破/关键物品得失/立场质变）
    与世界线动向（任务/势力/悬念）以**条目**记录——`add_facts` 新增、
    `remove_facts` 划掉不再成立的旧条目（引用动态块原文），加事实不丢旧事实、
    过期状态显式退场；近况/世界逐条进每轮动态上下文抗遗忘。角色卡变化落
    版本历史（source=text_game + reason）。基底设定（性格/来历/说话风格）
    GM 不可写——近况条目覆盖演出，基底只在手动编辑/写作助手改动（过版本）。
-4. **概率判定**：剧情分岔的随机性（战斗胜负/行动成败/机关触发/随机遭遇）
+5. **概率判定**：剧情分岔的随机性（战斗胜负/行动成败/机关触发/随机遭遇）
    交给 `roll_random_event`——GM 提交全部分支（含失败分支）与相对权重，
    系统抽取一个作为既定事实回填；GM 必须照结果演出，不得改写或重复判定
    （防"掷骰作弊"）。
@@ -117,8 +126,9 @@
 - `lib/screens/text_game/`：投影器（消息链 → GameSegment）、控制器（独立
   状态层）、游玩页；`lib/widgets/text_game/`：段渲染组件。**不 import
   widgets/agent_chat/ 任何组件**（媒体渲染复用通用 MediaView）。
-- GameSegment 映射：user → 玩家输入气泡；narrate → 阅读器风格旁白段；
-  speak → 角色名+台词；create_scene_image → 插图卡；present_choices → 选项
+- GameSegment 映射：user → 玩家输入气泡；narrate → 阅读器风格旁白段（无装饰
+  文本）；speak → 台词气泡（彩色角色名签 + 头像 + 底色气泡，与旁白刻意拉开
+  区分度）；create_scene_image → 插图卡；present_choices → 选项
   按钮组（只有最后一条可点；玩家输入精确命中 label 标记 ✓）；
   roll_random_event → 命运骰子卡。
 - **动画纪律：只为"本次到访新增的内容"播一次，历史永不重播**。游玩页在

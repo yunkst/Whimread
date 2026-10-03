@@ -525,6 +525,8 @@ class AgentLoop {
         // - 普通工具先全部跑完，再并行派发子 Agent（避免子 Agent 与普通工具
         //   并发产生不可预测的时序）
         final subagentCalls = <ToolCall>[];
+        // 本轮成功执行的终止工具（AgentScenario.terminalToolNames）
+        final terminalToolHits = <String>[];
         for (final call in toolCalls) {
           // 检查点 C：批量工具执行中途被取消，跳过剩余工具
           if (cancellationToken?.isCancelled == true) {
@@ -541,7 +543,12 @@ class AgentLoop {
             continue;
           }
 
-          messages.add(await _executeSingleTool(call, emit, cancellationToken));
+          final (toolMessage, toolOk) =
+              await _executeSingleTool(call, emit, cancellationToken);
+          messages.add(toolMessage);
+          if (toolOk && _scenario.terminalToolNames.contains(call.name)) {
+            terminalToolHits.add(call.name);
+          }
         }
 
         // 子 Agent 并行派发：同一轮内多个 dispatch_subagent 互不阻塞。
@@ -559,7 +566,27 @@ class AgentLoop {
           final parallelMessages = await Future.wait(subagentCalls.map(
             (call) => _executeSingleTool(call, emit, cancellationToken),
           ));
-          messages.addAll(parallelMessages);
+          for (final (toolMessage, toolOk) in parallelMessages) {
+            messages.add(toolMessage);
+            // 并行派发也守终止工具（防御：当前无场景这样声明）
+            if (toolOk &&
+                _scenario.terminalToolNames.contains('dispatch_subagent')) {
+              terminalToolHits.add('dispatch_subagent');
+            }
+          }
+        }
+
+        // 终止工具成功 → 回合到此交付，不再请求下一轮。放在全部结果入链
+        // 之后，保持 assistant(tool_calls) 与 tool 消息配对完整。
+        if (terminalToolHits.isNotEmpty) {
+          LoggerService.instance.i(
+              'Agent 循环因终止工具结束 (${terminalToolHits.join(', ')}, '
+              'scenario=${_scenario.id})',
+              category: LogCategory.ai,
+              tags: ['agent', 'loop', 'terminal_tool', _scenario.id]);
+          emit(const AgentDoneEvent());
+          RetrySignals.instance.clear();
+          return;
         }
 
         // 本轮成功执行（含工具调用）→ 进入下一轮，重置重试计数
@@ -749,7 +776,11 @@ class AgentLoop {
   /// 统一返回构造好的 [ChatMessage]（role: tool）。串行与并行路径都由
   /// 调用方 append 到 messages（串行原地 add、并行收集后顺序 add），
   /// 消除原 nullable 返回值 + `messagesToAppend` 双重语义的混乱。
-  Future<ChatMessage> _executeSingleTool(
+  /// 执行单个工具并返回 (tool 消息, 是否成功)。
+  ///
+  /// 成功标记供终止工具判定用（[AgentScenario.terminalToolNames]）：纯文本
+  /// 工具恒成功，JSON 工具按结果里有无 `error` 判。
+  Future<(ChatMessage, bool)> _executeSingleTool(
     ToolCall call,
     void Function(AgentEvent) emit,
     CancellationToken? cancellationToken,
@@ -843,10 +874,13 @@ class AgentLoop {
             'success',
             _scenario.id
           ]);
-      return ChatMessage(
-        role: 'tool',
-        content: resultStr,
-        toolCallId: call.id,
+      return (
+        ChatMessage(
+          role: 'tool',
+          content: resultStr,
+          toolCallId: call.id,
+        ),
+        true,
       );
     }
 
@@ -900,6 +934,6 @@ class AgentLoop {
           _scenario.id
         ]);
 
-    return toolMessage;
+    return (toolMessage, toolSuccess);
   }
 }

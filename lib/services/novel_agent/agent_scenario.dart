@@ -140,6 +140,18 @@ abstract class AgentScenario {
   /// 子类按需 override。
   Set<String> get streamableToolNames;
 
+  /// 终止工具：调用成功后本回合立即结束，AgentLoop 不再请求下一轮。
+  ///
+  /// 用于「工具本身就是交付物」的场景：文字游戏的 `present_choices` 提交
+  /// 选项即把剧情交给玩家，若不终止，LLM 会被 onNoToolCalls 之类的钩子推着
+  /// 继续"再演一遍"，玩家端看到重复剧情 + 第二组选项。
+  ///
+  /// 规则：
+  /// - 仅在工具**成功**时终止（返回 error 时要让 LLM 自行纠偏重调）
+  /// - 本轮其余工具照常执行完毕、tool 结果全部入链后才结束（保持消息链配对）
+  /// - 默认空集由 [AgentScenarioCleanupMixin] 提供，子类按需 override
+  Set<String> get terminalToolNames;
+
   /// 每轮请求尾部注入的动态上下文（缓存友好布局：易变内容放请求尾部，
   /// 静态协议放开头，前缀稳定可命中供应商的 prompt cache）。
   ///
@@ -233,6 +245,11 @@ mixin AgentScenarioCleanupMixin implements AgentScenario {
   /// AgentScenario` 的场景自动获得默认值，无需逐个实现。
   @override
   Set<String> get streamableToolNames => const {};
+
+  /// [AgentScenario.terminalToolNames] 的默认实现：没有终止工具，
+  /// AgentLoop 行为与引入该机制前完全一致。
+  @override
+  Set<String> get terminalToolNames => const {};
 
   /// [AgentScenario.buildDynamicContext] 的默认实现：无动态上下文。
   @override
