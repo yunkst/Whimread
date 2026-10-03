@@ -296,7 +296,7 @@ class _ShelfNovelsProviderElement extends FutureProviderElement<List<Novel>>
   Bookshelf get shelf => (origin as ShelfNovelsProvider).shelf;
 }
 
-String _$shelfCacheStatsHash() => r'e1aa5a7dd78c76b34fff4a2ab34d86cfbdb009aa';
+String _$shelfCacheStatsHash() => r'f4f32ae5617431e84f9d12322ca0854fa93782fd';
 
 /// 指定书架的缓存统计（family · keepAlive）
 ///

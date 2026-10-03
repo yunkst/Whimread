@@ -482,9 +482,8 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
                     : '查看重写后的章节',
               ),
             ),
-          // create_images / create_image_to_video 成功时，渲染媒体画廊
-          if ((call.name == 'create_images' ||
-                  call.name == 'create_image_to_video') &&
+          // create_images 成功时，渲染媒体画廊
+          if (call.name == 'create_images' &&
               call.status == AgentToolStatus.completed &&
               _mediaGallery != null)
             Padding(

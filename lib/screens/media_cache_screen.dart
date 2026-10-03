@@ -19,7 +19,6 @@ import '../../services/media/media_store.dart';
 import '../../services/media/media_types.dart';
 import '../../utils/format_utils.dart';
 import '../../widgets/common/confirm_dialog.dart';
-import '../../widgets/media/media_view.dart';
 import 'package:photo_view/photo_view.dart';
 
 class MediaCacheScreen extends ConsumerStatefulWidget {
@@ -68,7 +67,7 @@ class _MediaCacheScreenState extends ConsumerState<MediaCacheScreen> {
     final confirmed = await ConfirmDialog.show(
       context,
       title: '删除媒体',
-      message: '确定删除该${item.kind == MediaKind.video ? '视频' : '图片'}？$localOnlyWarn',
+      message: '确定删除该图片？$localOnlyWarn',
       confirmText: '删除',
       isDangerous: true,
     );
@@ -155,7 +154,6 @@ class _MediaCacheScreenState extends ConsumerState<MediaCacheScreen> {
                     children: [
                       _chip('全部', null),
                       _chip('图片', MediaKind.image),
-                      _chip('视频', MediaKind.video),
                     ],
                   ),
                 ),
@@ -224,7 +222,7 @@ class _MediaTile extends StatelessWidget {
       subtitle: Text(
         [
           sourceLabel(item.source),
-          item.kind == MediaKind.video ? '视频' : '图片',
+          '图片',
           FormatUtils.formatFileSize(item.localBytes),
           if (item.localOnly) '本地唯一副本',
         ].join(' · '),
@@ -240,12 +238,6 @@ class _MediaTile extends StatelessWidget {
   }
 
   Widget _thumb(BuildContext context) {
-    if (item.kind == MediaKind.video) {
-      return GestureDetector(
-        onTap: () => _openVideo(context),
-        child: const Icon(Icons.play_circle_outline),
-      );
-    }
     return _MediaThumbImage(
       mediaId: item.mediaId,
       onOpen: _openImage,
@@ -263,16 +255,6 @@ class _MediaTile extends StatelessWidget {
     );
   }
 
-  void _openVideo(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MediaView(
-          mediaId: item.mediaId,
-          fullscreen: true,
-        ),
-      ),
-    );
-  }
 }
 
 /// 本地图片全屏预览页

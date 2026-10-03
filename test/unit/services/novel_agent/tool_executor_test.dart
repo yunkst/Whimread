@@ -735,7 +735,8 @@ void main() {
 
       expect(json['success'], true);
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      expect(chapters.first.content, 'foo BAR baz');
+      expect(await chapterRepo.getCachedChapter(chapters.first.url),
+          'foo BAR baz');
     });
 
     test('oldString 找不到 → not_found', () async {
@@ -782,7 +783,8 @@ void main() {
 
       expect(json['success'], true);
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      expect(chapters.first.content, 'X bar X baz X');
+      expect(await chapterRepo.getCachedChapter(chapters.first.url),
+          'X bar X baz X');
     });
 
     test('oldString 与 newString 相同 → invalid_param', () async {
@@ -836,7 +838,8 @@ void main() {
 
       expect(json['success'], true);
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      expect(chapters.first.content, '第一段(改)\n第二段\n第三段');
+      expect(await chapterRepo.getCachedChapter(chapters.first.url),
+          '第一段(改)\n第二段\n第三段');
     });
 
     test('position 不存在 → chapter_position_out_of_range + suggested_tool', () async {
@@ -882,7 +885,8 @@ void main() {
       expect(json['success'], true, reason: json.toString());
 
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      final content = chapters.first.content!;
+      final content =
+          await chapterRepo.getCachedChapter(chapters.first.url) ?? '';
       expect(content, '第一段(改)\n第二段\n第三段');
       expect(content.contains(r'\n'), isFalse,
           reason: '落库正文不得残留字面 \\n 反斜杠序列');
@@ -906,7 +910,8 @@ void main() {
       expect(json['success'], true, reason: json.toString());
 
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      final content = chapters.first.content!;
+      final content =
+          await chapterRepo.getCachedChapter(chapters.first.url) ?? '';
       expect(content, '他说："走开。"然后退了一步。');
       expect(content.contains(r'\"'), isFalse,
           reason: '落库正文不得残留字面 \\" 反斜杠序列');
@@ -956,7 +961,7 @@ void main() {
 
       // 原文未被修改
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      expect(chapters.first.content, '旧内容');
+      expect(await chapterRepo.getCachedChapter(chapters.first.url), '旧内容');
     });
 
     test('position=2 重写 — 前一章超长正文自动截断，不中断走到 LLM 阶段', () async {
@@ -1000,8 +1005,10 @@ void main() {
 
       // 两章原文均未被修改
       final chapters = await chapterRepo.getCachedNovelChapters(defaultNovelUrl);
-      expect(chapters[0].content, longPrevContent);
-      expect(chapters[1].content, '第二章旧内容');
+      expect(await chapterRepo.getCachedChapter(chapters[0].url),
+          longPrevContent);
+      expect(await chapterRepo.getCachedChapter(chapters[1].url),
+          '第二章旧内容');
     });
 
     test('position 不存在 → chapter_position_out_of_range + suggested_tool', () async {

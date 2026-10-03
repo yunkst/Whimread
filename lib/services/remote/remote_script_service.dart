@@ -143,13 +143,16 @@ class RemoteScriptService {
     return (id: existing.id);
   }
 
-  /// 「另存」决策后调用：保留原本地脚本，另 INSERT 一条 remote 副本
-  /// （同 domain 允许多条 source=remote，按 last_used_at 取最新）。
+  /// 「另存」决策后调用：保留原本地脚本，另 INSERT 一条 remote 副本。
+  ///
+  /// 副本 domain 加 [SiteScriptRepository.kRemoteDomainSuffix] 后缀与本地
+  /// 脚本在库内共存（精确查找互不干扰）；爬取解析入口
+  /// `SiteScriptRepository.findByUrlHost` 在本地脚本缺失时会剥离后缀
+  /// 变体匹配兜底命中该副本。
   Future<({String id})> insertAsNewScript(RemoteScriptMeta meta) async {
     final payload = await _api.getRemoteScript(meta.remoteId);
-    // 临时把 draft 的 id 留空，让 insertRemoteDownload 生成新 id
     final draft = _payloadToScript(payload).copyWith(
-      domain: '${meta.domain}+remote',
+      domain: '${meta.domain}${SiteScriptRepository.kRemoteDomainSuffix}',
     );
     final result = await _scriptRepo.insertRemoteDownload(draft);
     LoggerService.instance.i(

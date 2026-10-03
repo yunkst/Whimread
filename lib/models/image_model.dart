@@ -1,12 +1,11 @@
 /// 生图模型
 ///
 /// 用户可用的生图模型及其元数据：
-/// - local_sd：导入的本地 SD 模型文件
-/// - local_dream：Local Dream 远程设备上的模型（局域网手机宿主模式）
+/// - local_dream_embedded：Local Dream 嵌入式引擎的模型包（唯一后端）
 /// - [name] 全局唯一，agent 作为 create_images 的 modelName key
 /// - [description] / [tags] 是模型的"特点"，agent 据此为用户需求挑选模型
 /// - [backendType] 决定 create_images 路由到哪个 ImageGenerationBackend
-/// - [status] 生命周期（downloading→converting→ready），半成品对 agent 不可见
+/// - [status] 生命周期（downloading→ready），半成品对 agent 不可见
 library;
 
 import 'dart:convert';
@@ -16,17 +15,11 @@ import 'dart:convert';
 /// 与数据库 backend_type 列的字符串字面量一一对应；新增后端（如 qnn）时
 /// 在此扩展枚举 + [dbName] / [parse] 两个映射即可。
 ///
-/// 注：旧版本曾包含 `comfyui`（异步任务后端），现已移除——生图完全走
-/// 客户端本地引擎。存量数据中 backend_type='comfyui' 的行 [parse] 时
-/// 会回退到 [ImageModelBackendType.localSd]（file_path 为空 → 校验失败
-/// 提示用户重新导入），实现平滑迁移。
+/// 注：旧版本曾包含 `comfyui`（异步任务后端）、`local_sd`（端侧 sd.cpp
+/// FFI）与 `local_dream`（局域网设备宿主），均已移除——生图只走嵌入式
+/// 引擎。存量数据中这些字面量的行由 v54 迁移清除；迁移前的 [parse] 回退
+/// 到 [ImageModelBackendType.localDreamEmbedded]。
 enum ImageModelBackendType {
-  /// 本地 sd.cpp 引擎（dart:ffi，端侧 CPU 推理）
-  localSd,
-
-  /// Local Dream 设备（安卓宿主模式 HTTP API，局域网内手机 NPU/CPU 推理）
-  localDream,
-
   /// Local Dream 嵌入式引擎（本机子进程 + localhost HTTP，
   /// 骁龙 NPU/CPU；filePath 存模型包目录，remoteModelId 存包类型 dbName）
   localDreamEmbedded;
@@ -34,10 +27,6 @@ enum ImageModelBackendType {
   /// 数据库 backend_type 列名
   String get dbName {
     switch (this) {
-      case ImageModelBackendType.localSd:
-        return 'local_sd';
-      case ImageModelBackendType.localDream:
-        return 'local_dream';
       case ImageModelBackendType.localDreamEmbedded:
         return 'local_dream_embedded';
     }
@@ -45,15 +34,12 @@ enum ImageModelBackendType {
 
   static ImageModelBackendType parse(String? name) {
     switch (name) {
-      case 'local_sd':
-        return ImageModelBackendType.localSd;
-      case 'local_dream':
-        return ImageModelBackendType.localDream;
       case 'local_dream_embedded':
         return ImageModelBackendType.localDreamEmbedded;
       default:
-        // 兼容旧值（如已下线的 'comfyui'）：回退到本地引擎
-        return ImageModelBackendType.localSd;
+        // 兼容旧值（已下线的 'comfyui'/'local_sd'/'local_dream'）：
+        // 回退到唯一实现（v54 迁移会清掉这些行）
+        return ImageModelBackendType.localDreamEmbedded;
     }
   }
 }
@@ -62,18 +48,21 @@ enum ImageModelBackendType {
 ///
 /// 完整链路：downloading ─pause→ paused        （下载进度 progress）
 ///              │                 ▲resume
-///              ▼ 自动            │
-///           converting ─失败→ failed ─retry─┐
-///              │ 成功                        │
-///              ▼                            ▼
-///            ready                        （可删除）
+///              ▼ 失败            │
+///            failed ───retry────┘
+///              │ 成功
+///              ▼
+///            ready
+///
+/// （历史上 converting 仅供已下线的 safetensors→Q8_0 端上转换链使用，
+/// v54 起从枚举移除；存量该字面量行由 v54 迁移清除，迁移前 [parse]
+/// 容错为 ready。）
 ///
 /// 仅 [ImageModelStatus.ready] 的模型会被 [ImageModelRepository.getEnabled]
 /// 返回——agent 永远看不到半成品。
 enum ImageModelStatus {
   downloading,
   paused,
-  converting,
   ready,
   failed;
 
@@ -84,8 +73,6 @@ enum ImageModelStatus {
         return 'downloading';
       case ImageModelStatus.paused:
         return 'paused';
-      case ImageModelStatus.converting:
-        return 'converting';
       case ImageModelStatus.ready:
         return 'ready';
       case ImageModelStatus.failed:
@@ -99,21 +86,17 @@ enum ImageModelStatus {
         return ImageModelStatus.downloading;
       case 'paused':
         return ImageModelStatus.paused;
-      case 'converting':
-        return ImageModelStatus.converting;
       case 'failed':
         return ImageModelStatus.failed;
       case 'ready':
       default:
-        // 兼容：空值/未知值一律视为 ready（存量行语义）
+        // 兼容：空值/未知值（含已下线的 'converting'）一律视为 ready
         return ImageModelStatus.ready;
     }
   }
 
   /// 是否进行中（UI 据此显示进度条/取消按钮）
-  bool get isActive =>
-      this == ImageModelStatus.downloading ||
-      this == ImageModelStatus.converting;
+  bool get isActive => this == ImageModelStatus.downloading;
 
   /// 是否已就绪（agent 可用）
   bool get isReady => this == ImageModelStatus.ready;
@@ -159,7 +142,7 @@ class ImageModel {
   /// 负向提示词预设（LLM 只传正向 prompt，负向随模型走）
   final String negativePrompt;
 
-  /// 生命周期状态（downloading/paused/converting/ready/failed）
+  /// 生命周期状态（downloading/paused/ready/failed）
   final ImageModelStatus status;
 
   /// 下载/转换进度 0-100
@@ -177,21 +160,30 @@ class ImageModel {
   /// 失败原因摘要（status=failed 时展示）
   final String errorMessage;
 
-  // ===== 远程设备（local_dream，v48）=====
+  // ===== 模型包定位（v54 语义收敛）=====
 
-  /// Local Dream 设备地址（如 192.168.31.76，不含 scheme 与端口；
-  /// 控制端口 8808 / 生成端口 8081 为协议常量，按 host 推导）
+  /// 旧版远程设备地址（local_dream 后端已下线，v54 迁移清行；列保留）
   final String remoteHost;
 
-  /// 设备上的模型 id（如 illustrious_v16，对应 /models 返回的 id）
+  /// 模型包类型 dbName（sd15cpu / sd15npu / sdxl）——嵌入式引擎据此
+  /// 选择画布尺寸与 QNN 依赖。v54 起该列语义唯一（原兼作设备模型 id）。
   final String remoteModelId;
+
+  /// 内置目录条目 id（model_pack.dart 的 catalog entry id；如
+  /// illustrious_v16）。下载页据此判定"已添加"，避免 name 拼接匹配。
+  /// 目录导入的包为空。
+  final String catalogId;
+
+  /// 默认出图比例（"宽:高"，如 "3:4"）。仅 SDXL 包生效（引擎固定画布
+  /// 合成重绘裁切）；空 = 1:1。Agent 未显式传 aspect_ratio 时的回退值。
+  final String defaultAspectRatio;
 
   const ImageModel({
     this.id,
     required this.name,
     this.description = '',
     this.tags = const [],
-    this.backendType = ImageModelBackendType.localSd,
+    this.backendType = ImageModelBackendType.localDreamEmbedded,
     this.filePath = '',
     this.fileSize = 0,
     this.previewMediaId,
@@ -213,6 +205,8 @@ class ImageModel {
     this.errorMessage = '',
     this.remoteHost = '',
     this.remoteModelId = '',
+    this.catalogId = '',
+    this.defaultAspectRatio = '',
   });
 
   factory ImageModel.fromMap(Map<String, dynamic> map) {
@@ -258,6 +252,8 @@ class ImageModel {
       errorMessage: (map['error_message'] as String?) ?? '',
       remoteHost: (map['remote_host'] as String?) ?? '',
       remoteModelId: (map['remote_model_id'] as String?) ?? '',
+      catalogId: (map['catalog_id'] as String?) ?? '',
+      defaultAspectRatio: (map['default_aspect_ratio'] as String?) ?? '',
     );
   }
 
@@ -288,6 +284,8 @@ class ImageModel {
     String? errorMessage,
     String? remoteHost,
     String? remoteModelId,
+    String? catalogId,
+    String? defaultAspectRatio,
   }) =>
       ImageModel(
         id: id ?? this.id,
@@ -316,6 +314,8 @@ class ImageModel {
         errorMessage: errorMessage ?? this.errorMessage,
         remoteHost: remoteHost ?? this.remoteHost,
         remoteModelId: remoteModelId ?? this.remoteModelId,
+        catalogId: catalogId ?? this.catalogId,
+        defaultAspectRatio: defaultAspectRatio ?? this.defaultAspectRatio,
       );
 
   @override

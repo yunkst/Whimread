@@ -1,14 +1,14 @@
-/// Local Dream 设备协议客户端
+/// Local Dream 嵌入式引擎协议客户端
 ///
-/// 对接 Local Dream 安卓端"宿主模式"（设备互联）暴露的 HTTP API：
-/// - 控制端口 [LocalDreamPorts.control]：/info /status /models /select
-/// - 生成端口 [LocalDreamPorts.generation]：/generate（SSE 流式，图片 base64）
+/// 对接本机引擎子进程（libstable_diffusion_core.so，监听 localhost:8081）
+/// 暴露的 HTTP API：
+/// - [LocalDreamPorts.generation]：/generate（SSE 流式，图片 base64）、/health
 ///
-/// 协议参考 local-dream 仓库 `RemoteProtocol.kt`（端口为协议常量）与
-/// `main.cpp`（SSE 事件格式）。两端均无鉴权，端口仅由 host 推导。
+/// 协议参考 Local Dream `main.cpp`（端口为协议常量、SSE 事件格式）。
+/// 无鉴权，端口固定。
 ///
 /// HTTP 用 dart:io HttpClient 直连而非 Dio：本项目 Dio 实例挂了设备鉴权
-/// 拦截器与后端超时语义，直连局域网设备不应经过它们（流式 SSE 同理，
+/// 拦截器与后端超时语义，直连本机子进程不应经过它们（流式 SSE 同理，
 /// 与 llm_provider_client.dart 的选择一致）。
 library;
 
@@ -22,10 +22,7 @@ import '../logger_service.dart';
 
 /// Local Dream 协议固定端口
 class LocalDreamPorts {
-  /// 控制端口（RemoteHostServer：/info /status /models /select）
-  static const int control = 8808;
-
-  /// 生成端口（原生后端 --listen_all：/generate /health）
+  /// 生成端口（原生后端 --listen：/generate /health）
   static const int generation = 8081;
 }
 
@@ -85,85 +82,6 @@ class LocalDreamGenerateRequest {
       };
 }
 
-/// GET /info：设备身份
-class LocalDreamInfo {
-  final String app;
-  final int protocol;
-  final String version;
-  final String device;
-
-  const LocalDreamInfo({
-    required this.app,
-    required this.protocol,
-    required this.version,
-    required this.device,
-  });
-
-  factory LocalDreamInfo.fromJson(Map<String, dynamic> json) => LocalDreamInfo(
-        app: (json['app'] as String?) ?? '',
-        protocol: (json['protocol'] as num?)?.toInt() ?? 0,
-        version: (json['version'] as String?) ?? '',
-        device: (json['device'] as String?) ?? '',
-      );
-}
-
-/// GET /status：后端状态（idle/starting/running/error）
-class LocalDreamStatus {
-  final String state;
-  final String? servingModelId;
-  final String? message;
-
-  const LocalDreamStatus({
-    required this.state,
-    this.servingModelId,
-    this.message,
-  });
-
-  factory LocalDreamStatus.fromJson(Map<String, dynamic> json) =>
-      LocalDreamStatus(
-        state: (json['state'] as String?) ?? 'idle',
-        servingModelId: json['serving_model_id'] as String?,
-        message: json['message'] as String?,
-      );
-}
-
-/// GET /models：设备上已安装的一个模型
-class LocalDreamCatalogModel {
-  final String id;
-  final String name;
-  final String description;
-  final bool isSdxl;
-  final int generationSize;
-  final int defaultSteps;
-  final double defaultCfg;
-  final String defaultNegativePrompt;
-
-  const LocalDreamCatalogModel({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.isSdxl,
-    required this.generationSize,
-    required this.defaultSteps,
-    required this.defaultCfg,
-    required this.defaultNegativePrompt,
-  });
-
-  factory LocalDreamCatalogModel.fromJson(Map<String, dynamic> json) {
-    final defaults = (json['defaults'] as Map<String, dynamic>?) ?? const {};
-    return LocalDreamCatalogModel(
-      id: (json['id'] as String?) ?? '',
-      name: (json['name'] as String?) ?? '',
-      description: (json['description'] as String?) ?? '',
-      isSdxl: (json['is_sdxl'] as bool?) ?? false,
-      generationSize: (json['generation_size'] as num?)?.toInt() ?? 512,
-      defaultSteps: (defaults['steps'] as num?)?.toInt() ?? 20,
-      defaultCfg: (defaults['cfg'] as num?)?.toDouble() ?? 7.0,
-      defaultNegativePrompt: (defaults['negative_prompt'] as String?) ?? '',
-    );
-  }
-}
-
 /// /generate SSE 流事件
 sealed class LocalDreamGenerateEvent {
   const LocalDreamGenerateEvent();
@@ -212,7 +130,7 @@ class LocalDreamErrorEvent extends LocalDreamGenerateEvent {
   const LocalDreamErrorEvent({required this.message});
 }
 
-/// 与 Local Dream 设备通信失败的异常（连接不上、协议不符、设备报错等）
+/// 与本机引擎通信失败的异常（连接不上、协议不符、引擎报错等）
 class LocalDreamException implements Exception {
   final String message;
   const LocalDreamException(this.message);
@@ -222,72 +140,27 @@ class LocalDreamException implements Exception {
 }
 
 class LocalDreamClient {
-  /// 设备地址（已规范化，不含 scheme 与端口）
+  /// 引擎监听地址（嵌入式引擎固定 127.0.0.1）
   final String host;
 
-  final int controlPort;
   final int generationPort;
 
   /// 默认单次 TCP 连接超时
   static const Duration defaultConnectTimeout = Duration(seconds: 10);
 
-  /// 单次 TCP 连接超时；本机探测等场景可通过构造参数注入更短的超时
+  /// 单次 TCP 连接超时
   final Duration connectTimeout;
 
   /// SSE 帧间空闲超时（采样一步可能 10s+，整图 1 分钟+，放宽到 2 分钟）
   static const Duration idleTimeout = Duration(seconds: 120);
 
-  /// /select 后等待后端进入 running 的上限
-  static const Duration selectSettleTimeout = Duration(seconds: 90);
-
-  /// 轮询 /status 的间隔（测试注入短间隔加速）
-  Duration selectPollInterval = const Duration(seconds: 1);
-
   HttpClient? _httpClient;
 
   LocalDreamClient({
     required this.host,
-    this.controlPort = LocalDreamPorts.control,
     this.generationPort = LocalDreamPorts.generation,
     this.connectTimeout = defaultConnectTimeout,
   });
-
-  /// 规范化用户输入的设备地址：去 scheme/路径/端口/空白。
-  /// 端口是协议常量，用户多填（如 `192.168.31.76:8808`）也一并剥掉。
-  /// 注：按首个 ':' 截断端口，不支持 IPv6 字面量（局域网直连场景为 IPv4）。
-  static String normalizeHost(String raw) {
-    var host = raw.trim();
-    final scheme = host.indexOf('://');
-    if (scheme >= 0) host = host.substring(scheme + 3);
-    final slash = host.indexOf('/');
-    if (slash >= 0) host = host.substring(0, slash);
-    final colon = host.indexOf(':');
-    if (colon >= 0) host = host.substring(0, colon);
-    return host.trim();
-  }
-
-  /// 探测 [host] 是否为 Local Dream 设备（/info 返回 app == 'localdream'）。
-  ///
-  /// 用于添加对话框的「本机自动检测」：任何通信失败（端口未开、超时、
-  /// 非 Local Dream 服务占用）都视为 false，调用方静默回退手动输入。
-  static Future<bool> isLocalDreamDevice(
-    String host, {
-    Duration? timeout,
-    int controlPort = LocalDreamPorts.control,
-  }) async {
-    final client = LocalDreamClient(
-      host: host,
-      controlPort: controlPort,
-      connectTimeout: timeout ?? defaultConnectTimeout,
-    );
-    try {
-      return (await client.info()).app == 'localdream';
-    } on LocalDreamException {
-      return false;
-    } finally {
-      client.close();
-    }
-  }
 
   HttpClient _http() {
     final client = _httpClient ??= HttpClient()
@@ -301,77 +174,34 @@ class LocalDreamClient {
     _httpClient = null;
   }
 
-  Uri _controlUri(String path) =>
-      Uri.parse('http://$host:$controlPort$path');
-
   Uri _generationUri(String path) =>
       Uri.parse('http://$host:$generationPort$path');
 
-  Future<Map<String, dynamic>> _getJson(Uri uri) async {
-    final body = await _requestJson(() async {
-      final request = await _http().getUrl(uri);
-      return request.close();
-    }, uri);
-    return body;
-  }
-
-  Future<Map<String, dynamic>> _postJson(Uri uri, Map<String, dynamic> json) {
-    return _requestJson(() async {
-      // 显式设 contentLength 走 Content-Length 而非 chunked：Dart 不设长度
-      // 时默认 chunked 传输，Local Dream 设备端解析不了 chunked body，
-      // 会拿不到 model_id 而回 404 "model not found"（2026-09-25 反馈 #6）
-      final body = utf8.encode(jsonEncode(json));
-      final request = await _http().postUrl(uri);
-      request.headers.contentType = ContentType.json;
-      request.contentLength = body.length;
-      request.add(body);
-      return request.close();
-    }, uri);
-  }
-
   /// 把底层连接异常统一映射为可读的 [LocalDreamException]。
-  /// [hint] 用于 SocketException 的场景化提示（控制端口与生成端口不同）。
-  LocalDreamException _connectionError(Object e, {required String hint}) {
+  LocalDreamException _connectionError(Object e) {
     if (e is TimeoutException) {
-      return LocalDreamException('连接设备 $host 超时，请确认在同一网络、'
-          '宿主模式已开启且手机屏幕未锁定');
+      return LocalDreamException('连接本机引擎 $host 超时');
     }
     if (e is SocketException) {
-      return LocalDreamException('无法连接设备 $host（${e.message}），$hint');
+      return LocalDreamException('无法连接本机引擎 $host（${e.message}）');
     }
     if (e is HttpException) {
-      return LocalDreamException('连接设备 $host 失败（${e.message}）');
+      return LocalDreamException('连接本机引擎 $host 失败（${e.message}）');
     }
-    return LocalDreamException('连接设备 $host 失败：$e');
+    return LocalDreamException('连接本机引擎 $host 失败：$e');
   }
 
-  Future<Map<String, dynamic>> _requestJson(
-    Future<HttpClientResponse> Function() open,
-    Uri uri,
-  ) async {
-    HttpClientResponse response;
+  /// 响应体尽力排空（带读取超时）。
+  ///
+  /// 半死进程（TCP 已建连但不再发数据）的响应体可能永远读不完，
+  /// 不加超时会让 [health] 轮询 / 非 200 分支永久挂起，
+  /// 引擎管理器的启动 deadline 检查随之失效。
+  Future<void> _drainQuietly(HttpClientResponse response) async {
     try {
-      response = await open().timeout(connectTimeout);
-    } catch (e) {
-      throw _connectionError(e,
-          hint: '请确认在同一网络、宿主模式已开启且手机屏幕未锁定');
+      await response.drain<void>().timeout(idleTimeout);
+    } on TimeoutException {
+      // 放弃接收即可：连接随后被丢弃
     }
-    if (response.statusCode != 200) {
-      await response.drain<void>();
-      throw LocalDreamException('设备 $host 返回 HTTP ${response.statusCode}');
-    }
-    final text = await response.transform(utf8.decoder).join();
-    try {
-      return jsonDecode(text) as Map<String, dynamic>;
-    } on FormatException {
-      throw LocalDreamException('设备 $host 返回了非 JSON 响应');
-    }
-  }
-
-  /// 设备身份（校验 app == localdream）
-  Future<LocalDreamInfo> info() async {
-    final json = await _getJson(_controlUri('/info'));
-    return LocalDreamInfo.fromJson(json);
   }
 
   /// 生成端口健康检查（GET /health 返回 200 即就绪；
@@ -382,7 +212,7 @@ class LocalDreamClient {
           .getUrl(_generationUri('/health'))
           .timeout(connectTimeout);
       final response = await request.close().timeout(connectTimeout);
-      await response.drain<void>();
+      await _drainQuietly(response);
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -391,9 +221,9 @@ class LocalDreamClient {
 
   /// 提交生成并消费整个 SSE 流，返回 complete 事件。
   ///
-  /// progress 钳制后透传给 [onProgress]（真实设备会出现重复帧与
+  /// progress 钳制后透传给 [onProgress]（真实引擎会出现重复帧与
   /// step > total 的帧，归一化保证上层 step/total 恒在 0..1）；
-  /// error 事件转为异常抛出。两个后端（远程设备/嵌入式）共用。
+  /// error 事件转为异常抛出。
   Future<LocalDreamCompleteEvent> generateAndWait(
     LocalDreamGenerateRequest request, {
     void Function(int step, int total)? onProgress,
@@ -408,60 +238,13 @@ class LocalDreamClient {
         case LocalDreamCompleteEvent():
           complete = event;
         case LocalDreamErrorEvent(:final message):
-          throw LocalDreamException('设备生成失败：$message');
+          throw LocalDreamException('引擎生成失败：$message');
       }
     }
     if (complete == null) {
-      throw const LocalDreamException('设备连接中断，未返回完整图片');
+      throw const LocalDreamException('引擎连接中断，未返回完整图片');
     }
     return complete;
-  }
-
-  /// 后端状态
-  Future<LocalDreamStatus> status() async {
-    final json = await _getJson(_controlUri('/status'));
-    return LocalDreamStatus.fromJson(json);
-  }
-
-  /// 设备上已安装的模型目录
-  Future<List<LocalDreamCatalogModel>> models() async {
-    final json = await _getJson(_controlUri('/models'));
-    final list = (json['models'] as List<dynamic>?) ?? const [];
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map(LocalDreamCatalogModel.fromJson)
-        .toList();
-  }
-
-  /// 远程激活模型并等待后端进入 running。
-  /// 设备已在跑其他模型时会被切换；已在跑目标模型时跳过重复 select。
-  Future<void> select(
-    String modelId, {
-    int width = 512,
-    int height = 512,
-  }) async {
-    final current = await status();
-    if (current.state == 'running' && current.servingModelId == modelId) {
-      return;
-    }
-    LoggerService.instance.i('远程激活 Local Dream 模型: $modelId @ $host',
-        category: LogCategory.ai, tags: ['image_gen', 'local_dream']);
-    await _postJson(
-        _controlUri('/select'), {'model_id': modelId, 'width': width, 'height': height});
-
-    final deadline = DateTime.now().add(selectSettleTimeout);
-    while (DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(selectPollInterval);
-      final current = await status();
-      if (current.state == 'running' && current.servingModelId == modelId) {
-        return;
-      }
-      if (current.state == 'error') {
-        throw LocalDreamException(
-            '设备激活模型 $modelId 失败：${current.message ?? '未知错误'}');
-      }
-    }
-    throw LocalDreamException('等待设备加载模型 $modelId 超时');
   }
 
   /// 提交生成，流式返回 progress/complete/error 事件。
@@ -482,11 +265,11 @@ class LocalDreamClient {
           }
           if (error is TimeoutException) {
             sink.addError(LocalDreamException(
-                '设备 $host 生成响应中断（超过 ${idleTimeout.inSeconds}s 无数据）'));
+                '引擎 $host 生成响应中断（超过 ${idleTimeout.inSeconds}s 无数据）'));
             return;
           }
           sink.addError(
-              LocalDreamException('与设备 $host 通信失败：$error'));
+              LocalDreamException('与引擎 $host 通信失败：$error'));
         },
       ),
     );
@@ -496,7 +279,7 @@ class LocalDreamClient {
       LocalDreamGenerateRequest request) async* {
     HttpClientResponse response;
     try {
-      // contentLength 同 _postJson：避免 chunked，设备端解析不了
+      // contentLength 显式设置走 Content-Length 而非 chunked 传输
       final body = utf8.encode(jsonEncode(request.toJson()));
       final httpRequest = await _http()
           .postUrl(_generationUri('/generate'))
@@ -506,14 +289,13 @@ class LocalDreamClient {
       httpRequest.add(body);
       response = await httpRequest.close().timeout(connectTimeout);
     } catch (e) {
-      throw _connectionError(e,
-          hint: '请确认设备模型已在手机端启动（宿主模式）且屏幕未锁定');
+      throw _connectionError(e);
     }
 
     if (response.statusCode != 200) {
       await response.drain<void>();
       throw LocalDreamException(
-          '设备生成接口返回 HTTP ${response.statusCode}，请确认模型已激活');
+          '引擎生成接口返回 HTTP ${response.statusCode}');
     }
 
     final parser = _SseParser();
@@ -529,7 +311,7 @@ class LocalDreamClient {
     } on StateError catch (e) {
       // _SseParser 在流意外结束时抛 StateError，转成可读文案
       throw LocalDreamException(
-          e.message.isEmpty ? '设备连接中断' : e.message);
+          e.message.isEmpty ? '引擎连接中断' : e.message);
     }
 
     for (final event in parser.flush()) {

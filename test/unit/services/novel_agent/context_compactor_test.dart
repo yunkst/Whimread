@@ -331,6 +331,67 @@ void main() {
       }
     });
 
+    // P0 回归：一个 assistant 带多个 tool_calls 时，候选切点可能落在
+    // 第 2..N 条 tool 结果「之间」（prev 是 tool 而非归属 assistant）。
+    // 旧实现此时直接 break → 保留段以孤儿 tool 消息开头、声明它的
+    // assistant 被丢弃 → OpenAI 兼容网关 400，且压缩结果持久留在
+    // messages 里，之后每一轮都带非法前缀（会话不可恢复）。
+    test('切点落在同一 assistant 的第 2 条 tool 结果之间 → 仍配对完整', () {
+      final compactor = ContextCompactor(
+        config: const CompactorConfig(
+          maxContextChars: 1000,
+          preserveTailChars: 305,
+          prePruneEnabled: false,
+        ),
+      );
+      const systemPrompt = 'sys';
+      // 尺寸设计：payload(tool c2)=~302、payload(tool c1)=~13，
+      // 保留 305 使从尾累加在 i=3（tool c1）处首次越界 → 候选切点=4，
+      // 即切在 tool(c1) 与 tool(c2) 之间（孤儿场景）
+      final messages = <ChatMessage>[
+        ChatMessage(role: 'system', content: systemPrompt),
+        ChatMessage(role: 'user', content: 'old ${'x' * 600}'),
+        ChatMessage(
+          role: 'assistant',
+          content: null,
+          toolCalls: [
+            ToolCall(id: 'c1', name: 'tool_one', arguments: {}),
+            ToolCall(id: 'c2', name: 'tool_two', arguments: {}),
+          ],
+        ),
+        ChatMessage(role: 'tool', content: '{"ok":true}', toolCallId: 'c1'),
+        ChatMessage(role: 'tool', content: '${'b' * 300}', toolCallId: 'c2'),
+      ];
+
+      final result = compactor.compact(
+        messages: messages,
+        systemPrompt: systemPrompt,
+      );
+
+      final retained = result.messages.where((m) => m.role != 'system').toList();
+      // 保留段首条不得是 tool 消息（否则其 assistant 已被丢弃 → 400）
+      expect(retained.first.role, isNot('tool'),
+          reason: '保留段不能以 tool 消息开头（孤儿结果 → API 400）');
+      // 归属 assistant 与两条 tool 结果要么全保留、要么全丢弃
+      final asst = retained
+          .where((m) =>
+              m.role == 'assistant' && (m.toolCalls?.isNotEmpty ?? false))
+          .toList();
+      final toolIds =
+          retained.where((m) => m.role == 'tool').map((m) => m.toolCallId).toSet();
+      for (final a in asst) {
+        for (final tc in a.toolCalls!) {
+          expect(toolIds, contains(tc.id),
+              reason: 'toolCall ${tc.id} 必须有对应的 tool 结果');
+        }
+      }
+      for (final id in toolIds) {
+        expect(
+            asst.any((a) => a.toolCalls!.any((tc) => tc.id == id)), isTrue,
+            reason: 'tool 结果 $id 的 assistant 必须一并保留');
+      }
+    });
+
     test('droppedAgentFromIndex 等于实际丢弃的起始索引', () {
       final compactor = ContextCompactor(
         config: const CompactorConfig(

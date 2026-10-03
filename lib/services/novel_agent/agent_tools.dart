@@ -838,11 +838,11 @@ class AgentTools {
       'name': 'list_text2img_models',
       'description':
           '获取用户在本地管理的生图模型列表（用户在「设置 → 生图模型管理」'
-          '导入的本地 SD 模型）。'
+          '下载/导入的 Local Dream 模型包）。'
           '返回每项的 name（作为 create_images 的 modelName 参数）、'
           'description（用户为该模型写的特点描述）、tags（结构化标签如'
           '"古风/写实/赛博朋克"）、是否默认、promptSkill（描述+标签摘要，'
-          '是提示词写作技巧建议），以及 backendType（当前仅 local_sd）。'
+          '是提示词写作技巧建议）。'
           '**你必须根据用户当前的需求语义，在 description/tags 中挑选最匹配的'
           '模型，把它的 name 作为 create_images 的 modelName 参数；**'
           '若用户提到风格/题材/用途关键词（"古风""写实""赛博朋克""人物特写"），'
@@ -862,7 +862,7 @@ class AgentTools {
     'function': {
       'name': 'create_images',
       'description':
-          '根据提示词生成图片（local_sd 端侧引擎，或 local_dream 远程设备）。\n'
+          '根据提示词生成图片（本机 Local Dream 引擎）。\n'
           '生图耗时长（数十秒/张），请耐心等待；'
           '聊天窗口会出现图片画廊展示结果。\n'
           '使用场景：\n'

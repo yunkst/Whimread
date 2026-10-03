@@ -42,7 +42,7 @@ void main() {
     String name = '默认模型',
     String description = '擅长通用场景',
     List<String> tags = const ['通用'],
-    ImageModelBackendType backendType = ImageModelBackendType.localSd,
+    ImageModelBackendType backendType = ImageModelBackendType.localDreamEmbedded,
     String filePath = '/data/models/x.gguf',
     int fileSize = 1000,
     int sortOrder = 0,
@@ -84,7 +84,7 @@ void main() {
       expect(loaded.description, '擅长水墨');
       expect(loaded.tags, ['古风', '水墨']);
       expect(loaded.fileSize, 2048);
-      expect(loaded.backendType, ImageModelBackendType.localSd);
+      expect(loaded.backendType, ImageModelBackendType.localDreamEmbedded);
       expect(loaded.isEnabled, true);
       expect(loaded.isDefault, false);
     });

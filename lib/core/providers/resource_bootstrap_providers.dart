@@ -4,8 +4,8 @@
 /// lib/services/app_resource_manager.dart 头注释）：
 /// - ui_fonts  : 走统一 manifest，下载后 FontLoader 注册
 /// - ocr_model : 委托 OcrModelDownloader（独立 manifest），仅汇报进度
-/// - sd_engine : 走统一 manifest，下载后注册 libsds.so 动态加载路径
-///   （非 Android 平台自动跳过）
+/// - local_dream_qnn : 走统一 manifest，NPU 引擎 dlopen 用的 QNN 运行库
+///   （.so）；引擎启动时只解析本地目录，不再触发网络（非 Android 自动跳过）
 ///
 /// 跳过语义：SharedPreferences 记 `resource_bootstrap_skipped_<manifestVersion>`，
 /// 同一 manifest 版本内跳过后不再弹引导页（后台静默补下载），manifest
@@ -22,6 +22,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/app_resource_manager.dart';
 import '../../services/logger_service.dart';
+import '../../services/ocr_model_downloader.dart';
 import 'ocr_providers.dart';
 
 part 'resource_bootstrap_providers.g.dart';
@@ -37,17 +38,31 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
   static const _itemOrder = [
     ResourceIds.uiFonts,
     ResourceIds.ocrModel,
-    ResourceIds.sdEngine,
+    ResourceIds.localDreamQnn,
   ];
 
   Dio? _downloadDio;
 
+  /// build 期同步捕获的依赖：skip() 后引导页 unmount → autoDispose
+  /// Notifier dispose → 此后再 ref.read 会抛 StateError。后台静默
+  /// 补下载必须在 dispose 后继续跑，所以依赖只能在存活期捕获到字段里。
+  AppResourceManager? _manager;
+  OcrModelDownloader? _downloader;
+
+  /// dispose 标记（Riverpod 2.4 无 ref.mounted）：置位后 state 写入
+  /// 全部 no-op，避免向已 dispose 的 Notifier 写 state 抛 StateError
+  bool _disposed = false;
+
   @override
   ResourceBootstrapState build() {
+    ref.onDispose(() => _disposed = true);
+    _manager = ref.read(appResourceManagerProvider);
+    _downloader = ref.read(ocrModelDownloaderProvider);
     return const ResourceBootstrapState(itemIds: _itemOrder, items: {});
   }
 
   void _update(String id, ResourceItemState s) {
+    if (_disposed) return; // dispose 后后台补下载继续，UI 状态写入静默丢弃
     final items = Map<String, ResourceItemState>.of(state.items);
     items[id] = s;
     state = state.copyWith(items: items);
@@ -118,7 +133,7 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
     await Future.wait([
       _bootstrapFonts(manager, manifest),
       _bootstrapOcr(),
-      _bootstrapSdEngine(manager, manifest),
+      _bootstrapQnn(manager, manifest),
     ]);
 
     final allReady = !state.hasFailure &&
@@ -155,7 +170,9 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
 
   Future<void> _bootstrapOcr() async {
     try {
-      final downloader = ref.read(ocrModelDownloaderProvider);
+      // 用 build 期捕获的实例，dispose 后不再触碰 ref
+      final downloader = _downloader;
+      if (downloader == null) return;
       await downloader.ensureLocal(
           onProgress: (r, t) => _progress(ResourceIds.ocrModel, r, t));
       _ready(ResourceIds.ocrModel);
@@ -164,23 +181,27 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
     }
   }
 
-  Future<void> _bootstrapSdEngine(
+  /// QNN 运行库（local_dream_qnn）：NPU 引擎 dlopen 用的 .so 集合。
+  /// Android 专属；ensureResource 内含 sha256 命中判断，
+  /// 已就绪时零流量直过。引擎启动只解析本目录，不再走网络。
+  Future<void> _bootstrapQnn(
       AppResourceManager manager, AppResourcesManifest manifest) async {
     if (!await _isAndroid()) {
-      _ready(ResourceIds.sdEngine);
+      _ready(ResourceIds.localDreamQnn);
       return;
     }
-    final spec = manifest.resources[ResourceIds.sdEngine];
+    final spec = manifest.resources[ResourceIds.localDreamQnn];
     if (spec == null) {
-      _ready(ResourceIds.sdEngine);
+      // 清单未发布：按"各功能按需降级"放行，NPU 启动时报缺库错误
+      _ready(ResourceIds.localDreamQnn);
       return;
     }
     try {
-      await manager.ensureSdEngine(spec,
-          onProgress: (r, t) => _progress(ResourceIds.sdEngine, r, t));
-      _ready(ResourceIds.sdEngine);
+      await manager.ensureResource(spec,
+          onProgress: (r, t) => _progress(ResourceIds.localDreamQnn, r, t));
+      _ready(ResourceIds.localDreamQnn);
     } catch (e) {
-      _fail(ResourceIds.sdEngine, e);
+      _fail(ResourceIds.localDreamQnn, e);
     }
   }
 
@@ -211,8 +232,9 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
       if (state.items[ResourceIds.ocrModel]?.status != ResourceItemStatus.ready)
         _bootstrapOcr(),
       if (await _isAndroid() &&
-          state.items[ResourceIds.sdEngine]?.status != ResourceItemStatus.ready)
-        _bootstrapSdEngine(manager, manifest),
+          state.items[ResourceIds.localDreamQnn]?.status !=
+              ResourceItemStatus.ready)
+        _bootstrapQnn(manager, manifest),
     ]);
     final allReady = !state.hasFailure &&
         state.items.values.every((s) => s.status == ResourceItemStatus.ready);
@@ -222,16 +244,24 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
   /// 不改 UI 状态，静默把缺失资源补齐（跳过后调用）。
   /// 独立 Dio，避免占用引导页下载通道。
   void _continueInBackground() {
+    // ref.read 只在存活期同步执行；此后 Notifier 随引导页 unmount 被
+    // dispose，后台闭包只操作捕获的依赖 + no-op 化的 _update
+    final manager = _manager;
+    if (manager == null) return;
+    _downloadDio ??= Dio();
     unawaited(() async {
-      final manager = ref.read(appResourceManagerProvider);
-      _downloadDio ??= Dio();
       try {
         final manifest = await manager.fetchManifest();
         await Future.wait([
           _bootstrapFonts(manager, manifest),
           _bootstrapOcr(),
-          if (await _isAndroid()) _bootstrapSdEngine(manager, manifest),
+          if (await _isAndroid()) _bootstrapQnn(manager, manifest),
         ]);
+        LoggerService.instance.i(
+          '跳过后台资源补下载完成',
+          category: LogCategory.general,
+          tags: ['resource', 'bootstrap', 'background_done'],
+        );
       } catch (_) {/* 静默失败：下次启动重新校验 */}
     }());
   }

@@ -880,28 +880,6 @@ class ScenarioSession {
     }
   }
 
-  /// 外部改写某条 tool 消息的内容（异步生图完成后由游玩页控制器调用）。
-  ///
-  /// 只同步内存真理源 _agentMessages + UI 投影；DB 改写由调用方
-  /// （TextGameImageService）负责。找不到对应消息（会话未 hydrate /
-  /// 已切换到其它会话）静默忽略——DB 已是最终态，下次 hydrate 自然正确。
-  /// 同步内存的意义：本会话后续的 compaction 整链重写以内存为基准，
-  /// 不同步会让改写结果被「已提交」旧值覆盖。
-  void updateToolMessageContent(String toolCallId, String content) {
-    for (var i = _agentMessages.length - 1; i >= 0; i--) {
-      final m = _agentMessages[i];
-      if (m.role == 'tool' && m.toolCallId == toolCallId) {
-        _agentMessages[i] = ChatMessage(
-          role: 'tool',
-          content: content,
-          toolCallId: toolCallId,
-        );
-        _state = _state.copyWith(messages: _uiMessages);
-        _notifyStateChanged();
-        return;
-      }
-    }
-  }
 
   /// 续跑 Agent —— 与 [_runAgent] 区别：不 append user、不调 sendMessage、走 resumeFromMessages。
   ///

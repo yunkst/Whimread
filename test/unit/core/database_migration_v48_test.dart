@@ -35,7 +35,7 @@ void main() {
     expect(namesBefore, isNot(contains('remote_model_id')),
         reason: 'v47 不应存在 remote_model_id');
 
-    await DatabaseMigrations.upgrade(db, 47, DatabaseMigrations.currentVersion);
+    await DatabaseMigrations.upgrade(db, 47, 48);
 
     final columnsAfter = await db.rawQuery("PRAGMA table_info(image_models)");
     final namesAfter = columnsAfter.map((c) => c['name']).toSet();
@@ -54,7 +54,7 @@ void main() {
       'updated_at': now,
     });
 
-    await DatabaseMigrations.upgrade(db, 47, DatabaseMigrations.currentVersion);
+    await DatabaseMigrations.upgrade(db, 47, 48);
 
     final rows = await db.query('image_models');
     expect(rows.single['backend_type'], 'local_sd');

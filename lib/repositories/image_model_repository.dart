@@ -41,6 +41,8 @@ class ImageModelRepository extends BaseRepository
       'error_message': model.errorMessage,
       'remote_host': model.remoteHost,
       'remote_model_id': model.remoteModelId,
+      'catalog_id': model.catalogId,
+      'default_aspect_ratio': model.defaultAspectRatio,
       if (isInsert) 'created_at': now,
     };
   }

@@ -41,7 +41,6 @@ class _FakeEngineManager implements LocalDreamEngineManager {
   Future<void> ensureStarted({
     required LocalDreamPackType type,
     required String modelDir,
-    void Function(int received, int total)? onQnnProgress,
   }) async {
     started.add((type: type, modelDir: modelDir));
   }
@@ -57,6 +56,12 @@ class _FakeEngineManager implements LocalDreamEngineManager {
 
   @override
   Future<String?> nativeLibDir() async => '/unused';
+
+  @override
+  Stream<LocalDreamEngineStatus> get statusStream => const Stream.empty();
+
+  @override
+  void dispose() {}
 }
 
 void main() {
@@ -163,7 +168,6 @@ void main() {
     final b = backend();
     expect(b.id, 'local_dream_embedded');
     expect(b.supports(ImageModelBackendType.localDreamEmbedded), isTrue);
-    expect(b.supports(ImageModelBackendType.localSd), isFalse);
   });
 
   test('validate：引擎未打包 → 放置引导文案', () async {

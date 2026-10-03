@@ -320,23 +320,29 @@ class ContextCompactor {
   /// 配对保护：若切点落在 assistant(toolCalls) 与其 tool 结果之间，回退。
   ///
   /// [splitIndex] 原始候选切点（messages[splitIndex] 是保留段的第一条）。
-  /// 若 messages[splitIndex-1] 是 assistant 且带 toolCalls，
-  /// 且 messages[splitIndex] 是 tool（其 toolCallId 属于前一个 assistant），
-  /// 则把切点回退到 splitIndex-1（把 assistant 也纳入保留段，配对完整）。
-  /// 递归向前检查，直到切点安全或顶到 system。
+  /// 保留段首条若是 tool 消息，其声明 assistant 必须一并保留，否则消息
+  /// 序列含无主 tool 结果，OpenAI 兼容网关直接 400。
+  /// 逐条向前回退：前一条恰是拥有该 toolCallId 的 assistant 时纳入后
+  /// 复查；前一条是 tool 消息（切点落在同一 assistant 的第 2..N 条结果
+  /// 之间）或非归属 assistant 时继续回退，直到保留段首条非 tool。
+  /// 多回退一条是安全方向（多保留不会 400），提前 break 才会留下孤儿。
   int _protectToolPairing(List<ChatMessage> messages, int splitIndex) {
     int split = splitIndex;
     while (split > 1 && split < messages.length) {
-      final prev = messages[split - 1];
       final curr = messages[split];
+      // 保留段首条不是 tool 消息：assistant 在其 tool 结果之前，
+      // 无孤立结果的可能，切点安全
+      if (curr.role != 'tool') break;
+      final prev = messages[split - 1];
       if (prev.role == 'assistant' &&
-          (prev.toolCalls?.isNotEmpty ?? false) &&
-          curr.role == 'tool' &&
           (prev.toolCalls?.any((t) => t.id == curr.toolCallId) ?? false)) {
+        // 纳入归属 assistant 后复查：该 assistant 自身是否也应保留
         split = split - 1;
         continue;
       }
-      break;
+      // prev 是同 assistant 的其它 tool 结果（切点落在多条结果之间）
+      // 或非归属消息：继续向前回退寻找 curr 的归属 assistant
+      split = split - 1;
     }
     return split;
   }

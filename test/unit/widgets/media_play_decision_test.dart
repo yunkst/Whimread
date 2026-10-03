@@ -1,8 +1,7 @@
-/// MediaView 媒体播放决策单元测试
+/// MediaView 可见性决策单元测试
 ///
-/// 覆盖两个纯函数（离屏 pause 行为的大脑，零依赖、可单测）：
-/// - [mediaPlayHysteresis]：可见性双阈值迟滞（0.1/0.5），防 fling 抖动
-/// - [mediaVideoPlayCommand]：shouldPlay ↔ isPlaying → play/pause/none，防重复调用
+/// 覆盖纯函数 [mediaPlayHysteresis]：可见性双阈值迟滞（0.1/0.5），
+/// 防 fling 抖动。零依赖、可单测。
 ///
 /// 运行：
 ///   cd novel_app
@@ -148,67 +147,6 @@ void main() {
           current,
           expected,
           reason: 'fraction=$fraction 后状态应为 $expected',
-        );
-      }
-    });
-  });
-
-  // ===========================================================================
-  // mediaVideoPlayCommand：shouldPlay ↔ isPlaying → 指令
-  // ===========================================================================
-  group('mediaVideoPlayCommand - 状态转换', () {
-    test('shouldPlay=true 且未在播放 → play', () {
-      expect(
-        mediaVideoPlayCommand(shouldPlay: true, isPlaying: false),
-        VideoPlayCommand.play,
-      );
-    });
-
-    test('shouldPlay=false 且正在播放 → pause', () {
-      expect(
-        mediaVideoPlayCommand(shouldPlay: false, isPlaying: true),
-        VideoPlayCommand.pause,
-      );
-    });
-  });
-
-  group('mediaVideoPlayCommand - 防重复调用（核心契约）', () {
-    test('shouldPlay=true 且已在播放 → none（不重复 play）', () {
-      // didUpdateWidget 多次触发时，不应反复调用 controller.play()
-      expect(
-        mediaVideoPlayCommand(shouldPlay: true, isPlaying: true),
-        VideoPlayCommand.none,
-        reason: '状态已一致，避免重复 play 抖动',
-      );
-    });
-
-    test('shouldPlay=false 且已暂停 → none（不重复 pause）', () {
-      expect(
-        mediaVideoPlayCommand(shouldPlay: false, isPlaying: false),
-        VideoPlayCommand.none,
-        reason: '离屏后多次回调不应反复 pause',
-      );
-    });
-  });
-
-  group('mediaVideoPlayCommand - 离屏 pause 行为序列', () {
-    test('模拟"可见播放 → 滚出 → 回滚"的指令序列', () {
-      // isPlaying 初始 false，可见后 play，播放中滚出 pause，回滚再 play
-      final steps = <(bool shouldPlay, bool isPlaying, VideoPlayCommand cmd)>[
-        (true, false, VideoPlayCommand.play), // 进入可见 → 播放
-        (true, true, VideoPlayCommand.none), // 播放中，状态稳定
-        (false, true, VideoPlayCommand.pause), // 滚出视野 → 离屏 pause
-        (false, false, VideoPlayCommand.none), // 已暂停，不再重复
-        (true, false, VideoPlayCommand.play), // 回滚入视野 → 继续播放
-      ];
-      for (final (shouldPlay, isPlaying, expected) in steps) {
-        expect(
-          mediaVideoPlayCommand(
-            shouldPlay: shouldPlay,
-            isPlaying: isPlaying,
-          ),
-          expected,
-          reason: 'shouldPlay=$shouldPlay isPlaying=$isPlaying',
         );
       }
     });

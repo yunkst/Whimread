@@ -4,10 +4,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'prompt_tag_management_screen.dart';
 import 'agent_memory_management_screen.dart';
 import 'image_model_management_screen.dart';
-import 'local_dream_engine_screen.dart';
 import 'feedback_submit_screen.dart';
 import 'log_viewer_screen.dart';
 import 'managed_model_picker_screen.dart';
+import '../widgets/common/beta_tag.dart';
 import '../widgets/common/library_app_bar.dart';
 import 'preload_queue_debug_screen.dart';
 import '../services/app_update_service.dart';
@@ -234,7 +234,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       children: [
         _buildPromptTagTile(appColors),
         _buildImageModelTile(appColors),
-        _buildLocalDreamTile(appColors),
         _buildAgentMemoryTile(appColors),
         if (kHasBundledBackend) _buildManagedModelTile(appColors),
         _buildStarQuotaTile(appColors),
@@ -328,30 +327,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: const [
           Text('生图模型管理'),
           SizedBox(width: 6),
-          _BetaTag(),
+          BetaTag(),
         ],
       ),
-      subtitle: const Text('导入本地 SD 模型供 Agent 出图（Beta）'),
+      subtitle: const Text('下载/导入模型包供 Agent 出图（Beta）'),
       trailing: const Icon(Icons.arrow_forward_ios),
       onTap: () => _pushScreen(const ImageModelManagementScreen()),
-    );
-  }
-
-  /// 「Local Dream 引擎」设置项（Beta）
-  Widget _buildLocalDreamTile(AppColors appColors) {
-    return ListTile(
-      leading: Icon(Icons.memory_outlined, color: appColors.agentAccent),
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: const [
-          Text('Local Dream 引擎'),
-          SizedBox(width: 6),
-          _BetaTag(),
-        ],
-      ),
-      subtitle: const Text('本机 NPU 生图引擎自检与测试（骁龙）'),
-      trailing: const Icon(Icons.arrow_forward_ios),
-      onTap: () => _pushScreen(const LocalDreamEngineScreen()),
     );
   }
 
@@ -844,32 +825,6 @@ class _SettingsSection extends StatelessWidget {
           ),
           ...body,
         ],
-      ),
-    );
-  }
-}
-
-/// 功能 Beta 标签
-class _BetaTag extends StatelessWidget {
-  const _BetaTag();
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        color: colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        'Beta',
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
-          color: colorScheme.onSecondaryContainer,
-        ),
       ),
     );
   }

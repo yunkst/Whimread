@@ -5,31 +5,28 @@ library;
 
 import 'dart:io';
 
-/// 媒体类型
+/// 媒体类型（仅图片）
 ///
-/// `dbName`/`ext` 与 `fromDbName`/`fromExt` 集中接管 kind↔字符串映射，
-/// 避免 `'video'/'image'/'png'/'mp4'` 字面量散落在 proxy/store/widget 各处。
+/// 视频（云端图生视频时代）已下线：解析历史 `'video'`/`'mp4'` 行时统一
+/// 归为 image——那些文件已无法被任何端侧功能生成，缓存管理页仍可删除。
 enum MediaKind {
-  image,
-  video;
+  image;
 
   /// 数据库 kind 列名
-  String get dbName => this == MediaKind.video ? 'video' : 'image';
+  String get dbName => 'image';
 
   /// 本地文件扩展名（不含点）
-  String get ext => this == MediaKind.video ? 'mp4' : 'png';
+  String get ext => 'png';
 
-  static MediaKind fromDbName(String name) =>
-      name == 'video' ? MediaKind.video : MediaKind.image;
+  static MediaKind fromDbName(String name) => MediaKind.image;
 
-  static MediaKind fromExt(String ext) =>
-      ext == 'mp4' ? MediaKind.video : MediaKind.image;
+  static MediaKind fromExt(String ext) => MediaKind.image;
 }
 
 /// 媒体来源 — localUpload 不回源。
 ///
-/// 历史上的 text2img/imageToVideo 回源端点已随 ComfyUI 后端下线，
-/// v51 迁移把存量记录归一为 local_upload，枚举随之瘦身。
+/// 历史上曾有云端回源来源（text2img/imageToVideo），端点下线后 v51 迁移
+/// 把存量记录归一为 local_upload，枚举随之只剩一项。
 enum MediaSource {
   /// 用户上传：仅本地，不回源，不可被"清空可回源缓存"批量删除
   localUpload;

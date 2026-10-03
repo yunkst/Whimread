@@ -1,12 +1,8 @@
 /// 文生图子执行器 — list_text2img_models / create_images
 ///
-/// 依赖 ImageModelRepository（本地模型元数据）、ImageGenerationBackend
-/// （local_sd 端侧引擎 / local_dream 远程设备）、MediaProxy（媒体登记由
-/// 后端完成）、CharacterRepository（create_images 指定 character 时
-/// 自动入角色图集并拼接角色提示词）。
-///
-/// 注：图生视频（create_image_to_video）依赖的 ComfyUI 后端已随
-/// "生图完全客户端化" 移除，该工具已从 AgentTools 注销。
+/// 依赖 ImageModelRepository（本地模型元数据）、ImageGenerationService
+/// （生图统一门面）、CharacterRepository（create_images 指定 character
+/// 时自动入角色图集）。
 library;
 
 import 'dart:convert';
@@ -20,10 +16,7 @@ import '../../../core/providers/image_model_providers.dart';
 import '../../../models/character.dart';
 import '../../../models/image_model.dart';
 import '../../logger_service.dart';
-import '../../image_generation/image_generation_backend.dart';
 import '../../image_generation/image_generation_providers.dart';
-import '../../image_generation/image_model_picker.dart';
-import '../../image_generation/local_sd_backend.dart';
 import '../agent_scenario.dart' show AgentScenarioContext;
 import '../tool_arg_parser.dart' show ToolArgParser;
 import '../tool_executor_helpers.dart';
@@ -111,16 +104,6 @@ class MediaExecutor with ToolExecutorHelpers {
     if (aspectErr != null) return aspectErr;
 
     final count = (countRaw ?? 1).clamp(1, 4);
-    // 比例预设合法性校验（Local Dream 同款快捷项 + 任意 w:h）
-    if (aspectRatio != null && aspectRatio.isNotEmpty) {
-      final match = RegExp(r'^\s*\d{1,4}\s*:\s*\d{1,4}\s*$').hasMatch(aspectRatio);
-      if (!match) {
-        return jsonEncode(guidanceError(
-          'invalid_aspect_ratio',
-          'aspect_ratio 需为 "宽:高" 格式的比例（如 "1:1"、"3:4"、"16:9"）。',
-        ));
-      }
-    }
 
     // ---------- 角色图集关联（可选） ----------
     final characterRepo = ref.read(characterRepositoryProvider);
@@ -141,77 +124,47 @@ class MediaExecutor with ToolExecutorHelpers {
       character = resolved;
     }
 
-    // ---------- 选模型（共享选取器：显式名 → 默认 → 第一个启用） ----------
-    final repo = ref.read(imageModelRepositoryProvider);
-    final pick = await pickImageModel(repo, modelName: modelName);
-    if (pick.errorJson != null) return jsonEncode(pick.errorJson);
-    final model = pick.model!;
-
-    // ---------- 生图 ----------
-    final backend = ref.read(imageGenerationBackendByTypeProvider(model.backendType));
-    // 负向提示词来自模型预设（用户配置），LLM 不传
-    final negativePrompt =
-        model.negativePrompt.isEmpty ? null : model.negativePrompt;
-    try {
-      final result = await backend.submit(
-        ImageGenerationRequest(
-          model: model,
+    // ---------- 生图（统一门面：选模型 + 构造请求 + 错误码映射） ----------
+    final outcome = await ref.read(imageGenerationServiceProvider).generate(
+          modelName: modelName,
           prompt: prompt,
-          negativePrompt: negativePrompt,
           count: count,
-          aspectRatio: (aspectRatio == null || aspectRatio.isEmpty)
-              ? null
-              : aspectRatio,
-        ),
-      );
+          aspectRatio: aspectRatio,
+        );
+    if (!outcome.ok) return jsonEncode(outcome.errorJson!);
+    final result = outcome.result!;
 
-      // ---------- 角色图集入集 ----------
-      if (character != null) {
-        for (final mediaId in result.mediaIds) {
-          await characterRepo.addCharacterImage(character.id!, mediaId);
-        }
-        ref.invalidate(characterGalleryProvider(character.id!));
+    // ---------- 角色图集入集 ----------
+    if (character != null) {
+      for (final mediaId in result.mediaIds) {
+        await characterRepo.addCharacterImage(character.id!, mediaId);
       }
-
-      LoggerService.instance.i(
-          '提交文生图任务: count=$count, model=${model.name}, '
-          'character=${character?.name}, '
-          'hasNegativePrompt=${negativePrompt != null}',
-          category: LogCategory.ai,
-          tags: ['agent', 'tool', 'create_images']);
-
-      return jsonEncode({
-        'success': true,
-        'message': character != null
-            ? '已生成 ${result.mediaIds.length} 张图片，'
-                '并已加入角色「${character.name}」的图集。'
-            : '已生成 $count 张图片，画廊将自动展示。',
-        'images': result.mediaIds
-            .map((mediaId) => {
-                  'mediaId': mediaId,
-                  'prompt': prompt,
-                  'modelName': model.name,
-                  if (negativePrompt != null) 'negativePrompt': negativePrompt,
-                  if (character != null) 'character': character.name,
-                  if (character != null) 'addedToGallery': true,
-                })
-            .toList(),
-        'count': result.mediaIds.length,
-      });
-    } on LocalEngineNotReadyException catch (e) {
-      return jsonEncode({
-        'error': 'engine_not_ready',
-        'message': e.message,
-      });
-    } catch (e) {
-      LoggerService.instance.e('生图失败: $e',
-          category: LogCategory.ai,
-          tags: ['agent', 'tool', 'create_images', 'error']);
-      return jsonEncode({
-        'error': 'generation_failed',
-        'message': '生图失败：$e',
-      });
+      ref.invalidate(characterGalleryProvider(character.id!));
     }
+
+    LoggerService.instance.i(
+        '提交文生图任务: count=$count, model=${result.modelName}, '
+        'character=${character?.name}',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'create_images']);
+
+    return jsonEncode({
+      'success': true,
+      'message': character != null
+          ? '已生成 ${result.mediaIds.length} 张图片，'
+              '并已加入角色「${character.name}」的图集。'
+          : '已生成 ${result.mediaIds.length} 张图片，画廊将自动展示。',
+      'images': result.mediaIds
+          .map((mediaId) => {
+                'mediaId': mediaId,
+                'prompt': prompt,
+                'modelName': result.modelName,
+                if (character != null) 'character': character.name,
+                if (character != null) 'addedToGallery': true,
+              })
+          .toList(),
+      'count': result.mediaIds.length,
+    });
   }
 
   /// 由模型的描述 + 标签拼出 promptSkill（提示词写作建议）

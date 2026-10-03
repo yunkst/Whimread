@@ -1,8 +1,8 @@
 /// parseMediaGallery 解析器单元测试
 ///
 /// 验证 create_images / create_image_to_video 工具结果 JSON 的解析逻辑
-/// （纯函数，无依赖）。覆盖：null、非法 JSON、success=false、images/videos
-/// 缺失/空、元素缺关键字段、完整有效数据、mediaId 兼容旧 taskId 字段。
+/// （纯函数，无依赖）。覆盖：null、非法 JSON、success=false、images
+/// 缺失/空、元素缺关键字段、完整有效数据。
 ///
 /// 运行：
 ///   cd novel_app
@@ -52,10 +52,9 @@ void main() {
       expect(parseMediaGallery(json), isNull);
     });
 
-    test('success=true 但无 images/videos 返回 null', () {
+    test('success=true 但无 images 返回 null', () {
       expect(parseMediaGallery('{"success":true}'), isNull);
       expect(parseMediaGallery('{"success":true,"images":[]}'), isNull);
-      expect(parseMediaGallery('{"success":true,"videos":[]}'), isNull);
     });
 
     test('images 不是 List 返回 null', () {
@@ -67,11 +66,11 @@ void main() {
   });
 
   group('parseMediaGallery - images 元素字段校验', () {
-    test('图片元素缺 mediaId（且无旧 taskId 兜底）时被跳过', () {
+    test('图片元素缺 mediaId 时被跳过', () {
       final json = jsonEncode({
         'success': true,
         'images': [
-          {'prompt': 'no id'}, // 无 mediaId 也无 taskId
+          {'prompt': 'no id'}, // 无 mediaId
         ],
       });
       expect(parseMediaGallery(json), isNull, reason: '全部元素无效时应返回 null');
@@ -94,63 +93,6 @@ void main() {
       expect(data.items[1].mediaId, 'also_valid');
     });
 
-    test('图片 mediaId 兼容旧 taskId 字段（历史会话 hydrate）', () {
-      final json = jsonEncode({
-        'success': true,
-        'images': [
-          {'taskId': 'legacy-task-id'},
-        ],
-      });
-      final data = parseMediaGallery(json);
-      expect(data, isNotNull);
-      expect(data!.items.first.mediaId, 'legacy-task-id');
-    });
-  });
-
-  group('parseMediaGallery - videos 数组（图生视频）', () {
-    test('videos 元素缺 mediaId 被跳过', () {
-      final json = jsonEncode({
-        'success': true,
-        'videos': [
-          {'prompt': 'no id'},
-        ],
-      });
-      expect(parseMediaGallery(json), isNull);
-    });
-
-    test('videos 正常解析且 kind=video', () {
-      final json = jsonEncode({
-        'success': true,
-        'videos': [
-          {'mediaId': 'v1', 'prompt': 'zoom in'},
-        ],
-      });
-      final data = parseMediaGallery(json);
-      expect(data, isNotNull);
-      expect(data!.items.length, 1);
-      expect(data.items.first.mediaId, 'v1');
-      expect(data.items.first.kind, MediaKind.video);
-      expect(data.items.first.prompt, 'zoom in');
-    });
-
-    test('images + videos 同时存在时全部保留（先图后视频）', () {
-      final json = jsonEncode({
-        'success': true,
-        'images': [
-          {'mediaId': 'img1'},
-        ],
-        'videos': [
-          {'mediaId': 'vid1'},
-        ],
-      });
-      final data = parseMediaGallery(json);
-      expect(data, isNotNull);
-      expect(data!.items.length, 2);
-      expect(data.items[0].mediaId, 'img1');
-      expect(data.items[0].kind, MediaKind.image);
-      expect(data.items[1].mediaId, 'vid1');
-      expect(data.items[1].kind, MediaKind.video);
-    });
   });
 
   group('parseMediaGallery - 完整有效数据', () {

@@ -565,6 +565,11 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
         'error': 'llm_call_failed',
         'message': '调用 LLM 失败：$e',
       });
+    } finally {
+      // 每次 create_chapter / rewrite_chapter 都会新建 provider，
+      // 不释放会累积传输层（HTTP 连接池/客户端状态）实例，
+      // 与 novel_agent_service / subagent_runner 的释放约定保持一致
+      llm.dispose();
     }
   }
 

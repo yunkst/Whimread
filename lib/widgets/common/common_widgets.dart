@@ -3,4 +3,5 @@
 // 提供项目中常用的可复用UI组件。
 
 // 对话框组件
+export 'beta_tag.dart';
 export 'confirm_dialog.dart';

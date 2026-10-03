@@ -241,7 +241,7 @@ void main() {
   });
 
   group('工具面', () {
-    test('6 个回合工具（含异步生图/状态回写/游戏内建卡）', () {
+    test('6 个回合工具（含生图/状态回写/游戏内建卡）', () {
       final names =
           _scenario().tools.map((t) => t['function']['name'] as String).toSet();
       expect(names, {
@@ -271,7 +271,7 @@ void main() {
       expect(prompt, contains('create_scene_image'));
       expect(prompt, contains('update_game_state'));
       expect(prompt, contains('create_character'), reason: '游戏内建新角色指引');
-      expect(prompt, contains('异步'));
+      expect(prompt, contains('同步'));
       expect(prompt, contains('重大且持久'), reason: '状态回写的触发阈值');
       // 设定数据不得出现在静态提示词（保证前缀稳定可缓存）
       expect(prompt, isNot(contains('修仙世界，灵气衰竭')));

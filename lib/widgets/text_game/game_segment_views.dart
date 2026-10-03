@@ -8,10 +8,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/providers/text_game_providers.dart';
 import '../../screens/text_game/game_transcript_projector.dart';
-import '../../services/text_game/text_game_image_service.dart'
-    show TextGameImageTaskStatus;
 import '../character/avatar_media.dart';
 import '../media/media_view.dart';
 
@@ -150,10 +147,8 @@ class GamePlayerInputView extends StatelessWidget {
 
 /// 场景插图段
 ///
-/// 渲染优先级：
-/// 1. 本次运行的任务态（TextGameImageService 按 toolCallId 查）
-/// 2. 消息链里的 tool result（重启后 hydrate 恢复）
-/// 未完成 → 占位转圈；失败 → 错误文案；无媒体（任务丢失）→ 生成中断占位。
+/// 渲染直接读消息链里的 tool result（生图同步完成，结果即最终态）；
+/// 未完成 → 占位转圈；失败 → 错误文案。
 class GameSceneImageView extends ConsumerWidget {
   final GameSceneImage segment;
 
@@ -161,20 +156,9 @@ class GameSceneImageView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 本次运行的任务态优先
-    final task =
-        ref.watch(textGameImageServiceProvider).taskByToolCallId(segment.toolCallId);
-
     Widget child;
-    if (task != null && task.status == TextGameImageTaskStatus.completed) {
-      child = _mediaList(context, task.mediaIds);
-    } else if (task != null && task.status == TextGameImageTaskStatus.failed) {
-      child = _statusBox(context, Icons.image_not_supported_outlined,
-          task.error ?? '插图生成失败');
-    } else if (task != null) {
+    if (!segment.toolCompleted) {
       child = _statusBox(context, null, '插图生成中…', spinner: true);
-    } else if (!segment.toolCompleted) {
-      child = _statusBox(context, null, '插图提交中…', spinner: true);
     } else {
       final mediaIds = parseSceneImageMediaIds(segment.toolResultJson);
       if (mediaIds.isNotEmpty) {

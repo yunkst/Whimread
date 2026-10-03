@@ -639,6 +639,10 @@ class AgentLoop {
             RetrySignals.instance.clear();
             return;
           }
+          // 重发前修复消息尾部：本轮若有工具执行抛异常，messages 会残留
+          // assistant(tool_calls) 与其部分 tool 结果的不配对状态，直接重发
+          // 会被网关以 400 拒绝（且 400 归类为可重试，重试预算全部浪费）。
+          _repairUnpairedToolResults(messages);
           continue; // 重试本轮，不递增 round
         }
 
@@ -682,6 +686,60 @@ class AgentLoop {
         category: LogCategory.ai, tags: ['agent', 'loop_end', _scenario.id]);
   }
 
+  /// 修复「assistant(tool_calls) 缺配套 tool 结果」的消息尾部。
+  ///
+  /// 回合级重试时若本轮有工具执行抛异常（含 dispatch_subagent 的
+  /// Future.wait 中途失败），messages 尾部会残留
+  /// `assistant(tool_calls=[A,B]) + tool(A)` 的不配对状态——OpenAI 兼容
+  /// 网关要求每个 toolCallId 都有配套 tool 结果，直接重发必 400。
+  /// 这里为缺失结果的每个 toolCallId 补一条显式 error 的 tool 消息：
+  /// 已成功工具的结果保留（副作用已落库，LLM 需要看到其结果），
+  /// 失败的显式告知（而非静默丢上下文）。重试后再次调用为幂等 no-op。
+  void _repairUnpairedToolResults(List<ChatMessage> messages) {
+    // 定位最后一条 assistant 消息：无 toolCalls（纯文本轮或尚未注入
+    // 本轮 tool_calls）说明没有待配对的工具声明，无需修复。
+    var assistantIdx = -1;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role == 'assistant') {
+        assistantIdx = i;
+        break;
+      }
+    }
+    if (assistantIdx < 0) return;
+    final toolCalls = messages[assistantIdx].toolCalls;
+    if (toolCalls == null || toolCalls.isEmpty) return;
+
+    // 收集该 assistant 之后已应答的 toolCallId
+    final answered = <String>{};
+    for (var i = assistantIdx + 1; i < messages.length; i++) {
+      final id = messages[i].toolCallId;
+      if (messages[i].role == 'tool' && id != null) answered.add(id);
+    }
+
+    var repaired = 0;
+    for (final call in toolCalls) {
+      if (answered.contains(call.id)) continue;
+      messages.add(ChatMessage(
+        role: 'tool',
+        toolCallId: call.id,
+        content: jsonEncode(<String, dynamic>{
+          'error': 'tool_execution_aborted',
+          'message': '工具 ${call.name} 执行被异常中断，结果未产生或未送达。'
+              '如需该信息请在重试后重新调用。',
+        }),
+      ));
+      repaired++;
+    }
+    if (repaired > 0) {
+      LoggerService.instance.w(
+        '回合重试前修复 tool 配对: 补齐 $repaired 条缺失的 tool 结果 '
+        '(scenario=${_scenario.id})',
+        category: LogCategory.ai,
+        tags: ['agent', 'loop', 'tool_pairing_repair', _scenario.id],
+      );
+    }
+  }
+
   /// 执行单个工具调用（emit 事件 + 格式化结果 + 返回 tool 消息）。
   ///
   /// 任务 7：从原「第 5 步 for 循环体」抽出，使普通串行与 dispatch_subagent 并行
@@ -710,22 +768,44 @@ class AgentLoop {
     var lastEmittedChars = 0;
     var firstProgressEmitted = false;
 
-    // 执行工具（委托给场景），流式进度按 100 字节流上报
-    final rawResult = await _scenario.executeTool(
-      call.name,
-      call.arguments,
-      onProgress: (n) {
-        if (!firstProgressEmitted) {
-          firstProgressEmitted = true;
-          lastEmittedChars = n;
-          emit(ToolProgressEvent(call.id, n));
-        } else if (n - lastEmittedChars >= progressThreshold) {
-          lastEmittedChars = n;
-          emit(ToolProgressEvent(call.id, n));
-        }
-      },
-      toolCallId: call.id, // 任务 7 透传父 toolCallId，供 dispatch_subagent 用
-    );
+    // 执行工具（委托给场景），流式进度按 100 字节流上报。
+    //
+    // 兜底约定：场景内部异常统一转 error JSON 交给 LLM 自行纠正，
+    // 而非冒泡到回合级 catch——后者一旦被判瞬态就整轮重试，并会中断
+    // 已成功工具的结果交付（触发 _repairUnpairedToolResults 补偿）。
+    // ToolExecutor 路径已有内部兜底，这里对直接实现 executeTool 的
+    // 场景补齐同一约定，使「场景只需写业务」成为循环层强约束。
+    String rawResult;
+    try {
+      rawResult = await _scenario.executeTool(
+        call.name,
+        call.arguments,
+        onProgress: (n) {
+          if (!firstProgressEmitted) {
+            firstProgressEmitted = true;
+            lastEmittedChars = n;
+            emit(ToolProgressEvent(call.id, n));
+          } else if (n - lastEmittedChars >= progressThreshold) {
+            lastEmittedChars = n;
+            emit(ToolProgressEvent(call.id, n));
+          }
+        },
+        toolCallId: call.id, // 任务 7 透传父 toolCallId，供 dispatch_subagent 用
+      );
+    } catch (e, stack) {
+      // 取消语义不走兜底：保持向上传播由回合级取消检查处理
+      if (cancellationToken?.isCancelled == true) rethrow;
+      LoggerService.instance.e(
+        '工具执行异常转 error JSON: ${call.name}, $e',
+        stackTrace: stack.toString(),
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', call.name, 'execution_failed', _scenario.id],
+      );
+      rawResult = jsonEncode(<String, dynamic>{
+        'error': 'execution_failed',
+        'message': '工具 ${call.name} 执行异常: $e',
+      });
+    }
 
     // 工具结果格式化：截断逻辑委托给 ToolResultFormatter。
     // llm = 合法 JSON（可能截断），给 LLM；full = 完整版，给 DB。

@@ -454,7 +454,13 @@ class LineSplitter extends StreamTransformerBase<String, String> {
   Stream<String> bind(Stream<String> stream) {
     final controller = StreamController<String>();
     final buffer = StringBuffer();
-    stream.listen(
+    StreamSubscription<String>? subscription;
+    controller.onCancel = () {
+      // 下游取消（用户中断生成 / await for 提前 break）时同步取消上游订阅，
+      // 否则 HTTP 连接会继续读取完整响应——白耗流量并占用连接池
+      return subscription?.cancel();
+    };
+    subscription = stream.listen(
       (data) {
         buffer.write(data);
         final s = buffer.toString();

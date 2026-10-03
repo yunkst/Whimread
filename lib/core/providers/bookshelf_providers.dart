@@ -185,12 +185,15 @@ Future<Map<String, CacheStats>> shelfCacheStats(Ref ref, Bookshelf shelf) async 
   final novels = await ref.watch(shelfNovelsProvider(shelf).future);
   final chapterRepo = ref.watch(chapterRepositoryProvider);
 
+  // 单条 GROUP BY 批量取计数，替代逐本 2 次 COUNT 的 N+1 模式
+  final counts = await chapterRepo
+      .getChapterCountsForNovels(novels.map((n) => n.url).toList());
+
   final stats = <String, CacheStats>{};
   for (final novel in novels) {
-    final cached = await chapterRepo.getCachedChaptersCount(novel.url);
-    final total = await chapterRepo.getTotalChaptersCount(novel.url);
-    if (total > 0) {
-      stats[novel.url] = CacheStats(cached: cached, total: total);
+    final count = counts[novel.url];
+    if (count != null && count.total > 0) {
+      stats[novel.url] = CacheStats(cached: count.cached, total: count.total);
     }
   }
   return stats;

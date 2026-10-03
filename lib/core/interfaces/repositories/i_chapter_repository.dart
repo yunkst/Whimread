@@ -83,6 +83,14 @@ abstract class IChapterRepository {
   /// 返回 novel_chapters 表中的章节总数
   Future<int> getTotalChaptersCount(String novelUrl);
 
+  /// 批量获取多本小说的缓存/总章节数（单条 GROUP BY 查询）
+  ///
+  /// 供书架页统计使用，替代逐本 2 次 COUNT 的 N+1 模式。
+  /// 结果中缺失的 url 表示该小说无章节记录。
+  Future<Map<String, ({int cached, int total})>> getChapterCountsForNovels(
+    List<String> novelUrls,
+  );
+
   // ========== 章节内容搜索 ==========
 
   /// 搜索缓存章节内容

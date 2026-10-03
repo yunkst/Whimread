@@ -1,10 +1,10 @@
-/// 媒体画廊卡片 — 渲染 create_images / create_image_to_video 工具结果
+/// 媒体画廊卡片 — 渲染 create_images 工具结果
 ///
 /// 替代旧 image_gallery_card.dart。区别：
 /// - 工具结果统一用 mediaId（不再有 imageId+taskId 双字段）
 /// - 单张渲染交给 MediaView（状态机/轮询/全屏缩放都在那里），本卡片只负责
 ///   "解析 + 排版（单条直出 / 多条 PageView + 页码）"
-/// - 同时认 images 数组（图，create_images）和 videos 数组（视频，create_image_to_video）
+/// - 只认 create_images 结果的 images 数组
 library;
 
 import 'dart:convert';
@@ -33,9 +33,7 @@ class MediaGalleryData {
   const MediaGalleryData({required this.items});
 }
 
-/// 解析工具结果 JSON。
-/// - create_images 返回 images 数组（每项含 mediaId；兼容旧格式的 taskId 字段）
-/// - create_image_to_video 返回 videos 数组（每项含 mediaId）
+/// 解析工具结果 JSON（create_images 的 images 数组，每项含 mediaId）。
 /// 成功且至少一项有效时返回 MediaGalleryData，否则 null。
 MediaGalleryData? parseMediaGallery(String? toolResultJson) {
   if (toolResultJson == null) return null;
@@ -48,26 +46,11 @@ MediaGalleryData? parseMediaGallery(String? toolResultJson) {
     if (rawImages is List) {
       for (final m in rawImages) {
         if (m is! Map) continue;
-        // mediaId 优先；回退 taskId 兼容历史会话 hydrate 的旧结果
-        final mediaId = (m['mediaId'] ?? m['taskId']) as String?;
-        if (mediaId == null) continue;
-        items.add(MediaGalleryItem(
-          mediaId: mediaId,
-          kind: MediaKind.image,
-          prompt: (m['prompt'] as String?) ?? '',
-        ));
-      }
-    }
-
-    final rawVideos = json['videos'];
-    if (rawVideos is List) {
-      for (final m in rawVideos) {
-        if (m is! Map) continue;
         final mediaId = m['mediaId'] as String?;
         if (mediaId == null) continue;
         items.add(MediaGalleryItem(
           mediaId: mediaId,
-          kind: MediaKind.video,
+          kind: MediaKind.image,
           prompt: (m['prompt'] as String?) ?? '',
         ));
       }
@@ -146,7 +129,7 @@ class _MultiGalleryState extends State<_MultiGallery> {
 /// 高度塌缩、滚动手势失灵。
 ///
 /// 因此本槽位必须为 [MediaView] 提供 **bounded 父约束**：1:1 方形适合
-/// AI 生成的小说插图（ComfyUI 默认方形输出）。如未来需要其他比例，
+/// AI 生成的小说插图（端侧引擎默认方形输出）。如未来需要其他比例，
 /// 把 [AspectRatio] 换成 [ConstrainedBox(maxHeight: ...)] 即可。
 class _GallerySlot extends StatelessWidget {
   final MediaGalleryItem item;
@@ -206,14 +189,13 @@ class _FullScreenGalleryState extends State<_FullScreenGallery> {
   @override
   Widget build(BuildContext context) {
     final total = widget.items.length;
-    final isVideo = widget.items[_index].kind == MediaKind.video;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black.withValues(alpha: 0.5),
         foregroundColor: Colors.white,
         title: Text(
-          total > 1 ? '${_index + 1} / $total' : (isVideo ? '视频' : '图片'),
+          total > 1 ? '${_index + 1} / $total' : '图片',
           style: AppTypography.metaItalic.copyWith(
             fontSize: 14,
             color: context.appColors.galleryOnDark,

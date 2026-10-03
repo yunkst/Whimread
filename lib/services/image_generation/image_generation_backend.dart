@@ -1,13 +1,25 @@
 /// 生图后端抽象层
 ///
-/// 当前唯一实现是 [LocalSdCppBackend]（端侧 sd.cpp 推理）。抽象层的意义：
-/// 未来接入 NPU（qnn）等新后端时，MediaExecutor 与 UI 无需改动——
+/// 唯一实现是 [LocalDreamEmbeddedBackend]（本机嵌入式 Local Dream 引擎）。
+/// 抽象层的意义：未来接入新后端时，MediaExecutor 与 UI 无需改动——
 /// 后端负责完成"提交"和"让图最终能被 resolve 出来"的全过程，返回的
 /// mediaId 已经是 MediaProxy 已登记的句柄（本地生成的 bytes 直接写入
 /// MediaStore，UI 一次 resolve 即可见）。
 library;
 
 import '../../models/image_model.dart';
+
+/// 引擎/模型环境不可用异常（未打包、缺 QNN 运行库、启动超时、进程退出等）。
+///
+/// Agent 侧（media_executor）捕获后映射为结构化 `engine_not_ready`
+/// 错误码，与 generation_failed（生成过程中的失败）区分。
+class LocalEngineNotReadyException implements Exception {
+  final String message;
+  const LocalEngineNotReadyException(this.message);
+
+  @override
+  String toString() => message;
+}
 
 /// 生图请求
 class ImageGenerationRequest {

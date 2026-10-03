@@ -1,7 +1,7 @@
 /// 启动资源引导页。
 ///
 /// 首次安装 / 资源版本更新时展示：校验本地缓存 → 缺失资源逐项下载
-/// （字体 / OCR 模型 / 文生图引擎）。本页是纯 UI——进入/退出的时机由
+/// （字体 / OCR 模型 / QNN 运行库）。本页是纯 UI——进入/退出的时机由
 /// main.dart 的 `_ResourceGate` 根据 `resourceBootstrapNotifierProvider`
 /// 状态决定（避免反向 import main.dart 的 HomePage）。
 /// - 「跳过」：notifier.skip() 落跳过标记 + 转后台静默补下载，gate 随即
@@ -22,7 +22,7 @@ import '../../services/app_resource_manager.dart';
 String _displayName(String id) => switch (id) {
       ResourceIds.uiFonts => '阅读字体（Noto 宋体/黑体）',
       ResourceIds.ocrModel => 'OCR 识别模型（反爬字体还原）',
-      ResourceIds.sdEngine => '本地文生图引擎',
+      ResourceIds.localDreamQnn => 'QNN 运行库（NPU 文生图加速）',
       _ => id,
     };
 

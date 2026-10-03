@@ -1,14 +1,17 @@
 /// 生图模型管理页
 ///
-/// 职责：
-/// - 列出 image_models 表全部模型（名字 / 后端类型 / 标签 / 大小 / 状态）
-/// - 导入 .gguf 模型文件 → 编辑对话框填名字与特点 → 落库
-/// - 编辑 / 删除 / 启停 / 设为默认
+/// 一页完成生图模型的全部管理：
+/// - 「可下载模型包」：内置目录（与 Local Dream App 同款转换包）按设备
+///   SoC 过滤展示，点下载即建行并开始（进度/失败/续传都在卡片上）
+/// - 「我的模型」：image_models 表全部模型（含目录导入），就绪模型可
+///   编辑 / 设为默认 / 启停 / 删除 / **测试生图**（门面同步链路）
+/// - AppBar：HF / HF Mirror 源切换、从目录导入模型包
 ///
-/// 架构：本 Screen watch [imageModelLifecycleProvider]（含下载事件自动刷新），CRUD 后
-/// ref.invalidate 刷新（与 characterListProvider 同款刷新约定）。
+/// 架构：watch [imageModelLifecycleProvider]（下载事件自动刷新），CRUD 经
+/// [imageModelAdminServiceProvider] 门面（改库 → 刷新的约定只此一份）。
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 
 import 'package:file_picker/file_picker.dart';
@@ -16,27 +19,35 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/interfaces/repositories/i_image_model_repository.dart';
+import '../../core/providers/device_soc_provider.dart';
 import '../../core/providers/image_model_download_providers.dart';
-import '../../core/providers/image_model_providers.dart';
 import '../../models/image_model.dart';
-import '../../services/image_model_import_service.dart';
+import '../../services/image_generation/image_generation_providers.dart';
 import '../../services/local_dream_embedded/model_pack.dart';
 import '../../services/logger_service.dart';
-import '../../utils/format_utils.dart';
 import '../../utils/toast_utils.dart';
 import '../../widgets/common/common_widgets.dart';
-import '../../widgets/empty_states/empty_state_view.dart';
+import 'image_model/dialogs/image_gen_test_sheet.dart';
 import 'image_model/dialogs/image_model_edit_dialog.dart';
-import 'image_model/dialogs/local_dream_model_dialog.dart';
-import 'image_model/local_dream_pack_download_screen.dart';
 
-class ImageModelManagementScreen extends ConsumerWidget {
+class ImageModelManagementScreen extends ConsumerStatefulWidget {
   const ImageModelManagementScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // 生命周期视图：下载/转换事件自动刷新（进度条实时走动）
+  ConsumerState<ImageModelManagementScreen> createState() =>
+      _ImageModelManagementScreenState();
+}
+
+class _ImageModelManagementScreenState
+    extends ConsumerState<ImageModelManagementScreen> {
+  /// 下载源（HuggingFace / HF Mirror；本页内存态，重进恢复默认）
+  String _baseUrl = LocalDreamBaseUrl.huggingface;
+  bool _startingDownload = false;
+
+  @override
+  Widget build(BuildContext context) {
     final modelsAsync = ref.watch(imageModelLifecycleProvider);
+    final soc = ref.watch(deviceSocProvider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -45,39 +56,15 @@ class ImageModelManagementScreen extends ConsumerWidget {
           children: [
             const Text('生图模型管理'),
             const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'Beta',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                  color: Theme.of(context).colorScheme.onSecondaryContainer,
-                ),
-              ),
-            ),
+            const BetaTag(),
           ],
         ),
         actions: [
+          _mirrorMenu(),
           IconButton(
-            onPressed: () => _showPackMenu(context, ref),
-            icon: const Icon(Icons.download_outlined),
-            tooltip: 'Local Dream 模型包（下载/导入）',
-          ),
-          IconButton(
-            onPressed: () => _addRemoteModel(context, ref),
-            icon: const Icon(Icons.phonelink_setup_outlined),
-            tooltip: '添加 Local Dream 设备模型',
-          ),
-          IconButton(
-            onPressed: () => _addModel(context, ref),
-            icon: const Icon(Icons.add),
-            tooltip: '导入本地模型文件',
+            onPressed: () => _importPack(context),
+            icon: const Icon(Icons.folder_open_outlined),
+            tooltip: '从目录导入模型包',
           ),
         ],
       ),
@@ -85,18 +72,7 @@ class ImageModelManagementScreen extends ConsumerWidget {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败：$e')),
         data: (models) {
-          if (models.isEmpty) {
-            return EmptyStateView(
-              icon: Icons.image_outlined,
-              title: '还没有生图模型',
-              subtitle: '导入 .gguf / .safetensors 模型文件，\n'
-                  '或在内置浏览器下载模型自动导入；\n'
-                  'Agent 会根据模型特点自动选型出图。',
-              actionText: '导入第一个模型',
-              onAction: () => _addModel(context, ref),
-            );
-          }
-          // 下载/转换中的排前面（用户正在等的任务），其余按 sort_order
+          // 下载/进行中任务排前面，其余按 sort_order
           final sorted = List<ImageModel>.of(models)
             ..sort((a, b) {
               final aActive = a.status.isActive ? 0 : 1;
@@ -104,13 +80,44 @@ class ImageModelManagementScreen extends ConsumerWidget {
               if (aActive != bActive) return aActive - bActive;
               return a.sortOrder.compareTo(b.sortOrder);
             });
-          return ListView.separated(
+          return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: sorted.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, i) => _ModelCard(
-                model: sorted[i],
-                existingNames: _nameSet(sorted, sorted[i])),
+            children: [
+              _readinessBanner(),
+              _sectionHeader('可下载模型包'),
+              _socHint(soc?.npuSuffix),
+              const SizedBox(height: 6),
+              ...catalogForSoc(soc?.socModel).map(
+                (e) => _CatalogEntryCard(
+                  entry: e,
+                  match: _matchRow(models, e),
+                  onDownload: () => _startDownload(e, soc?.npuSuffix),
+                  starting: _startingDownload,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _sectionHeader('我的模型'),
+              if (sorted.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Text(
+                    '还没有模型。从上方目录下载一个，下载完成后即可测试生图，'
+                    'Agent 也会根据模型特点自动选型出图。',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.6),
+                        ),
+                  ),
+                ),
+              ...sorted.map((m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _ModelCard(
+                        model: m, existingNames: _nameSet(sorted, m)),
+                  )),
+              const SizedBox(height: 8),
+            ],
           );
         },
       ),
@@ -120,44 +127,139 @@ class ImageModelManagementScreen extends ConsumerWidget {
   static Set<String> _nameSet(List<ImageModel> all, ImageModel exclude) =>
       {for (final m in all) if (m.id != exclude.id) m.name};
 
-  /// Local Dream 模型包入口：下载（内置目录/manifest）或从目录导入
-  Future<void> _showPackMenu(BuildContext context, WidgetRef ref) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.cloud_download_outlined),
-              title: const Text('下载模型包'),
-              subtitle: const Text('从内置目录或自定义 manifest 下载'),
-              onTap: () => Navigator.pop(sheetContext, 'download'),
+  // ===== 可下载目录 =====
+
+  Widget _sectionHeader(String title) => Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 4),
+        child: Text(title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                )),
+      );
+
+  Widget _socHint(String? socSuffix) => Text(
+        socSuffix == null
+            ? '未检测到骁龙 NPU，仅显示 CPU 兜底模型包。'
+            : 'NPU 芯片源：$socSuffix（与 Local Dream 相同的转换包）。',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.6),
             ),
-            ListTile(
-              leading: const Icon(Icons.folder_open_outlined),
-              title: const Text('从目录导入模型包'),
-              subtitle: const Text('已在本机有 Local Dream 模型文件时使用'),
-              onTap: () => Navigator.pop(sheetContext, 'import'),
-            ),
-          ],
+      );
+
+  /// 引擎/运行库自检提示条：只在缺东西时出现（都就绪则零噪音）
+  Widget _readinessBanner() {
+    final readiness = ref.watch(localDreamReadinessProvider).valueOrNull;
+    if (readiness == null) return const SizedBox.shrink();
+    final hints = <String>[];
+    if (!readiness.binary) {
+      hints.add('引擎二进制未打包（需按 docs/local_dream_engine.md 放置产物重新构建，'
+          '下载模型包仍可提前进行）');
+    }
+    if (!readiness.qnn) {
+      hints.add('QNN 运行库未就绪（NPU 模型包需联网重启应用完成启动引导下载，'
+          'CPU 包不受影响）');
+    }
+    if (hints.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Card(
+        elevation: 0,
+        color: Theme.of(context)
+            .colorScheme
+            .errorContainer
+            .withValues(alpha: 0.35),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            hints.join('\n'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                ),
+          ),
         ),
       ),
     );
-    if (action == 'download' && context.mounted) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const LocalDreamPackDownloadScreen(),
-        ),
+  }
+
+  /// 下载源切换菜单（HuggingFace / HF Mirror）
+  Widget _mirrorMenu() {
+    return PopupMenuButton<String>(
+      tooltip: '下载源',
+      icon: const Icon(Icons.dns_outlined),
+      onSelected: (url) => setState(() => _baseUrl = url),
+      itemBuilder: (_) => LocalDreamBaseUrl.choices
+          .map((c) => PopupMenuItem(
+                value: c.$1,
+                child: Row(
+                  children: [
+                    if (_baseUrl == c.$1)
+                      const Icon(Icons.check, size: 18)
+                    else
+                      const SizedBox(width: 18),
+                    const SizedBox(width: 6),
+                    Text(c.$2),
+                  ],
+                ),
+              ))
+          .toList(),
+    );
+  }
+
+  /// 找目录条目对应的行（按 catalog_id 匹配；目录导入的包 catalogId 为空，
+  /// 不会与目录条目混淆）
+  ({ImageModel? downloading, ImageModel? paused, ImageModel? failed, ImageModel? ready})
+      _matchRow(List<ImageModel> rows, LocalDreamPackEntry entry) {
+    ImageModel? downloading;
+    ImageModel? paused;
+    ImageModel? failed;
+    ImageModel? ready;
+    for (final r in rows) {
+      if (r.catalogId != entry.id) continue;
+      switch (r.status) {
+        case ImageModelStatus.downloading:
+          downloading = r;
+        case ImageModelStatus.paused:
+          paused = r;
+        case ImageModelStatus.failed:
+          failed = r;
+        case ImageModelStatus.ready:
+          ready = r;
+      }
+    }
+    return (downloading: downloading, paused: paused, failed: failed, ready: ready);
+  }
+
+  Future<void> _startDownload(
+      LocalDreamPackEntry entry, String? socSuffix) async {
+    if (_startingDownload) return;
+    final zipUrl =
+        entry.resolveZipUrl(baseUrl: _baseUrl, socSuffix: socSuffix);
+    if (zipUrl == null) {
+      ToastUtils.showError('当前设备无可用 NPU 源', context: context);
+      return;
+    }
+    setState(() => _startingDownload = true);
+    final downloader = ref.read(localDreamPackDownloaderProvider);
+    try {
+      final row = await downloader.createDownloadingRow(
+        entry: entry,
+        zipUrl: zipUrl,
       );
-    } else if (action == 'import' && context.mounted) {
-      await _importPack(context, ref);
+      if (!mounted) return;
+      ToastUtils.showInfo('开始下载「${entry.name}」', context: context);
+      unawaited(downloader.startDownload(row));
+    } catch (e) {
+      if (mounted) ToastUtils.showError('创建下载任务失败：$e', context: context);
+    } finally {
+      if (mounted) setState(() => _startingDownload = false);
     }
   }
 
   /// 导入 Local Dream 模型包目录（选类型 → SAF 选目录 → 拷贝校验落库）
-  Future<void> _importPack(BuildContext context, WidgetRef ref) async {
+  Future<void> _importPack(BuildContext context) async {
     // 1. 选包类型（sd15cpu 与 sd15npu 文件相同，无法从内容推断）
     final type = await showModalBottomSheet<LocalDreamPackType>(
       context: context,
@@ -203,7 +305,7 @@ class ImageModelManagementScreen extends ConsumerWidget {
         sourceDir: sourceDirPath,
         displayName: dirName,
       );
-      ref.invalidate(imageModelLifecycleProvider);
+      ref.read(imageModelAdminServiceProvider).refresh();
       if (!context.mounted) return;
       if (result.row.status == ImageModelStatus.ready) {
         ToastUtils.showSuccess('已导入「${result.row.name}」', context: context);
@@ -216,132 +318,100 @@ class ImageModelManagementScreen extends ConsumerWidget {
       if (context.mounted) ToastUtils.showError('导入失败：$e', context: context);
     }
   }
+}
 
-  /// 添加 Local Dream 设备模型：填设备地址 → 拉取设备模型列表选择 → 落库
-  Future<void> _addRemoteModel(BuildContext context, WidgetRef ref) async {
-    final repo = ref.read(imageModelRepositoryProvider);
-    final models = await repo.getAll();
-    if (!context.mounted) return;
+/// 内置目录条目卡片：下载入口 / 下载进度 / 失败原因 / 已添加标记
+class _CatalogEntryCard extends StatelessWidget {
+  final LocalDreamPackEntry entry;
+  final ({ImageModel? downloading, ImageModel? paused, ImageModel? failed, ImageModel? ready})
+      match;
+  final VoidCallback onDownload;
+  final bool starting;
 
-    final model = await showDialog<ImageModel>(
-      context: context,
-      builder: (_) => LocalDreamModelDialog(
-        existingNames: {for (final m in models) m.name},
+  const _CatalogEntryCard({
+    required this.entry,
+    required this.match,
+    required this.onDownload,
+    required this.starting,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final added = match.ready != null;
+    final downloadingRow = match.downloading;
+    final pausedRow = match.paused;
+    final failRow = match.failed;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('${entry.name} · ${entry.description}',
+                      style: theme.textTheme.titleSmall),
+                ),
+                if (added)
+                  Icon(Icons.check_circle,
+                      size: 18, color: theme.colorScheme.primary)
+                else
+                  IconButton(
+                    tooltip: '下载',
+                    icon: const Icon(Icons.download_outlined),
+                    onPressed: starting ? null : onDownload,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${entry.type.label} · 约 ${entry.approximateSize}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+            if (downloadingRow != null) ...[
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                  value: downloadingRow.progress / 100.0),
+              const SizedBox(height: 2),
+              Text('下载中 ${downloadingRow.progress}%',
+                  style: theme.textTheme.bodySmall),
+            ],
+            // failed/paused 不算已添加，此处仍显示下载入口；failed 附失败原因
+            if (failRow != null) ...[
+              const SizedBox(height: 6),
+              Text('上次失败：${failRow.errorMessage}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ],
+            if (pausedRow != null && downloadingRow == null) ...[
+              const SizedBox(height: 6),
+              Text('已暂停（点下载图标可重新开始）',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  )),
+            ],
+          ],
+        ),
       ),
     );
-    if (model == null) return; // 用户取消
-
-    final sortOrder = await repo.getNextSortOrder();
-    await _saveNewModel(context, ref, model.copyWith(sortOrder: sortOrder));
-  }
-
-  /// 落库 + 刷新 + 提示（本地导入与设备添加共用）
-  Future<void> _saveNewModel(
-      BuildContext context, WidgetRef ref, ImageModel model) async {
-    final repo = ref.read(imageModelRepositoryProvider);
-    try {
-      await repo.save(model);
-      ref.invalidate(imageModelLifecycleProvider);
-      if (context.mounted) {
-        ToastUtils.showSuccess('已添加模型「${model.name}」', context: context);
-      }
-    } on ImageModelNameConflictException {
-      if (context.mounted) {
-        ToastUtils.showError('模型名称「${model.name}」已存在', context: context);
-      }
-    } catch (e) {
-      LoggerService.instance.e('保存生图模型失败: $e',
-          category: LogCategory.database, tags: ['image_model', 'save']);
-      if (context.mounted) ToastUtils.showError('保存失败：$e', context: context);
-    }
-  }
-
-  Future<void> _addModel(BuildContext context, WidgetRef ref) async {
-    // 导入流程：选文件 → 复制 →
-    //   .gguf       → 编辑对话框填元数据 → ready 落库
-    //   .safetensors → 建 converting 行 → 端上转换 → ready
-    ImageModelImportResult? imported;
-    try {
-      imported = await ImageModelImportService.instance.pickAndImport();
-    } on ImageModelImportException catch (e) {
-      if (context.mounted) ToastUtils.showError(e.message, context: context);
-      return;
-    } catch (e) {
-      LoggerService.instance.e('导入模型文件失败: $e',
-          category: LogCategory.ai, tags: ['image_model', 'import']);
-      if (context.mounted) {
-        ToastUtils.showError('导入失败：$e', context: context);
-      }
-      return;
-    }
-    if (imported == null) return; // 用户取消
-    if (!context.mounted) return;
-
-    final repo = ref.read(imageModelRepositoryProvider);
-
-    // ===== safetensors：不弹编辑框（转换完成后再编辑），直接入队转换 =====
-    if (imported.needsConversion) {
-      final now = DateTime.now();
-      final row = ImageModel(
-        name: _stripGguf(imported.originalFileName),
-        status: ImageModelStatus.converting,
-        filePath: imported.filePath,
-        fileSize: imported.fileSize,
-        createdAt: now,
-        updatedAt: now,
-      );
-      try {
-        final id = await repo.save(row.copyWith(sortOrder: await repo.getNextSortOrder()));
-        final saved = await repo.getById(id);
-        if (saved != null) {
-          await ref
-              .read(imageModelDownloadServiceProvider)
-              .startConversionForImportedFile(saved, imported.filePath);
-        }
-        ref.invalidate(imageModelLifecycleProvider);
-        if (context.mounted) {
-          ToastUtils.showInfo(
-              '已导入「${row.name}」，正在转换（Q8_0 量化，需数分钟）',
-              context: context);
-        }
-      } catch (e) {
-        LoggerService.instance.e('safetensors 导入失败: $e',
-            category: LogCategory.ai, tags: ['image_model', 'import']);
-        if (context.mounted) ToastUtils.showError('导入失败：$e', context: context);
-      }
-      return;
-    }
-
-    // ===== gguf：原有编辑对话框流程 =====
-    final models = await repo.getAll();
-    if (!context.mounted) return;
-
-    final model = await showDialog<ImageModel>(
-      context: context,
-      builder: (_) => ImageModelEditDialog(
-        presetFilePath: imported!.filePath,
-        presetFileSize: imported.fileSize,
-        presetName: _stripGguf(imported.originalFileName),
-        existingNames: {for (final m in models) m.name},
-      ),
-    );
-    if (model == null) {
-      // 用户放弃编辑 → 删掉已复制的文件，避免垃圾堆积
-      await ImageModelImportService.instance.deleteModelFile(imported.filePath);
-      return;
-    }
-
-    final sortOrder = await repo.getNextSortOrder();
-    await _saveNewModel(context, ref, model.copyWith(sortOrder: sortOrder));
-  }
-
-  static String _stripGguf(String fileName) {
-    final base = fileName.replaceAll(
-        RegExp(r'\.(safetensors|gguf)$', caseSensitive: false), '');
-    return base.isEmpty ? '未命名模型' : base;
   }
 }
 
+/// 我的模型卡片
 class _ModelCard extends ConsumerWidget {
   final ImageModel model;
   final Set<String> existingNames;
@@ -388,8 +458,7 @@ class _ModelCard extends ConsumerWidget {
                   ),
                 ),
                 PopupMenuButton<String>(
-                  onSelected: (action) =>
-                      _onMenu(context, ref, action),
+                  onSelected: (action) => _onMenu(context, ref, action),
                   itemBuilder: (_) => _menuItems(),
                 ),
               ],
@@ -407,16 +476,10 @@ class _ModelCard extends ConsumerWidget {
               const SizedBox(height: 4),
               Text('已暂停（${model.progress}%）',
                   style: Theme.of(context).textTheme.bodySmall),
-            ] else if (model.status == ImageModelStatus.converting) ...[
-              const SizedBox(height: 10),
-              const LinearProgressIndicator(),
-              const SizedBox(height: 4),
-              Text('转换中（Q8_0 量化，数分钟）',
-                  style: Theme.of(context).textTheme.bodySmall),
             ] else if (model.status == ImageModelStatus.failed) ...[
               const SizedBox(height: 10),
               Text(
-                model.errorMessage.isEmpty ? '下载/转换失败' : model.errorMessage,
+                model.errorMessage.isEmpty ? '下载失败' : model.errorMessage,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.error,
                     ),
@@ -446,30 +509,27 @@ class _ModelCard extends ConsumerWidget {
               ),
             ],
             const SizedBox(height: 8),
-            if (isReady)
+            if (isReady) ...[
               Text(
-                switch (model.backendType) {
-                  ImageModelBackendType.localDreamEmbedded =>
-                    'Local Dream 本机引擎 · ${_packTypeLabel(model)} · '
-                        '${_packFileCount(model)} 个文件',
-                  ImageModelBackendType.localDream =>
-                    'Local Dream 设备 · ${model.remoteHost} · ${model.remoteModelId}',
-                  _ =>
-                    '${FormatUtils.formatFileSize(model.fileSize)} · ${_fileName(model.filePath)}',
-                },
+                'Local Dream 本机引擎 · ${_packTypeLabel(model)} · '
+                '${_packFileCount(model)} 个文件',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
-              )
-            else if (model.sourcePageUrl.isNotEmpty)
-              Text(
-                '来源：${Uri.tryParse(model.sourcePageUrl)?.host ?? model.sourcePageUrl}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
+              const SizedBox(height: 10),
+              // 测试生图：直出（下载完成后即可验证引擎链路）
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: model.isEnabled
+                      ? () => ImageGenTestSheet.show(context, model)
+                      : null,
+                  icon: const Icon(Icons.image_outlined, size: 18),
+                  label: const Text('测试生图'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -482,8 +542,6 @@ class _ModelCard extends ConsumerWidget {
         return '下载中';
       case ImageModelStatus.paused:
         return '已暂停';
-      case ImageModelStatus.converting:
-        return '转换中';
       case ImageModelStatus.failed:
         return '失败';
       case ImageModelStatus.ready:
@@ -494,7 +552,6 @@ class _ModelCard extends ConsumerWidget {
   Color _statusColor(ImageModelStatus s, ColorScheme scheme) {
     switch (s) {
       case ImageModelStatus.downloading:
-      case ImageModelStatus.converting:
         return scheme.tertiary;
       case ImageModelStatus.paused:
         return scheme.outline;
@@ -517,15 +574,9 @@ class _ModelCard extends ConsumerWidget {
           PopupMenuItem(value: 'resume', child: Text('继续下载')),
           PopupMenuItem(value: 'delete', child: Text('取消并删除')),
         ];
-      case ImageModelStatus.converting:
-        return const [
-          PopupMenuItem(value: 'delete', child: Text('删除')),
-        ];
       case ImageModelStatus.failed:
         // 目录导入的包（无下载源）重试只会再次失败，应重新导入而非重试
-        final importedPack =
-            model.backendType == ImageModelBackendType.localDreamEmbedded &&
-                model.sourceUrl.isEmpty;
+        final importedPack = model.sourceUrl.isEmpty;
         return [
           if (!importedPack)
             const PopupMenuItem(value: 'retry', child: Text('重试')),
@@ -533,6 +584,7 @@ class _ModelCard extends ConsumerWidget {
         ];
       case ImageModelStatus.ready:
         return [
+          const PopupMenuItem(value: 'test', child: Text('测试生图')),
           const PopupMenuItem(value: 'edit', child: Text('编辑')),
           if (!model.isDefault)
             const PopupMenuItem(value: 'default', child: Text('设为默认')),
@@ -543,12 +595,6 @@ class _ModelCard extends ConsumerWidget {
           const PopupMenuItem(value: 'delete', child: Text('删除')),
         ];
     }
-  }
-
-  static String _fileName(String path) {
-    if (path.isEmpty) return '';
-    final idx = path.replaceAll('\\', '/').lastIndexOf('/');
-    return idx >= 0 ? path.substring(idx + 1) : path;
   }
 
   static String _packTypeLabel(ImageModel model) {
@@ -573,40 +619,15 @@ class _ModelCard extends ConsumerWidget {
 
   Future<void> _onMenu(
       BuildContext context, WidgetRef ref, String action) async {
-    final repo = ref.read(imageModelRepositoryProvider);
-    final downloadService = ref.read(imageModelDownloadServiceProvider);
-    final packDownloader = ref.read(localDreamPackDownloaderProvider);
-    final isEmbedded =
-        model.backendType == ImageModelBackendType.localDreamEmbedded;
+    final admin = ref.read(imageModelAdminServiceProvider);
     switch (action) {
       // ===== 生命周期动作 =====
       case 'pause':
-        if (isEmbedded) {
-          packDownloader.pause(model.id!);
-        } else {
-          await downloadService.pause(model.id!);
-        }
-        ref.invalidate(imageModelLifecycleProvider);
+        admin.pause(model.id!);
         break;
       case 'resume':
-        if (isEmbedded) {
-          await packDownloader.startDownload(model);
-        } else {
-          await downloadService.resume(model);
-        }
-        ref.invalidate(imageModelLifecycleProvider);
-        break;
       case 'retry':
-        // failed 行按来源分流：模型包 → 重跑包下载；有源文件的转换失败 →
-        // 重试转换；否则重试单文件下载
-        if (isEmbedded) {
-          await packDownloader.startDownload(model);
-        } else if (model.sourceUrl.isNotEmpty) {
-          await downloadService.resume(model);
-        } else {
-          await downloadService.retryConversion(model);
-        }
-        ref.invalidate(imageModelLifecycleProvider);
+        await admin.resume(model);
         break;
       case 'delete':
         if (!context.mounted) return;
@@ -615,47 +636,33 @@ class _ModelCard extends ConsumerWidget {
           title: '确认删除',
           message: model.status.isReady
               ? '将删除模型「${model.name}」及其模型文件，此操作不可恢复。'
-              : '将取消「${model.name}」的下载/转换并删除相关文件。',
+              : '将取消「${model.name}」的下载并删除相关文件。',
           confirmText: '删除',
           isDangerous: true,
         );
         if (confirmed != true) return;
-        if (isEmbedded) {
-          // 包下载器统一清理：取消任务 + 删包目录 + 删行
-          await packDownloader.cancelAndDelete(model);
-        } else {
-          // 清理下载/转换临时文件 + 最终模型文件，再删记录
-          await downloadService.cleanupFiles(model.id!);
-          await ImageModelImportService.instance.deleteModelFile(model.filePath);
-          await repo.delete(model.id!);
-        }
-        ref.invalidate(imageModelLifecycleProvider);
+        await admin.delete(model);
         if (context.mounted) {
           ToastUtils.showSuccess('已删除「${model.name}」', context: context);
         }
         break;
       // ===== ready 模型的常规动作 =====
+      case 'test':
+        if (!context.mounted) return;
+        await ImageGenTestSheet.show(context, model);
+        break;
       case 'edit':
         if (!context.mounted) return;
-        // 远程设备模型走设备对话框（无本地文件字段）
-        final isRemote =
-            model.backendType == ImageModelBackendType.localDream;
         final updated = await showDialog<ImageModel>(
           context: context,
-          builder: (_) => isRemote
-              ? LocalDreamModelDialog(
-                  model: model,
-                  existingNames: existingNames,
-                )
-              : ImageModelEditDialog(
-                  model: model,
-                  existingNames: existingNames,
-                ),
+          builder: (_) => ImageModelEditDialog(
+            model: model,
+            existingNames: existingNames,
+          ),
         );
         if (updated == null) return;
         try {
-          await repo.save(updated);
-          ref.invalidate(imageModelLifecycleProvider);
+          await admin.save(updated);
           if (context.mounted) {
             ToastUtils.showSuccess('已保存「${updated.name}」', context: context);
           }
@@ -666,12 +673,10 @@ class _ModelCard extends ConsumerWidget {
         }
         break;
       case 'default':
-        await repo.setDefault(model.id!);
-        ref.invalidate(imageModelLifecycleProvider);
+        await admin.setDefault(model.id!);
         break;
       case 'toggle':
-        await repo.save(model.copyWith(isEnabled: !model.isEnabled));
-        ref.invalidate(imageModelLifecycleProvider);
+        await admin.save(model.copyWith(isEnabled: !model.isEnabled));
         break;
     }
   }

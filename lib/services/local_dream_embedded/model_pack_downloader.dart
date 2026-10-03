@@ -8,9 +8,6 @@
 ///
 /// 状态机复用 image_models 行（downloading → paused/failed/ready +
 /// progress 列），管理页卡片零改动渲染进度。
-///
-/// 与 [ImageModelDownloadService]（单文件 gguf/safetensors）并存的
-/// 独立服务：包下载逻辑差异大（zip 解压、无转换阶段）。
 library;
 
 import 'dart:async';
@@ -38,8 +35,7 @@ class LocalDreamModelPackDownloader {
   /// 每个进行中的包一个 CancelToken（key = image_models.id）
   final Map<int, CancelToken> _cancelTokens = {};
 
-  /// 事件流：管理页 lifecycle provider 监听刷新（对齐
-  /// ImageModelDownloadService.onChanged 约定）
+  /// 事件流：管理页 lifecycle provider 监听刷新
   final _onChanged = StreamController<void>.broadcast();
   Stream<void> get onChanged => _onChanged.stream;
 
@@ -49,6 +45,25 @@ class LocalDreamModelPackDownloader {
 
   void dispose() {
     _onChanged.close();
+  }
+
+  /// 启动对账：进程被杀遗留的 downloading 行归位为 paused
+  /// （.part 已保留，用户点"继续下载"即从断点续传）。
+  /// App 启动时调用一次；进行中的下载不存在于此时点（单实例假设）。
+  /// 返回是否发现并归位了 stuck 行。
+  Future<bool> recoverInterruptedDownloads() async {
+    final repo = _ref.read(imageModelRepositoryProvider);
+    final stuck = await repo.getByStatus(ImageModelStatus.downloading);
+    if (stuck.isEmpty) return false;
+    for (final row in stuck) {
+      await repo.updateStatus(row.id!, ImageModelStatus.paused);
+    }
+    LoggerService.instance.i(
+        '模型包下载对账：${stuck.length} 行 downloading → paused',
+        category: LogCategory.ai,
+        tags: ['local_dream_pack', 'recover']);
+    _onChanged.add(null);
+    return true;
   }
 
   /// 模型包根目录（<应用文档目录>/local_dream_models/）
@@ -61,9 +76,11 @@ class LocalDreamModelPackDownloader {
 
   /// 为一个目录条目创建占位 image_models 行（status=downloading）。
   /// [zipUrl] 为解析后的完整下载地址（含芯片后缀 / 镜像源）。
+  /// [catalogId] 落库的目录条目 id（目录导入传空——它不对应 catalog 条目）。
   Future<ImageModel> createDownloadingRow({
     required LocalDreamPackEntry entry,
     required String zipUrl,
+    String? catalogId,
   }) async {
     final root = await modelsRootDir();
     // 包目录用 Local Dream 的模型 id（重名冲突时加时间戳后缀）
@@ -82,6 +99,7 @@ class LocalDreamModelPackDownloader {
       backendType: ImageModelBackendType.localDreamEmbedded,
       filePath: packDir,
       remoteModelId: entry.type.dbName,
+      catalogId: catalogId ?? entry.id,
       negativePrompt: entry.defaultNegativePrompt,
       isEnabled: true,
       status: ImageModelStatus.downloading,
@@ -240,7 +258,8 @@ class LocalDreamModelPackDownloader {
       defaultPrompt: '',
       defaultNegativePrompt: '',
     );
-    final row = await createDownloadingRow(entry: entry, zipUrl: '');
+    final row = await createDownloadingRow(
+        entry: entry, zipUrl: '', catalogId: '');
     final copied = await importFromDirectory(model: row, sourceDir: sourceDir);
 
     final repo = _ref.read(imageModelRepositoryProvider);
@@ -325,7 +344,7 @@ class LocalDreamModelPackDownloader {
       await for (final chunk in response.data!.stream) {
         sink.add(chunk);
         received += chunk.length;
-        // 节流写库（≥1s 或 ≥5MB，对齐单文件下载服务）
+        // 节流写库（≥1s 或 ≥5MB）
         if (totalBytes > 0 &&
             (DateTime.now().difference(lastUpdate).inMilliseconds >= 1000 ||
                 received - startFrom >= 5 * 1024 * 1024)) {

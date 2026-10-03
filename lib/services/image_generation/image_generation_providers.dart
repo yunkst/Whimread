@@ -1,9 +1,12 @@
 /// 生图后端 Provider + dispatcher
 ///
-/// 按模型 backendType 路由：local_sd 走端侧 sd.cpp 引擎，
-/// local_dream 走局域网 Local Dream 设备宿主模式 HTTP API。
-/// 未来接入新后端时在 [imageGenerationBackendsProvider] 的映射表里加一项即可。
+/// 唯一后端：local_dream_embedded（本机嵌入式 Local Dream 引擎子进程）。
+/// 历史上曾有 local_sd（端侧 sd.cpp FFI）与 local_dream（局域网设备宿主）
+/// 两个后端，均已下线；未来接入新后端时在
+/// [imageGenerationBackendsProvider] 的映射表里加一项即可。
 library;
+
+import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,29 +15,37 @@ import '../../models/image_model.dart';
 import '../media/media_proxy.dart';
 import '../local_dream_embedded/engine_manager.dart';
 import 'image_generation_backend.dart';
-import 'local_dream_backend.dart';
+import 'image_generation_service.dart';
 import 'local_dream_embedded_backend.dart';
-import 'local_sd_backend.dart';
-
-/// 本地 sd.cpp 后端 Provider（阶段 B：FFI 真实现；签名与阶段 A 一致）
-final localSdCppBackendProvider = Provider<LocalSdCppBackend>((ref) {
-  final dbConn = ref.watch(databaseConnectionProvider);
-  return LocalSdCppBackend(
-    mediaProxy: MediaProxy(dbConn: dbConn),
-  );
-});
-
-/// Local Dream 远程设备后端 Provider
-final localDreamBackendProvider = Provider<LocalDreamBackend>((ref) {
-  final dbConn = ref.watch(databaseConnectionProvider);
-  return LocalDreamBackend(
-    mediaProxy: MediaProxy(dbConn: dbConn),
-  );
-});
 
 /// Local Dream 嵌入式引擎后端 Provider（引擎子进程全局单例）
 final localDreamEmbeddedEngineManagerProvider =
-    Provider<LocalDreamEngineManager>((ref) => LocalDreamEngineManager());
+    Provider<LocalDreamEngineManager>((ref) {
+  final manager = LocalDreamEngineManager();
+  ref.onDispose(() {
+    // 容器销毁时停掉引擎子进程并关闭状态流
+    //（防热重载/测试容器重建后留下孤儿进程）
+    unawaited(manager.stop());
+    manager.dispose();
+  });
+  return manager;
+});
+
+/// 引擎运行状态（响应式；引擎页 watch 本 provider 替代手动快照轮询）
+final localDreamEngineStateProvider =
+    StreamProvider<LocalDreamEngineStatus>((ref) {
+  final manager = ref.watch(localDreamEmbeddedEngineManagerProvider);
+  return manager.statusStream;
+});
+
+/// 引擎自检（引擎二进制 / QNN 运行库就绪情况；模型管理页提示条用）
+final localDreamReadinessProvider =
+    FutureProvider<({bool binary, bool qnn})>((ref) async {
+  final manager = ref.watch(localDreamEmbeddedEngineManagerProvider);
+  final binary = await manager.isBinaryAvailable();
+  final qnn = await manager.isQnnRuntimeReady();
+  return (binary: binary, qnn: qnn);
+});
 
 final localDreamEmbeddedBackendProvider = Provider<LocalDreamEmbeddedBackend>(
     (ref) {
@@ -49,8 +60,6 @@ final localDreamEmbeddedBackendProvider = Provider<LocalDreamEmbeddedBackend>(
 final imageGenerationBackendsProvider =
     Provider<Map<ImageModelBackendType, ImageGenerationBackend>>((ref) {
   return {
-    ImageModelBackendType.localSd: ref.watch(localSdCppBackendProvider),
-    ImageModelBackendType.localDream: ref.watch(localDreamBackendProvider),
     ImageModelBackendType.localDreamEmbedded:
         ref.watch(localDreamEmbeddedBackendProvider),
   };
@@ -58,9 +67,13 @@ final imageGenerationBackendsProvider =
 
 /// 按 backendType 取出对应后端（family）
 ///
-/// backendType 不识别时回退到本地引擎（单后端现状下即唯一实现）
+/// backendType 不识别时（历史残留行）回退到嵌入式引擎（唯一实现）
 final imageGenerationBackendByTypeProvider = Provider.family<
     ImageGenerationBackend, ImageModelBackendType>((ref, type) {
   final backends = ref.watch(imageGenerationBackendsProvider);
-  return backends[type] ?? ref.watch(localSdCppBackendProvider);
+  return backends[type] ?? ref.watch(localDreamEmbeddedBackendProvider);
 });
+
+/// 生图统一提交门面（模型选取 + 请求构造 + 错误码映射）
+final imageGenerationServiceProvider = Provider<ImageGenerationService>(
+    (ref) => ImageGenerationService(ref));

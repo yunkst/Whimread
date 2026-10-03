@@ -5,8 +5,9 @@
 ///
 /// 职责：
 /// - 探测引擎二进制是否已打包（缺失时给出放置引导）
-/// - QNN 运行库运行时按需下载（dlopen 语义不受 W^X exec 限制，
-///   走 app_resource_manager 统一 manifest 机制，不进 APK/启动引导）
+/// - 解析 QNN 运行库目录（dlopen 语义不受 W^X exec 限制）：下载与
+///   sha256 校验由启动资源引导（resource_bootstrap）完成，引擎启动
+///   只查本地目录，不触发网络
 /// - 启动/停止子进程：参数相同复用运行中的实例，不同则重启切换模型
 /// - 启动后轮询 /health 等待模型加载完成（NPU 图加载可达数十秒）
 ///
@@ -19,8 +20,6 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
-
-import 'package:path/path.dart' as p;
 
 import '../app_resource_manager.dart';
 import '../logger_service.dart';
@@ -78,13 +77,27 @@ class LocalDreamEngineManager {
   final LocalDreamClient _client;
   final AppResourceManager _resources;
 
-  /// manifest 缓存（QNN spec 查询用；失败不缓存，下次重试）
-  AppResourcesManifest? _manifestCache;
-
   Process? _process;
   LocalDreamEngineStatus _status = const LocalDreamEngineStatus.stopped();
   String? _cachedNativeLibDir;
   bool _stopping = false;
+
+  /// 状态变更广播（启动就绪 / 意外退出 / 主动停止后触发）
+  final StreamController<LocalDreamEngineStatus> _statusChanges =
+      StreamController<LocalDreamEngineStatus>.broadcast();
+
+  /// 引擎运行状态流（UI 响应式订阅；初始快照用同步 getter [status]）
+  Stream<LocalDreamEngineStatus> get statusStream => _statusChanges.stream;
+
+  /// 释放资源（关闭状态流；容器销毁时调用）
+  void dispose() {
+    _statusChanges.close();
+  }
+
+  void _setStatus(LocalDreamEngineStatus s) {
+    _status = s;
+    if (!_statusChanges.isClosed) _statusChanges.add(s);
+  }
 
   /// 引擎操作互斥链：ensureStarted 的"检查-启动"与 stop 串行执行，
   /// 防止并发调用双双 spawn（第二个绑 8081 端口失败）或 stop 误杀
@@ -162,48 +175,19 @@ class LocalDreamEngineManager {
   }
 
   /// QNN 运行库是否已下载就绪（本地检查，不触发网络/下载；
-  /// 权威校验在 [_ensureQnnRuntime] 的 sha256 流程里）
+  /// 下载与 sha256 校验由启动资源引导完成）
   Future<bool> isQnnRuntimeReady() => _resources.localDreamQnnReady();
 
-  /// 解析 QNN 运行时目录：manifest 取 spec → ensureResource 下载校验。
-  /// [onProgress] 透传下载字节进度（仅首次下载时有流量）。
-  Future<String?> _ensureQnnRuntime(
-    LocalDreamPackType type, {
-    void Function(int received, int total)? onProgress,
-  }) async {
+  /// 解析 QNN 运行库目录（纯本地：启动引导已下载校验过，这里只定位）。
+  /// sd15cpu 纯 MNN 不需要 → null；NPU 类型缺库时抛错并指向启动引导。
+  Future<String?> _resolveQnnRuntimeDir(LocalDreamPackType type) async {
     if (!type.needsQnnLibs) return null;
-
-    final manifest = await _manifest();
-    final spec = manifest.resources[ResourceIds.localDreamQnn];
-    if (spec == null) {
+    if (!await _resources.localDreamQnnReady()) {
       throw const LocalDreamEngineException(
-          'QNN 运行库资源尚未发布（资源清单缺少 local_dream_qnn 条目），'
-          '请等待资源更新后重试');
+          'QNN 运行库未就绪：请联网重启应用，待启动资源引导完成后再试');
     }
-    final Map<String, String> paths;
-    try {
-      paths = await _resources.ensureResource(spec, onProgress: onProgress);
-    } catch (e) {
-      throw LocalDreamEngineException('下载 QNN 运行库失败：$e');
-    }
-    if (paths.isEmpty) {
-      throw const LocalDreamEngineException('QNN 运行库资源下载结果为空');
-    }
-    return p.dirname(paths.values.first);
-  }
-
-  /// manifest（带缓存；仅在 QNN 启动路径使用）
-  Future<AppResourcesManifest> _manifest() async {
-    final cached = _manifestCache;
-    if (cached != null) return cached;
-    try {
-      final manifest = await _resources.fetchManifest();
-      _manifestCache = manifest;
-      return manifest;
-    } catch (e) {
-      throw LocalDreamEngineException(
-          '获取资源清单失败（检查网络后重试）：$e');
-    }
+    final dir = await _resources.resourceDir(ResourceIds.localDreamQnn);
+    return dir.path;
   }
 
   /// 确保引擎以 [type] + [modelDir] 运行并健康（模型加载完成）。
@@ -217,7 +201,6 @@ class LocalDreamEngineManager {
   Future<void> ensureStarted({
     required LocalDreamPackType type,
     required String modelDir,
-    void Function(int received, int total)? onQnnProgress,
   }) async {
     // 单飞：相同参数的启动已在进行中 → 复用同一 Future（含异常语义）
     final active = _activeStart;
@@ -232,7 +215,7 @@ class LocalDreamEngineManager {
           return;
         }
         await _stopInternal();
-        await _spawn(type: type, modelDir: modelDir, onQnnProgress: onQnnProgress);
+        await _spawn(type: type, modelDir: modelDir);
       } finally {
         // 只清理仍属于自己的记录（期间可能有不同参数的新任务已入队）
         if (identical(_activeStart, pending)) _activeStart = null;
@@ -253,7 +236,6 @@ class LocalDreamEngineManager {
   Future<void> _spawn({
     required LocalDreamPackType type,
     required String modelDir,
-    void Function(int received, int total)? onQnnProgress,
   }) async {
     final nativeDir = await nativeLibDir();
     final executable = nativeDir == null
@@ -266,8 +248,8 @@ class LocalDreamEngineManager {
           '请按 docs/local_dream_engine.md 放置 Local Dream 引擎产物后重新构建安装。');
     }
 
-    // QNN 运行库运行时下载（dlopen 语义；首次有流量，之后 sha256 命中直过）
-    final runtimeDir = await _ensureQnnRuntime(type, onProgress: onQnnProgress);
+    // QNN 运行库目录（启动引导已下载校验，这里纯本地解析）
+    final runtimeDir = await _resolveQnnRuntimeDir(type);
 
     final args = buildEngineArgs(
       type: type,
@@ -292,12 +274,12 @@ class LocalDreamEngineManager {
     );
     _process = process;
     _stopping = false;
-    _status = LocalDreamEngineStatus(
+    _setStatus(LocalDreamEngineStatus(
       running: true,
       pid: process.pid,
       type: type,
       modelDir: modelDir,
-    );
+    ));
 
     // 引擎日志转发（不阻塞；onError 兜底避免未处理流错误）
     process.stdout
@@ -322,7 +304,7 @@ class LocalDreamEngineManager {
           tags: ['local_dream_engine', 'exit']);
       if (identical(_process, process)) {
         _process = null;
-        _status = const LocalDreamEngineStatus.stopped();
+        _setStatus(const LocalDreamEngineStatus.stopped());
       }
     }));
 
@@ -340,7 +322,10 @@ class LocalDreamEngineManager {
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    await stop();
+    // 超时收尾：直接调 _stopInternal，不经 stop() 入队。
+    // _spawn 本身运行在 _opChain 当前节点上，stop() 会把 _stopInternal
+    // 追加到链尾（链尾要等 _spawn 返回才轮到）→ 循环等待，链永久死锁。
+    await _stopInternal();
     throw LocalDreamEngineException(
         '引擎启动超时（>${startTimeout.inSeconds}s 未就绪），请查看日志排查模型加载错误');
   }
@@ -369,7 +354,7 @@ class LocalDreamEngineManager {
         tags: ['local_dream_engine', 'stop']);
     if (identical(_process, process)) {
       _process = null;
-      _status = const LocalDreamEngineStatus.stopped();
+      _setStatus(const LocalDreamEngineStatus.stopped());
     }
   }
 

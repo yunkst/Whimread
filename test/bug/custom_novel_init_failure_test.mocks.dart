@@ -455,6 +455,18 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i7.Future<int>);
 
   @override
+  _i7.Future<Map<String, ({int cached, int total})>> getChapterCountsForNovels(
+          List<String>? novelUrls) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #getChapterCountsForNovels,
+          [novelUrls],
+        ),
+        returnValue: _i7.Future<Map<String, ({int cached, int total})>>.value(
+            <String, ({int cached, int total})>{}),
+      ) as _i7.Future<Map<String, ({int cached, int total})>>);
+
+  @override
   _i7.Future<List<_i12.ChapterSearchResult>> searchInCachedContent(
     String? keyword, {
     String? novelUrl,

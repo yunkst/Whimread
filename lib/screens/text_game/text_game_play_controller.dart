@@ -8,8 +8,7 @@
 /// - 打开游戏 → switchSession(text_game, game.chatSessionId)（同刻只玩一局，
 ///   切局自动中断上一局的运行中回合并存档）
 /// - 玩家输入 → session.sendMessage（选项 label 与自由输入同路径）
-/// - 生图完成 → 监听 TextGameImageService.onChanged，把最终结果同步进
-///   session 内存消息链（DB 已由服务改写）
+/// - 生图同步完成 → 工具结果自带 mediaIds，经消息链直接渲染
 ///
 /// 离开页面：autoDispose 控制器停止监听，agent 继续在后台跑完（会话全局存活），
 /// 回来重放消息链即可。
@@ -32,7 +31,6 @@ import '../../core/providers/database_providers.dart'
 import '../../core/providers/chat_session_providers.dart';
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/providers/scenario_session.dart';
-import '../../core/providers/text_game_providers.dart';
 import '../../services/novel_agent/novel_agent_service.dart'
     show novelAgentServiceProvider;
 import 'game_transcript_projector.dart';
@@ -125,12 +123,7 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
   ScenarioSession? _session;
   String? _runId; // sessionId.toString()，过滤本局事件
   StreamSubscription<AgentEvent>? _eventSub;
-  StreamSubscription<void>? _imageSub;
   bool _disposed = false;
-
-  /// 已同步进会话内存链的生图任务 toolCallId。onChanged 每次携带全部任务，
-  /// 不去重会对同一条消息反复改写并触发全量重投影
-  final Set<String> _syncedImageToolCallIds = {};
 
   TextGamePlayController(this._ref, this._gameId) : super(const TextGamePlayState()) {
     _init();
@@ -173,11 +166,6 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
         .read(novelAgentServiceProvider)
         .events
         .listen(_handleAgentEvent);
-
-    // 订阅生图任务完成：同步内存消息链（DB 由服务已改写）
-    _imageSub = _ref.read(textGameImageServiceProvider).onChanged.listen((_) {
-      _syncCompletedImageTasks();
-    });
 
     _reproject();
   }
@@ -289,29 +277,11 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
       case 'present_choices':
         return '正在整理本回合选项…';
       case 'create_scene_image':
-        return '正在提交场景插图…';
+        return '正在生成场景插图…';
       case 'update_game_state':
         return '正在记录剧情状态…';
       default:
         return null;
-    }
-  }
-
-  /// 生图任务落定（成功/失败）→ 同步 session 内存里的 tool 消息内容。
-  /// updateToolMessageContent 内部会通知会话状态变化 → _reproject 自动重投影。
-  void _syncCompletedImageTasks() {
-    final session = _session;
-    if (session == null) return;
-    final tasks = _ref.read(textGameImageServiceProvider).tasks.values;
-    for (final t in tasks) {
-      if (t.sessionId != session.sessionId) continue;
-      final content = t.finalContent;
-      if (content == null) continue;
-      // 已同步过的任务跳过：updateToolMessageContent 每次都会替换消息对象
-      // 并全量通知重投影，不去重会随历史完成任务数放大重建
-      if (!_syncedImageToolCallIds.add(t.toolCallId)) continue;
-      // 只需同步本会话链内存在的消息；方法内部按 toolCallId 定位，未命中忽略
-      session.updateToolMessageContent(t.toolCallId, content);
     }
   }
 
@@ -432,7 +402,6 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
   void dispose() {
     _disposed = true;
     _eventSub?.cancel();
-    _imageSub?.cancel();
     super.dispose();
   }
 }

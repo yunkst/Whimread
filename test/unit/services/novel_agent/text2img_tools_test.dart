@@ -1,17 +1,13 @@
-/// ToolExecutor 文生图工具单元测试（纯客户端本地引擎模式）
+/// ToolExecutor 文生图工具单元测试（嵌入式引擎模式）
 ///
-/// 2026-09-09 ComfyUI 后端移除后 create_images / list_text2img_models 的行为：
-/// - list_text2img_models 读 image_models 表（用户管理的本地模型元数据）
-/// - create_images 统一分发到 LocalSdCppBackend：
-///     · 模型文件缺失/损坏 → generation_failed
-///     · 引擎未集成（阶段 A stub）→ engine_not_ready
+/// 2026-10 生图精简后 create_images / list_text2img_models 的行为：
+/// - list_text2img_models 读 image_models 表（用户管理的模型包元数据）
+/// - create_images 统一分发到 LocalDreamEmbeddedBackend：
+///     · 模型包类型/目录未配置、包缺文件 → engine_not_ready
+///     · 引擎未打包/未启动（测试环境恒如此）→ engine_not_ready
 /// - modelName 不存在 / 模型停用 / 无模型时返回结构化错误
 ///
 /// 本地模型数据通过真实 ImageModelRepository 写入 in-memory SQLite。
-///
-/// 运行：
-///   cd novel_app
-///   flutter test test/unit/services/novel_agent/text2img_tools_test.dart
 library;
 
 import 'dart:convert';
@@ -30,6 +26,7 @@ import 'package:novel_app/core/providers/services/network_service_providers.dart
 import 'package:novel_app/models/image_model.dart';
 import 'package:novel_app/repositories/image_model_repository.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
+import 'package:novel_app/services/local_dream_embedded/model_pack.dart';
 import 'package:novel_app/services/novel_agent/tool_executor.dart';
 import '../../../helpers/test_database_setup.dart' as test_db;
 
@@ -71,7 +68,7 @@ void main() {
     String description = '',
     List<String> tags = const [],
     String filePath = '',
-    int fileSize = 0,
+    String packType = 'sd15cpu',
     bool isEnabled = true,
     bool isDefault = false,
     int sortOrder = 0,
@@ -81,8 +78,9 @@ void main() {
       name: name,
       description: description,
       tags: tags,
+      backendType: ImageModelBackendType.localDreamEmbedded,
       filePath: filePath,
-      fileSize: fileSize,
+      remoteModelId: packType,
       isEnabled: isEnabled,
       isDefault: isDefault,
       sortOrder: sortOrder,
@@ -93,15 +91,15 @@ void main() {
     return (await repo.getById(id))!;
   }
 
-  /// 在临时目录写一个合法 gguf 文件（magic + ≥16 字节），返回路径
-  String writeValidGguf() {
-    final tmpDir = Directory.systemTemp.createTempSync('t2i_local_sd_');
+  /// 在临时目录写一个齐全的 sd15cpu 模型包（仅占位文件，仅校验文件名）
+  String writeCpuPack() {
+    final tmpDir = Directory.systemTemp.createTempSync('t2i_pack_');
     addTearDown(() => tmpDir.deleteSync(recursive: true));
-    final ggufPath = p.join(tmpDir.path, 'fake.gguf');
-    File(ggufPath).writeAsBytesSync(
-        [0x47, 0x47, 0x55, 0x46, 0x03, 0x00, 0x00, 0x00] +
-            List<int>.filled(16, 0));
-    return ggufPath;
+    for (final name
+        in LocalDreamPackType.sd15Cpu.requiredFiles) {
+      File(p.join(tmpDir.path, name)).writeAsStringSync('{}');
+    }
+    return tmpDir.path;
   }
 
   // =========================================================================
@@ -130,7 +128,7 @@ void main() {
       expect(models.first['name'], '古风水墨');
       expect(models.first['description'], '擅长中国古风水墨插画');
       expect(models.first['tags'], ['古风', '水墨']);
-      expect(models.first['backendType'], 'local_sd');
+      expect(models.first['backendType'], 'local_dream_embedded');
       // promptSkill 由描述+标签拼出（含关键词）
       expect(models.first['promptSkill'], contains('古风'));
     });
@@ -174,13 +172,12 @@ void main() {
   // create_images - 模型选择
   // =========================================================================
   group('create_images - 模型选择', () {
-    test('不传 modelName → 用默认模型（engine_not_ready 响应里带不出模型名，'
-        '用 list 验证默认选取路径走到了引擎）', () async {
+    test('不传 modelName → 用默认模型（包齐全时走到引擎启动）', () async {
       await insertModel(name: '非默认', sortOrder: 0);
       await insertModel(
-          name: '默认模型', isDefault: true, sortOrder: 1, filePath: writeValidGguf());
+          name: '默认模型', isDefault: true, sortOrder: 1, filePath: writeCpuPack());
 
-      // 默认模型文件合法 → 引擎未集成错误（说明选择逻辑走通）
+      // 默认模型包齐全 → 进入引擎启动，测试环境无 so → engine_not_ready
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
       }));
@@ -189,7 +186,7 @@ void main() {
     });
 
     test('不传 modelName 且无默认 → 退回第一个启用模型', () async {
-      await insertModel(name: '第一个', sortOrder: 0, filePath: writeValidGguf());
+      await insertModel(name: '第一个', sortOrder: 0, filePath: writeCpuPack());
 
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
@@ -200,40 +197,48 @@ void main() {
   });
 
   // =========================================================================
-  // create_images - 本地引擎（阶段 A：stub）
+  // create_images - 模型包/引擎不可用
   // =========================================================================
-  group('create_images - 本地引擎', () {
-    test('模型文件不存在 → generation_failed', () async {
+  group('create_images - 模型包/引擎不可用', () {
+    test('包类型未配置 → engine_not_ready', () async {
       await insertModel(
-        name: '本地模型',
-        filePath: '/tmp/nonexistent_gguf_${DateTime.now().microsecondsSinceEpoch}.gguf',
+        name: '未配置模型',
+        packType: 'unknown_type',
+        filePath: writeCpuPack(),
       );
 
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
-        'modelName': '本地模型',
+        'modelName': '未配置模型',
       }));
 
-      expect(json['error'], 'generation_failed');
-      expect(json['message'], contains('已丢失'));
+      expect(json['error'], 'engine_not_ready');
+      expect(json['message'], contains('未配置模型包类型'));
     });
 
-    test('模型文件存在 + gguf 头合法 → engine_not_ready（libsds.so 不可用）', () async {
-      await insertModel(
-        name: '本地模型',
-        filePath: writeValidGguf(),
-        fileSize: 24,
-      );
+    test('包目录未配置 → engine_not_ready', () async {
+      await insertModel(name: '无目录模型');
+
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+        'modelName': '无目录模型',
+      }));
+
+      expect(json['error'], 'engine_not_ready');
+      expect(json['message'], contains('未配置模型包目录'));
+    });
+
+    test('包齐全 + 引擎未打包 → engine_not_ready', () async {
+      await insertModel(name: '本地模型', filePath: writeCpuPack());
 
       final json = decode(await executor.execute('create_images', {
         'prompt': 'p',
         'modelName': '本地模型',
       }));
 
-      // 阶段 B 真实现：libsds.so 仅在 Android arm64-v8a 设备随包发布；
-      // 测试环境无 so → engine_not_ready，message 体现"libsds.so/不可用"语义
+      // 引擎二进制仅在 Android arm64-v8a 随包发布；测试环境无 so
       expect(json['error'], 'engine_not_ready');
-      expect(json['message'], contains('libsds.so'));
+      expect(json['message'], contains('引擎未打包'));
     });
   });
 
@@ -278,6 +283,17 @@ void main() {
 
       expect(json.containsKey('error'), true);
       expect(json['message'], contains('prompt'));
+    });
+
+    test('aspect_ratio 格式非法 → invalid_aspect_ratio', () async {
+      await insertModel(name: '甲', filePath: writeCpuPack());
+
+      final json = decode(await executor.execute('create_images', {
+        'prompt': 'p',
+        'aspect_ratio': 'wide',
+      }));
+
+      expect(json['error'], 'invalid_aspect_ratio');
     });
   });
 }

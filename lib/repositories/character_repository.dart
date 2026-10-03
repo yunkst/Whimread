@@ -41,17 +41,23 @@ class CharacterRepository extends BaseRepository
       'character.createCharacter',
       () async {
         final db = await database;
-        final id = await db.insert(
-          'characters',
-          character.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-        await _insertRevision(
-          character.copyWith(id: id),
-          source: source,
-          sourceRef: sourceRef,
-          reason: reason ?? '创建角色',
-        );
+        // 主表插入与 baseline 版本快照同事务：快照失败时角色不应留下
+        // （否则版本链缺 baseline，rollbackToRevision 无可回溯起点）
+        final id = await db.transaction<int>((txn) async {
+          final id = await txn.insert(
+            'characters',
+            character.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          await _insertRevision(
+            character.copyWith(id: id),
+            source: source,
+            sourceRef: sourceRef,
+            reason: reason ?? '创建角色',
+            executor: txn,
+          );
+          return id;
+        });
         LoggerService.instance.i(
           '创建角色: ${character.name} (id=$id)',
           category: LogCategory.character,
@@ -123,20 +129,26 @@ class CharacterRepository extends BaseRepository
           updatedAt: DateTime.now(),
         );
 
-        final affected = await db.update(
-          'characters',
-          updatedCharacter.toMap(),
-          where: 'id = ?',
-          whereArgs: [character.id],
-        );
-        if (affected > 0) {
-          await _insertRevision(
-            updatedCharacter,
-            source: source,
-            sourceRef: sourceRef,
-            reason: reason,
+        // 主表更新与版本快照同事务（与 chapter_repository.updateChapterContent
+        // 同标准）：快照失败时整笔回滚，避免「已变更但回滚不回去」
+        final affected = await db.transaction<int>((txn) async {
+          final affected = await txn.update(
+            'characters',
+            updatedCharacter.toMap(),
+            where: 'id = ?',
+            whereArgs: [character.id],
           );
-        }
+          if (affected > 0) {
+            await _insertRevision(
+              updatedCharacter,
+              source: source,
+              sourceRef: sourceRef,
+              reason: reason,
+              executor: txn,
+            );
+          }
+          return affected;
+        });
         LoggerService.instance.i(
           '更新角色: ${character.name} (id=${character.id}, affected=$affected)',
           category: LogCategory.character,
@@ -161,22 +173,26 @@ class CharacterRepository extends BaseRepository
       'character.deleteCharacter',
       () async {
         final db = await database;
-        // 先清图集关联行与版本记录，再删角色主行（两表均无外键，靠 repository 联动）
-        await db.delete(
-          'character_images',
-          where: 'characterId = ?',
-          whereArgs: [id],
-        );
-        await db.delete(
-          'character_revisions',
-          where: 'characterId = ?',
-          whereArgs: [id],
-        );
-        final affected = await db.delete(
-          'characters',
-          where: 'id = ?',
-          whereArgs: [id],
-        );
+        // 三表联动单事务（与 chapter_repository.deleteChapterAndReindex 同构）：
+        // 两表均无外键靠 repository 联动，中途失败会留下孤儿行或
+        // 「角色存活但版本历史已被清空」的残缺状态
+        final affected = await db.transaction<int>((txn) async {
+          await txn.delete(
+            'character_images',
+            where: 'characterId = ?',
+            whereArgs: [id],
+          );
+          await txn.delete(
+            'character_revisions',
+            where: 'characterId = ?',
+            whereArgs: [id],
+          );
+          return txn.delete(
+            'characters',
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        });
         LoggerService.instance.i(
           '删除角色: id=$id (affected=$affected)',
           category: LogCategory.character,
@@ -220,22 +236,24 @@ class CharacterRepository extends BaseRepository
       'character.deleteAllCharacters',
       () async {
         final db = await database;
-        // 先按子查询清掉该小说全部角色的图集关联行与版本记录（须在删角色前执行）
-        await db.execute(
-          'DELETE FROM character_images WHERE characterId IN '
-          '(SELECT id FROM characters WHERE novelUrl = ?)',
-          [novelUrl],
-        );
-        await db.execute(
-          'DELETE FROM character_revisions WHERE characterId IN '
-          '(SELECT id FROM characters WHERE novelUrl = ?)',
-          [novelUrl],
-        );
-        final affected = await db.delete(
-          'characters',
-          where: 'novelUrl = ?',
-          whereArgs: [novelUrl],
-        );
+        // 与 deleteCharacter 同理，三步联动单事务（子查询须在删角色前执行）
+        final affected = await db.transaction<int>((txn) async {
+          await txn.execute(
+            'DELETE FROM character_images WHERE characterId IN '
+            '(SELECT id FROM characters WHERE novelUrl = ?)',
+            [novelUrl],
+          );
+          await txn.execute(
+            'DELETE FROM character_revisions WHERE characterId IN '
+            '(SELECT id FROM characters WHERE novelUrl = ?)',
+            [novelUrl],
+          );
+          return txn.delete(
+            'characters',
+            where: 'novelUrl = ?',
+            whereArgs: [novelUrl],
+          );
+        });
         LoggerService.instance.i(
           '删除小说所有角色: novelUrl=$novelUrl (affected=$affected)',
           category: LogCategory.character,
@@ -262,26 +280,35 @@ class CharacterRepository extends BaseRepository
       int characterId, String? mediaId,
       {String? sourceRef}) async {
     final db = await database;
-    final affected = await db.update(
-      'characters',
-      {
-        'avatarMediaId': mediaId,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
-      },
-      where: 'id = ?',
-      whereArgs: [characterId],
-    );
-    if (affected > 0) {
-      final card = await getCharacter(characterId);
-      if (card != null) {
-        await _insertRevision(
-          card,
-          source: CharacterRevisionSource.manual,
-          sourceRef: sourceRef,
-          reason: mediaId == null ? '清除头像' : '更新头像',
+    // 头像变更与版本快照同事务（同 updateCharacter 的原子性标准）
+    final affected = await db.transaction<int>((txn) async {
+      final affected = await txn.update(
+        'characters',
+        {
+          'avatarMediaId': mediaId,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [characterId],
+      );
+      if (affected > 0) {
+        final maps = await txn.query(
+          'characters',
+          where: 'id = ?',
+          whereArgs: [characterId],
         );
+        if (maps.isNotEmpty) {
+          await _insertRevision(
+            Character.fromMap(maps.first),
+            source: CharacterRevisionSource.manual,
+            sourceRef: sourceRef,
+            reason: mediaId == null ? '清除头像' : '更新头像',
+            executor: txn,
+          );
+        }
       }
-    }
+      return affected;
+    });
     LoggerService.instance.d(
       '更新角色头像媒体: id=$characterId mediaId=$mediaId (affected=$affected)',
       category: LogCategory.character,
@@ -293,13 +320,17 @@ class CharacterRepository extends BaseRepository
   // ========== 角色卡版本记录（character_revisions，v53） ==========
 
   /// 追加一条版本快照（改后整卡）。内部方法：由 create/update/头像变更调用。
+  ///
+  /// [executor] 传入时在调用方事务内写入（保证主表变更与快照原子提交）；
+  /// 缺省时自行取数据库连接独立写入。
   Future<void> _insertRevision(
     Character card, {
     required String source,
     String? sourceRef,
     String? reason,
+    DatabaseExecutor? executor,
   }) async {
-    final db = await database;
+    final db = executor ?? await database;
     await db.insert(
       'character_revisions',
       CharacterRevision(
@@ -379,24 +410,29 @@ class CharacterRepository extends BaseRepository
   Future<CharacterGalleryImage> addCharacterImage(
       int characterId, String mediaId) async {
     final db = await database;
-    final maxRow = await db.rawQuery(
-        'SELECT MAX(sort) as maxSort FROM character_images '
-        'WHERE characterId = ?',
-        [characterId]);
-    final nextSort = (maxRow.first['maxSort'] as int? ?? -1) + 1;
-    final entry = CharacterGalleryImage(
-      characterId: characterId,
-      mediaId: mediaId,
-      sort: nextSort,
-      createdAt: DateTime.now(),
-    );
-    final id = await db.insert('character_images', entry.toMap());
+    // MAX(sort)+1 与 insert 同事务：事务内可见性被串行化，
+    // 快速连加不会算出相同 sort
+    final entry = await db.transaction<CharacterGalleryImage>((txn) async {
+      final maxRow = await txn.rawQuery(
+          'SELECT MAX(sort) as maxSort FROM character_images '
+          'WHERE characterId = ?',
+          [characterId]);
+      final nextSort = (maxRow.first['maxSort'] as int? ?? -1) + 1;
+      final entry = CharacterGalleryImage(
+        characterId: characterId,
+        mediaId: mediaId,
+        sort: nextSort,
+        createdAt: DateTime.now(),
+      );
+      final id = await txn.insert('character_images', entry.toMap());
+      return entry.copyWith(id: id);
+    });
     LoggerService.instance.d(
-      '角色图集追加: characterId=$characterId mediaId=$mediaId sort=$nextSort',
+      '角色图集追加: characterId=$characterId mediaId=$mediaId sort=${entry.sort}',
       category: LogCategory.character,
       tags: ['character', 'gallery', 'add'],
     );
-    return entry.copyWith(id: id);
+    return entry;
   }
 
   /// 查询角色图集（按 sort, id 升序）

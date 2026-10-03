@@ -82,11 +82,6 @@ void main() {
         createdAt: now,
         updatedAt: now));
     await repo.save(ImageModel(
-        name: '转换中',
-        status: ImageModelStatus.converting,
-        createdAt: now,
-        updatedAt: now));
-    await repo.save(ImageModel(
         name: '失败',
         status: ImageModelStatus.failed,
         createdAt: now,

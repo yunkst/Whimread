@@ -8,15 +8,14 @@
 ///
 /// 资源清单（`app-resources/v1/manifest.json`，各资源独立版本化）：
 ///   - ui_fonts  : Noto Serif/Sans SC 四个 ttf，下载后用 FontLoader 运行时注册
-///   - sd_engine : libsds.so（arm64-v8a），下载后由 SdLibrary 按绝对路径 dlopen
+///   - local_dream_qnn : 嵌入式引擎 dlopen 的 QNN 运行库 .so 集合
 ///   - ocr_model : 不走本 manifest，由 OcrModelDownloader 独立下载（已有链路），
 ///     由 bootstrap 编排层统一调度与展示进度
 ///
 /// 降级语义（所有失败都不阻塞进 App）：
 ///   - 字体缺失 → fontFamilyFallback 系统字体
 ///   - OCR 模型缺失 → OcrRestoreService 现有"模型下载中/失败"提示
-///   - libsds.so 缺失 → LocalSdCppBackend.isEngineBinaryAvailable() = false，
-///     生图走 engine_not_ready
+///   - QNN 运行库缺失 → NPU 模型包启动时 engine_not_ready，CPU 包不受影响
 library;
 
 import 'dart:async';
@@ -196,12 +195,11 @@ class ResourceBootstrapState {
 /// 统一资源 id 约定
 abstract final class ResourceIds {
   static const String uiFonts = 'ui_fonts';
-  static const String sdEngine = 'sd_engine';
   static const String ocrModel = 'ocr_model';
 
   /// Local Dream 嵌入式引擎的 QNN 运行库（多个 .so，dlopen 语义，
-  /// 不受 W^X exec 限制——与 libsds.so 同理可运行时下载）。
-  /// 引擎首次启动 NPU 类型时按需拉取，不进启动引导。
+  /// 不受 W^X exec 限制，可运行时下载）。
+  /// 由启动资源引导统一下载，引擎启动只解析本地目录。
   static const String localDreamQnn = 'local_dream_qnn';
 }
 
@@ -224,11 +222,6 @@ class AppResourceManager {
               receiveTimeout: const Duration(minutes: 30),
             )),
         retryDelay = retryDelay ?? _retryDelay;
-
-  // ---- SdLibrary 动态路径 ----
-  /// libsds.so 下载完成后的绝对路径。由 [ensureSdEngine] 成功后写入，
-  /// SdLibrary.open() 优先按此路径 dlopen（为空回退随包 so，兼容未瘦身构建）。
-  static String? sdLibraryPath;
 
   // ---- manifest ----
   Future<AppResourcesManifest> fetchManifest() async {
@@ -375,40 +368,6 @@ class AppResourceManager {
 
     if (await dest.exists()) await dest.delete();
     await tmp.rename(dest.path);
-  }
-
-  // ---- sd_engine 专用 ----
-
-  /// 确保 libsds.so 本地就绪并记录动态加载路径。
-  /// 成功后 [sdLibraryPath] 非空，SdLibrary.open() 按绝对路径打开。
-  Future<void> ensureSdEngine(DynamicResourceSpec spec,
-      {void Function(int received, int total)? onProgress}) async {
-    final paths = await ensureResource(spec, onProgress: onProgress);
-    final so = paths.values
-        .where((p) => p.endsWith('.so'))
-        .toList(growable: false);
-    if (so.isEmpty) {
-      throw StateError('sd_engine 资源里没有 .so 文件');
-    }
-    sdLibraryPath = so.first;
-    LoggerService.instance.i(
-      'libsds.so 动态加载路径已注册: ${so.first}',
-      category: LogCategory.general,
-      tags: ['resource', ResourceIds.sdEngine, 'ready'],
-    );
-  }
-
-  /// sd_engine 资源是否已下载就绪（不触发下载）。
-  /// 用于启动时把缓存路径直接挂回 [sdLibraryPath]。
-  Future<bool> tryRestoreSdEngine(DynamicResourceSpec spec) async {
-    final paths = await localReadyFiles(spec);
-    if (paths == null) return false;
-    final so = paths.values
-        .where((p) => p.endsWith('.so'))
-        .toList(growable: false);
-    if (so.isEmpty) return false;
-    sdLibraryPath = so.first;
-    return true;
   }
 
   // ---- local_dream_qnn 专用 ----

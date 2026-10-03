@@ -7,16 +7,8 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/text_game.dart';
-import '../../services/text_game/text_game_image_service.dart';
 import 'database_providers.dart';
 import 'service_providers.dart' show preferencesServiceProvider;
-
-/// 场景图异步生图服务（App 生命周期单例）
-final textGameImageServiceProvider = Provider<TextGameImageService>((ref) {
-  final service = TextGameImageService(ref);
-  ref.onDispose(service.dispose);
-  return service;
-});
 
 /// 文字游戏列表状态（管理页数据源）
 class TextGamesState {

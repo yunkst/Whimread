@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 53;
+  static const int currentVersion = 55;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -1116,6 +1116,34 @@ class DatabaseMigrations {
             'character_revisions', 'characterId');
         _log('迁移 v52 → v53: characters 加 speechStyle/currentState 列，'
             '新建 character_revisions 表（角色卡版本管理）');
+        break;
+
+      // ========== 版本 54：生图后端收敛 ==========
+      // 生图只保留 local_dream_embedded 嵌入式引擎：
+      // - local_sd（端侧 sd.cpp FFI）/ local_dream（局域网设备宿主）两个
+      //   后端连同各自链路（单文件下载/转换/设备配对）已从代码移除，其
+      //   模型行不再可用，删除（磁盘模型文件保留不删，由用户自行清理）
+      // - image_models 加 catalog_id 列：内置目录条目 id，供下载页判定
+      //   "已添加"（替代原 name 字符串拼接匹配）
+      case 54:
+        await db.execute(
+          "DELETE FROM image_models WHERE backend_type IN "
+          "('local_sd', 'local_dream', 'comfyui')",
+        );
+        await _addColumnIfNotExists(db, 'image_models', 'catalog_id', 'TEXT');
+        _log('迁移 v53 → v54: 删除已下线后端（local_sd/local_dream）的模型行，'
+            'image_models 加 catalog_id 列');
+        break;
+
+      // ========== 版本 55：模型默认出图比例 ==========
+      // SDXL 引擎在固定 1024 画布上按 aspect_ratio 合成重绘裁切，把比例
+      // 作为模型级预设持久化（空 = 1:1）；Agent 未显式传 aspect_ratio 时
+      // 由统一门面回退到该值。旧 default_width/height 像素列已无消费者，
+      // 保留不删（不做表重建）。
+      case 55:
+        await _addColumnIfNotExists(
+            db, 'image_models', 'default_aspect_ratio', 'TEXT');
+        _log('迁移 v54 → v55: image_models 加 default_aspect_ratio 列');
         break;
     }
   }

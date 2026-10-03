@@ -2,8 +2,7 @@
 ///
 /// 引擎子进程由 [LocalDreamEngineManager] 管理（localhost:8081），
 /// 生图协议复用 [LocalDreamClient] 的 /generate SSE 链路。
-/// 与远程 local_dream 后端的差异：无控制端口（/select /status 是
-/// Local Dream App 的 Kotlin 层）——模型切换由 manager 重启进程完成。
+/// 模型切换由 manager 重启进程完成。
 ///
 /// 模型条目约定（复用现有列，免迁移）：
 /// - filePath = 模型包目录（docs 下的 local_dream_models/id 目录）
@@ -20,7 +19,6 @@ import '../media/media_proxy.dart';
 import '../media/media_types.dart';
 import 'image_generation_backend.dart';
 import 'local_dream_client.dart';
-import 'local_sd_backend.dart' show LocalEngineNotReadyException;
 
 class LocalDreamEmbeddedBackend implements ImageGenerationBackend {
   final MediaProxy _mediaProxy;

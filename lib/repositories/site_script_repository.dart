@@ -52,6 +52,12 @@ class SiteScriptRepository extends BaseRepository {
     );
   }
 
+  /// 「另存」的 remote 副本 domain 后缀（见 RemoteScriptService.insertAsNewScript）：
+  /// 与同站点的本地脚本在库内共存（domain 列无唯一约束、精确匹配互不干扰）。
+  /// 爬取解析入口 [findByUrlHost] 的变体匹配会剥离该后缀兜底命中，
+  /// 避免副本成为永远无法命中的死数据。
+  static const String kRemoteDomainSuffix = '+remote';
+
   /// 按 host 变体等价查询脚本（P1 起 FAB / headless 服务的标准查找入口）
   ///
   /// 先按 [host] 精确匹配（走 DB 索引，绝大多数请求一次命中）；
@@ -61,6 +67,10 @@ class SiteScriptRepository extends BaseRepository {
   ///
   /// 变体匹配需要全表扫描，但 site_scripts 是用户级小表（<100 行），
   /// 可接受；精确路径仍是主路径。
+  ///
+  /// 匹配优先级：精确 domain > 变体等价（本地/普通行）> 「另存」的
+  /// `+remote` 副本（剥离后缀后变体等价）。本地脚本存在时优先用本地，
+  /// 副本只在本地缺失时兜底。
   Future<SiteScript?> findByUrlHost(String host) async {
     final exact = await getByDomain(host);
     if (exact != null) return exact;
@@ -76,6 +86,17 @@ class SiteScriptRepository extends BaseRepository {
         for (final row in results) {
           if (key.matchesHost(row['domain'] as String?)) {
             return SiteScript.fromMap(row);
+          }
+        }
+        // 第二遍：+remote 副本兜底（剥离后缀后按变体等价匹配）
+        for (final row in results) {
+          final domain = row['domain'] as String?;
+          if (domain != null && domain.endsWith(kRemoteDomainSuffix)) {
+            final baseDomain =
+                domain.substring(0, domain.length - kRemoteDomainSuffix.length);
+            if (key.matchesHost(baseDomain)) {
+              return SiteScript.fromMap(row);
+            }
           }
         }
         return null;
@@ -291,77 +312,82 @@ class SiteScriptRepository extends BaseRepository {
         final db = await database;
         final now = DateTime.now().millisecondsSinceEpoch;
 
-        final existing = await db.query(
-          'site_scripts',
-          where: 'domain = ?',
-          whereArgs: [domain],
-          orderBy: 'last_used_at DESC',
-        );
-
-        if (existing.isNotEmpty) {
-          // UPDATE：保留 id / created_at / use_count，重置 verified
-          final row = existing.first;
-          await db.update(
+        // 查-改-写收敛到单事务：domain 列无 UNIQUE 约束，两次并发保存
+        // （WebView 提取与 agent save_script 同时落库）若无事务会双双查空、
+        // 各自 INSERT 产生重复行（下方 cleanup 即历史重复的补偿逻辑）
+        return db.transaction<({String id, bool isInsert})>((txn) async {
+          final existing = await txn.query(
             'site_scripts',
-            {
-              'chapter_list_js': chapterListJs,
-              'chapter_content_js': chapterContentJs,
-              'url_pattern': urlPattern,
-              'sample_url': sampleUrl,
-              'last_used_at': now,
-              'verified': 0, // 脚本内容变了，需要重新验证
-              'chapter_list_ocr': chapterListOcr ? 1 : 0,
-              'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-            },
-            where: 'id = ?',
-            whereArgs: [row['id']],
+            where: 'domain = ?',
+            whereArgs: [domain],
+            orderBy: 'last_used_at DESC',
           );
 
-          // 清理同 domain 的历史重复记录（保留第一条，删除其余）
-          if (existing.length > 1) {
-            final keepId = row['id'] as String;
-            final deleted = await db.delete(
+          if (existing.isNotEmpty) {
+            // UPDATE：保留 id / created_at / use_count，重置 verified
+            final row = existing.first;
+            await txn.update(
               'site_scripts',
-              where: 'domain = ? AND id != ?',
-              whereArgs: [domain, keepId],
+              {
+                'chapter_list_js': chapterListJs,
+                'chapter_content_js': chapterContentJs,
+                'url_pattern': urlPattern,
+                'sample_url': sampleUrl,
+                'last_used_at': now,
+                'verified': 0, // 脚本内容变了，需要重新验证
+                'chapter_list_ocr': chapterListOcr ? 1 : 0,
+                'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+              },
+              where: 'id = ?',
+              whereArgs: [row['id']],
             );
+
+            // 清理同 domain 的历史重复记录（保留第一条，删除其余）
+            if (existing.length > 1) {
+              final keepId = row['id'] as String;
+              final deleted = await txn.delete(
+                'site_scripts',
+                where: 'domain = ? AND id != ?',
+                whereArgs: [domain, keepId],
+              );
+              LoggerService.instance.i(
+                '清理同域名重复脚本: domain=$domain, deleted=$deleted',
+                category: LogCategory.database,
+                tags: ['site_script', 'upsert', 'cleanup'],
+              );
+            }
+
             LoggerService.instance.i(
-              '清理同域名重复脚本: domain=$domain, deleted=$deleted',
+              '更新域名脚本 (upsert): domain=$domain id=${row['id']}',
               category: LogCategory.database,
-              tags: ['site_script', 'upsert', 'cleanup'],
+              tags: ['site_script', 'upsert', 'update'],
             );
+            return (id: row['id'] as String, isInsert: false);
           }
 
+          // INSERT：首次保存
+          final id = _newScriptId();
+          await txn.insert('site_scripts', {
+            'id': id,
+            'domain': domain,
+            'url_pattern': urlPattern,
+            'chapter_list_js': chapterListJs,
+            'chapter_content_js': chapterContentJs,
+            'sample_url': sampleUrl,
+            'created_at': now,
+            'last_used_at': now,
+            'use_count': 0,
+            'verified': 0,
+            'chapter_list_ocr': chapterListOcr ? 1 : 0,
+            'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+          });
           LoggerService.instance.i(
-            '更新域名脚本 (upsert): domain=$domain id=${row['id']}',
+            '新增域名脚本 (upsert): domain=$domain id=$id',
             category: LogCategory.database,
-            tags: ['site_script', 'upsert', 'update'],
+            tags: ['site_script', 'upsert', 'insert'],
           );
-          return (id: row['id'] as String, isInsert: false);
-        }
-
-        // INSERT：首次保存
-        final id = _newScriptId();
-        await db.insert('site_scripts', {
-          'id': id,
-          'domain': domain,
-          'url_pattern': urlPattern,
-          'chapter_list_js': chapterListJs,
-          'chapter_content_js': chapterContentJs,
-          'sample_url': sampleUrl,
-          'created_at': now,
-          'last_used_at': now,
-          'use_count': 0,
-          'verified': 0,
-          'chapter_list_ocr': chapterListOcr ? 1 : 0,
-          'chapter_content_ocr': chapterContentOcr ? 1 : 0,
+          return (id: id, isInsert: true);
         });
-        LoggerService.instance.i(
-          '新增域名脚本 (upsert): domain=$domain id=$id',
-          category: LogCategory.database,
-          tags: ['site_script', 'upsert', 'insert'],
-        );
-        return (id: id, isInsert: true);
       },
       message: (e) => 'upsert 脚本失败: domain=$domain - $e',
       category: LogCategory.database,

@@ -295,6 +295,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       preloadService.resume();
     }
 
+    // loadChapter 走 HeadlessWebView 抓取可达数秒，期间用户可能已退出
+    // 阅读页：dispose 后使用 ref 抛 ref-after-disposed，中断后续标注入库
+    // 与预加载（同文件 _navigateToChapter/_refreshChapter 均有同款守卫）
+    if (!mounted) return;
+
     // 标记章节为已读（走 ChapterMutationNotifier 收口：写库 + bump signal
     // 触发章节列表已读高亮软刷新）
     await ref.read(chapterMutationProvider.notifier).markChapterAsRead(

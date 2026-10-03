@@ -225,6 +225,41 @@ void main() {
         .getById(row.id!);
     expect(latest!.status, ImageModelStatus.ready);
   });
+
+  test('createDownloadingRow 写入 catalog_id（目录条目 id），导入行为空', () async {
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    expect(row.catalogId, 'anythingv5');
+
+    final imported = await downloader.importPackDirectory(
+      type: LocalDreamPackType.sd15Cpu,
+      sourceDir: tempDir.path,
+      displayName: '手工导入包',
+    );
+    expect(imported.row.catalogId, isEmpty);
+  });
+
+  test('recoverInterruptedDownloads：downloading 行归位 paused', () async {
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+
+    // 模拟杀进程遗留：行处于 downloading（无进行中任务）
+    final recovered = await downloader.recoverInterruptedDownloads();
+    expect(recovered, isTrue);
+
+    final latest = await container
+        .read(imageModelRepositoryProvider)
+        .getById(row.id!);
+    expect(latest!.status, ImageModelStatus.paused);
+
+    // 再跑一次：无 stuck 行时不触发写库
+    final again = await downloader.recoverInterruptedDownloads();
+    expect(again, isFalse);
+  });
 }
 
 class _UnusedApiServiceWrapper extends ApiServiceWrapper {}

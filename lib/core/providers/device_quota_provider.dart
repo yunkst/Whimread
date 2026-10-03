@@ -18,6 +18,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/device/device_auth_service.dart';
+import '../../services/logger_service.dart';
 
 class DeviceQuotaState {
   /// 当前余额；null = 不可知（见文件头注释）
@@ -101,8 +102,10 @@ class DeviceQuotaNotifier extends StateNotifier<DeviceQuotaState> {
       fetchedAt: DateTime.now(),
       hasRedeemedStar: state.hasRedeemedStar,
     );
-    // Star 标记不阻塞余额更新（标记写失败/存储慢都不应拖住 UI），
-    // 到达后补写；getBool 内部兜底不抛错。
+    // Star 标记不阻塞余额更新（标记写失败/存储慢都不应拖住 UI），到达后补写。
+    // 注入的默认值是 DeviceAuthService.hasRedeemedStarQuota → 内部走
+    // PreferencesService.getBool，而它在平台通道异常时**会 rethrow**，
+    // 所以必须显式兜底：漏出的未处理异常既刷错误日志又让标记永不更新。
     _hasRedeemedStar().then((redeemed) {
       if (!mounted) return;
       if (redeemed != state.hasRedeemedStar) {
@@ -112,6 +115,12 @@ class DeviceQuotaNotifier extends StateNotifier<DeviceQuotaState> {
           hasRedeemedStar: redeemed,
         );
       }
+    }, onError: (Object e) {
+      LoggerService.instance.d(
+        '读取 Star 标记失败，沿用当前状态: $e',
+        category: LogCategory.general,
+        tags: ['device_quota', 'star_flag', 'read_failed'],
+      );
     });
   }
 

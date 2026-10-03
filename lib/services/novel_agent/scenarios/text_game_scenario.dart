@@ -33,6 +33,7 @@ import 'package:novel_app/models/character_revision.dart'
     show CharacterRevisionSource;
 import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/models/text_game.dart';
+import 'package:novel_app/services/image_generation/image_generation_providers.dart';
 import 'package:novel_app/services/logger_service.dart';
 
 import '../agent_scenario.dart';
@@ -135,10 +136,6 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   /// 参战角色卡（characters 表行，含玩家角色卡；factory 按参战名单加载）
   final List<Character> cast;
 
-  /// 缓存当前场景上下文（buildSystemPrompt 先于工具执行被调用），
-  /// create_scene_image 需要其中的 chatSessionId 定位剧情消息链
-  AgentScenarioContext? _currentContext;
-
   TextGameScenario(this._ref, this.game, {required this.novel, required this.cast});
 
   /// 玩家角色卡（未设置/名单缺卡时为 null）
@@ -185,7 +182,6 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   /// 生成、拼在请求尾部，改卡或改设定后下一轮即生效，且不会使缓存前缀失效。
   @override
   String buildSystemPrompt(AgentScenarioContext context) {
-    _currentContext = context;
     final buf = StringBuffer();
 
     buf.writeln('你是文字游戏「${game.title}」的游戏主持人（GM）。'
@@ -221,8 +217,9 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         '创建角色卡（自动加入参战名单并记录版本），再用 speak 让其说话。'
         '不要凭空扮演「游戏当前状态」块之外的已有角色。');
     buf.writeln('8. 场景插图：按「游戏当前状态」块中的插图策略执行。'
-        'create_scene_image 是异步的：提交后立即继续输出剧情，不要等待、'
-        '不要向玩家提及生成进度。prompt 用英文外貌/构图描述'
+        'create_scene_image 是同步的：调用后会阻塞到图片生成完成（数十秒），'
+        '返回即已拿到图片，不要重复调用同一场景。'
+        'prompt 用英文外貌/构图描述'
         '（可参考角色 facePrompts/bodyPrompts/appearanceFeatures）。');
 
     return buf.toString();
@@ -352,12 +349,28 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
       case 'present_choices':
         return _executePresentChoices(args);
       case 'create_scene_image':
-        // 异步生图：校验+选模型+入队后立即返回，生成在后台完成
-        return await _ref.read(textGameImageServiceProvider).submitForTool(
-              chatSessionId: _currentContext?.chatSessionId,
-              toolCallId: toolCallId,
-              args: args,
-            );
+        // 同步生图：与 create_images 共用统一门面（await 到出图完成）
+        final prompt = (args['prompt'] as String?)?.trim() ?? '';
+        final aspectRatio = (args['aspect_ratio'] as String?)?.trim();
+        final outcome =
+            await _ref.read(imageGenerationServiceProvider).generate(
+                  prompt: prompt,
+                  aspectRatio: aspectRatio,
+                );
+        if (!outcome.ok) return jsonEncode(outcome.errorJson!);
+        return jsonEncode({
+          'success': true,
+          'message': '场景图已生成。',
+          // 与 create_images 结果同构：画廊解析可直接渲染
+          'images': outcome.result!.mediaIds
+              .map((m) => {
+                    'mediaId': m,
+                    'prompt': prompt,
+                    'modelName': outcome.result!.modelName,
+                  })
+              .toList(),
+          'count': outcome.result!.mediaIds.length,
+        });
       case 'update_game_state':
         return await _executeUpdateGameState(args);
       case 'create_character':

@@ -109,30 +109,13 @@ void main() {
     final manager = AppResourceManager(dio: Dio(), retryDelay: Duration.zero);
     await expectLater(
       manager.ensureResource(
-          DynamicResourceSpec(id: 'sd_engine', version: 'v1', files: [bad])),
+          DynamicResourceSpec(
+            id: 'local_dream_qnn', version: 'v1', files: [bad])),
       throwsA(isA<StateError>()),
     );
-    final dir = await manager.resourceDir('sd_engine');
+    final dir = await manager.resourceDir('local_dream_qnn');
     expect(dir.listSync().whereType<File>().where((f) => f.path.endsWith('.tmp')),
         isEmpty);
   });
 
-  test('tryRestoreSdEngine 命中时回填 sdLibraryPath', () async {
-    final f = spec('libsds.so');
-    final manager = AppResourceManager(dio: Dio(), retryDelay: Duration.zero);
-    final specObj = DynamicResourceSpec(id: 'sd_engine', version: 'v1', files: [f]);
-    AppResourceManager.sdLibraryPath = null;
-
-    expect(await manager.tryRestoreSdEngine(specObj), isFalse);
-
-    await manager.ensureSdEngine(specObj);
-    expect(AppResourceManager.sdLibraryPath, isNotNull);
-    expect(AppResourceManager.sdLibraryPath!.endsWith('libsds.so'), isTrue);
-
-    // 新实例（模拟重启）：tryRestore 直接恢复路径
-    AppResourceManager.sdLibraryPath = null;
-    final manager2 = AppResourceManager(dio: Dio());
-    expect(await manager2.tryRestoreSdEngine(specObj), isTrue);
-    expect(AppResourceManager.sdLibraryPath, isNotNull);
-  });
 }

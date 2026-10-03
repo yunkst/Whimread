@@ -16,9 +16,8 @@ Whimread (Flutter)
   └─ MediaProxy.upload                出图落库为 mediaId（上层无感）
 ```
 
-与远程设备模式（local_dream 后端）共用协议客户端；区别是嵌入式没有
-控制端口（/select /status 属 Local Dream App 的 Kotlin 层），换模型 =
-manager 换参数重启进程。
+协议客户端 `local_dream_client.dart` 只保留生成端口能力
+（/generate SSE + /health）；换模型 = manager 换参数重启进程。
 
 ## 构建期人工步骤（不放置则功能优雅降级为"引擎未打包"）
 
@@ -61,14 +60,15 @@ dart run tool/publish_resources.dart   --sd-so <现有 libsds.so>   --qnn-dir ld
 # 按 dist/UPLOAD_LIST.txt 上传（含更新后的 manifest.json）
 ```
 
-完成后：构建用 `-PlocalDreamEngineUrl=<第 4 步输出的 URL>`；客户端首次启动
-NPU 模型时自动下载 QNN 运行库。模型源 URL：内置目录
+完成后：构建用 `-PlocalDreamEngineUrl=<第 4 步输出的 URL>`；客户端在启动
+资源引导阶段自动下载 QNN 运行库。模型源 URL：内置目录
 （`lib/services/local_dream_embedded/model_pack.dart`）已指向 HuggingFace
 真实源（`xororz/sd-qnn` 等作者仓库），国内可在下载页切 HF Mirror。
 2. **QNN 运行库不打包**：被引擎 dlopen（不受 exec 限制），经
-   `app_resource_manager` 统一 manifest（`local_dream_qnn` 条目）首次
-   启动 NPU 模型时按需下载到 `dynamic_resources/local_dream_qnn/`，
-   sha256 校验 + 断点重试。需要往资源桶 manifest 里发布该条目
+   `app_resource_manager` 统一 manifest（`local_dream_qnn` 条目）在启动
+   资源引导阶段下载到 `dynamic_resources/local_dream_qnn/`（引擎启动只
+   解析本地目录，不触发网络），sha256 校验 + 断点重试。需要往资源桶
+   manifest 里发布该条目
    （文件名 = 原始 so 名，如 libQnnHtp.so）。**未发布前 sd15cpu 包
    （纯 MNN，无 QNN 依赖）可完整使用**。
 
@@ -111,14 +111,17 @@ image_models 行字段复用（无迁移）：`backend_type='local_dream_embedde
 
 ## 入口
 
-- 设置 → AI → **Local Dream 引擎（Beta）**：状态自检（二进制/QNN/进程）、
-  启动/停止、测试生图（SSE 进度 + 耗时）、SoC 信息。
-- 设置 → AI → 生图模型管理 → AppBar 下载图标：**下载模型包**（内置
-  目录 / 自定义 manifest URL）与**从目录导入模型包**。
+设置 → AI → **生图模型管理（Beta）**，一页完成全部操作：
+- **可下载模型包**：内置目录按设备 SoC 过滤展示，点击即下载（卡片内
+  进度/失败原因/续传；AppBar 可切 HF / HF Mirror 源）；
+- **我的模型**：就绪模型可直接「测试生图」（与 Agent 出图同走统一门面，
+  引擎按需自动启动，采样进度条 + 耗时）；AppBar 支持从目录导入模型包；
+- 引擎二进制 / QNN 运行库未就绪时页面顶部出现提示条（引擎由生成链路
+  按需自动启动，无独立管理页）。
 
 ## 已知限制
 
-- 仅 Android arm64 + 骁龙 NPU 机型收益；其他平台走 sd.cpp CPU 或远程设备。
-- anima 类型与 upscaler 模式未接入；safetensors 在线转 NPU（cvtbase）未接入。
+- 仅 Android arm64 + 骁龙 NPU 机型收益；其他平台无本机生图能力。
+- anima 类型与 upscaler 模式未接入。
 - 生成期间无前台服务保活（App 切后台过久可能被系统回收进程，重进会冷启）。
 - 引擎升级可能要求重新下载模型包（格式与引擎版本耦合）。

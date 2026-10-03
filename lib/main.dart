@@ -49,11 +49,13 @@ final _seenErrorSignatures = <int>{};
 /// 遵循项目规则：UI 文案中文、品牌名「随心阅读」。
 const String kAppTitle = '随心阅读';
 
-/// 启动期对账：进程被杀遗留的 downloading/converting 行归位为
-/// paused/failed（可续传/可重试）。异步执行，失败仅记日志，不阻塞启动。
+/// 启动期对账：进程被杀遗留的 downloading 行归位为 failed（可重试）。
+/// 异步执行，失败仅记日志，不阻塞启动。
 Future<void> _recoverImageModelDownloads(ProviderContainer container) async {
   try {
-    await container.read(imageModelDownloadServiceProvider).recoverOnStartup();
+    await container
+        .read(localDreamPackDownloaderProvider)
+        .recoverInterruptedDownloads();
   } catch (e) {
     LoggerService.instance.w(
       '生图模型下载对账失败: $e',
@@ -233,7 +235,7 @@ void main() async {
       child: const NovelReaderApp(),
     ));
 
-    // 动态资源（字体/OCR 模型/libsds.so）的启动校验与下载已移交
+    // 动态资源（字体/OCR 模型/QNN 运行库）的启动校验与下载已移交
     // _ResourceGate → resourceBootstrapNotifierProvider（见 _AppRoot）。
   }, (error, stackTrace) {
     _logGlobalError('async-unhandled', error, stackTrace,

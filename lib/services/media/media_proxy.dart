@@ -2,8 +2,8 @@
 ///
 /// 三层架构的中层。职责：
 /// - `resolve(mediaId)`：查本地 MediaStore → 命中返回；miss 返回 miss
-///   （历史回源端点已随 ComfyUI 托管下线移除，所有来源均不可回源）。
-/// - `upload(...)`：用户上传图片/视频，生成 mediaId + 存本地 + 写 media_items
+///   （无云端回源，所有来源均不可回源）。
+/// - `upload(...)`：上传图片生成 mediaId + 存本地 + 写 media_items
 ///   (localOnly=1)，返回 mediaId 供展示层使用。
 ///
 /// `mediaId` 体系：
@@ -24,7 +24,10 @@ import 'media_store.dart';
 import 'media_types.dart';
 
 /// resolve 结果状态
-enum MediaStatus { loaded, pending, failed, miss }
+///
+/// 历史上 pending/failed 服务于 ComfyUI 云回源轮询（该后端已下线），
+/// 本地生成在 upload 时即落 MediaStore，resolve 只可能 loaded/miss。
+enum MediaStatus { loaded, miss }
 
 class MediaResult {
   final MediaStatus status;
@@ -118,8 +121,7 @@ class MediaProxy {
       );
     }
 
-    // 2. miss — 回源路径已随 ComfyUI 托管下线移除
-    //    （v51 迁移把存量 text2img/image_to_video 记录归一为 local_upload）
+    // 2. miss — 无回源路径（历史上曾有云端端点，v51 已把存量记录归一）
     return MediaResult(status: MediaStatus.miss, kind: item.kind);
   }
 

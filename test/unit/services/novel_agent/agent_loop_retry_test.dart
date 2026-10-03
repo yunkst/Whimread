@@ -722,4 +722,92 @@ void main() {
       expect(events.last, isA<AgentDoneEvent>());
     });
   });
+
+  // ========================================================================
+  // P0 回归：tool 配对不变量
+  //
+  // 旧实现：一轮多个 tool_calls，前面的工具成功、后面的抛异常 →
+  // 异常冒泡到回合级 catch → 被判瞬态 → continue 整轮重试 → messages
+  // 残留 assistant(tool_calls=[c1,c2]) + tool(c1)，c2 无配套结果 →
+  // 重发非法载荷被网关 400（400 又被判可重试，重试预算全部复现）。
+  //
+  // 修复后：工具异常在 _executeSingleTool 统一转 error JSON（不再冒泡），
+  // 回合重试前另有 _repairUnpairedToolResults 兜底（覆盖 dispatch_subagent
+  // Future.wait 部分失败等残余路径）。本测试锁定「每个已声明 toolCallId
+  // 必有配套 tool 结果」这一不变量——旧代码在此场景必然失败。
+  // ========================================================================
+  group('tool 配对不变量（P0 回归）', () {
+    test('一轮多工具中途异常 → 下一轮请求仍配对完整', () async {
+      final llm = _ScriptedErrorLlm()
+        // 第 1 轮：一次声明两个 tool_calls，第二个执行时抛瞬态网络错误
+        ..enqueue(
+          response: const _ScriptedResponse(
+            toolCallDeltas: [
+              {
+                'index': 0,
+                'id': 'c1',
+                'function': {'name': 'ok_tool', 'arguments': '{}'},
+              },
+              {
+                'index': 1,
+                'id': 'c2',
+                'function': {'name': 'boom_tool', 'arguments': '{}'},
+              },
+            ],
+          ),
+        )
+        ..enqueue(response: const _ScriptedResponse(contentChunks: ['完成']));
+      final loop = AgentLoop(
+        llm: llm,
+        scenario: _SecondToolThrowsScenario(),
+        config: const AgentLoopConfig(maxRounds: 5, networkRetryPerRound: 2),
+      );
+      final events = await runLoop(loop);
+
+      expect(events.last, isA<AgentDoneEvent>(),
+          reason: '工具异常转 error JSON 后 LLM 应能自行收尾');
+
+      // 不变量：最后一次请求中，每个已声明的 toolCallId 都有配套 tool 结果
+      final lastMessages = llm.calls.last;
+      final declared = <String>{};
+      for (final m in lastMessages) {
+        for (final tc in m.toolCalls ?? const <ToolCall>[]) {
+          declared.add(tc.id);
+        }
+      }
+      final answered = lastMessages
+          .where((m) => m.role == 'tool' && m.toolCallId != null)
+          .map((m) => m.toolCallId!)
+          .toSet();
+      expect(answered, containsAll(declared),
+          reason: 'toolCall 缺配套 tool 结果 → OpenAI 兼容网关 400');
+
+      // 失败工具的显式 error 结果送达 LLM（可自行纠正），成功工具结果保留
+      final repaired =
+          lastMessages.where((m) => m.role == 'tool' && m.toolCallId == 'c2');
+      expect(repaired, isNotEmpty);
+      expect(repaired.first.content, contains('execution_failed'));
+      final ok =
+          lastMessages.where((m) => m.role == 'tool' && m.toolCallId == 'c1');
+      expect(ok, isNotEmpty);
+      expect(ok.first.content, contains('"ok"'));
+    });
+  });
+}
+
+/// 第二个工具执行时抛瞬态网络错误：复现「一轮多工具，前一个成功、
+/// 后一个异常」场景（旧实现会打破 tool 配对触发 400）。
+class _SecondToolThrowsScenario extends BaseFakeAgentScenario {
+  @override
+  Future<String> executeTool(
+    String name,
+    Map<String, dynamic> args, {
+    void Function(int generatedChars)? onProgress,
+    String? toolCallId,
+  }) async {
+    if (name == 'boom_tool') {
+      throw const SocketException('工具执行中断');
+    }
+    return jsonEncode({'ok': true});
+  }
 }
