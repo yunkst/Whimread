@@ -193,6 +193,26 @@
   提示；被删消息上未完成的生图任务完成时按 toolCallId 定位失败，安全
   no-op（消息已不存在）。
 
+## 重新开始（保留设定，重开一局）
+
+游玩页 AppBar「更多 → 重新开始」：清空本局全部剧情，回到扉页
+「开始游戏」前，从同一份设定重新开局。
+
+- 入口在从未开始的新游戏上不显示（`state.isEmptyGame` 时无剧情可重开）。
+- 实现链路：控制器 `restartGame` 复位取消标记/补选额度/运行态记账 →
+  `ScenarioSession.clearConversation()`（内存 `_agentMessages` +
+  `_pendingSegments` 清空、会话状态重置、`chat_session` 消息表清空，运行中
+  先取消当前回合；取消会摘掉事件订阅，残留 loop 的迟到事件不会写回）→
+  `_reproject`。**清的是剧情消息，不是游戏行**：会话 id 复用，设定全部保留。
+- 设定保留范围：世界观、开场、参战名单、玩家角色、玩法规则、世界与剧情线
+  条目——含游玩期演化（`update_game_state` 写入的角色近况/世界线条目、
+  `create_character` 加入的参战角色）。与回溯重选「设定演化不随剧情回退」
+  同一语义，确认弹窗如实告知。
+- 动画记账（`_settledRollIds` / `_settledChoiceIds` / `_seededTranscriptLen`）
+  在清空前复位——否则空链会先走「缩短重算」把播种长度钉在 0，新一局的内容
+  反而不会按新到访重播入场/揭晓动画。
+- 不可恢复：剧情消息直接删除，无版本记录（与回溯重选一致）。
+
 ## 「GM 思考」开关（可选幕后展示）
 
 游玩页 AppBar 的心理学图标切换（SharedPreferences 持久化，全局偏好）。

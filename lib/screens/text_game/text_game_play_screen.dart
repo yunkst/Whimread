@@ -204,13 +204,21 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
                     scenarioId: ScenarioIds.textGame,
                   ),
                 );
+              } else if (value == 'restart') {
+                _confirmRestart(context, game);
               } else if (value == 'delete') {
                 _confirmDelete(context, game);
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'ai_config', child: Text('AI 模型配置')),
-              PopupMenuItem(value: 'delete', child: Text('删除游戏')),
+            // 从未开始的新游戏没有可重开的剧情，不显示该项
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                  value: 'ai_config', child: Text('AI 模型配置')),
+              if (!state.isEmptyGame)
+                const PopupMenuItem(
+                    value: 'restart', child: Text('重新开始')),
+              const PopupMenuItem(
+                  value: 'delete', child: Text('删除游戏')),
             ],
           ),
         ],
@@ -511,6 +519,48 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     if (!context.mounted) return;
     ref.invalidate(textGamesProvider);
     Navigator.of(context).pop(); // 返回管理页
+  }
+
+  /// 重新开始：确认后清空本局剧情回到扉页，设定保留。
+  /// 动画记账一并复位——新一局的内容按"新到访"重新播入场/揭晓动画。
+  Future<void> _confirmRestart(BuildContext context, TextGame game) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('重新开始'),
+        content: Text(
+            '清空「${game.title}」的全部剧情，回到「开始游戏」前？\n\n'
+            '设定会保留：世界观、开场、参战角色、玩法规则与世界与剧情线条目'
+            '不受影响。剧情记录删除后不可恢复；运行中的回合会先中断。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('重新开始'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    // 记账复位在前：清空后链长为 0 会先走"缩短重算"分支，把播种长度钉在
+    // 0 上，新一局的内容反而不会按新到访重播
+    setState(() {
+      _settledRollIds.clear();
+      _settledChoiceIds.clear();
+      _seededTranscriptLen = -1;
+      _lastItemCount = 0;
+      _lastStreamingLen = 0;
+    });
+    await ref
+        .read(textGamePlayControllerProvider(widget.gameId).notifier)
+        .restartGame();
   }
 
   /// 被删游戏的剧情会话若正驻内存且在运行，取消其当前回合

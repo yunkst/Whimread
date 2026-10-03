@@ -454,6 +454,26 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
 
   // ===== 玩家操作 =====
 
+  /// 重新开始：清空本局全部剧情（会话消息链，内存 + DB），回到扉页
+  /// 「开始游戏」前的状态。
+  ///
+  /// **设定一律保留**：世界观、开场、参战名单、玩家角色、玩法规则、世界与
+  /// 剧情线条目都不动——含游玩期的设定演化（`update_game_state` 写入的角色
+  /// 近况/世界线条目、`create_character` 加入的参战角色）。这与剧情回溯
+  /// （[rollbackToChoices]）的「设定演化不随剧情回退」是同一语义。
+  ///
+  /// 运行中调用安全：[ScenarioSession.clearConversation] 先清内存再取消，
+  /// partial 不会被落库；取消标记与补选额度随重开一并复位。
+  Future<void> restartGame() async {
+    final session = _session;
+    if (session == null) return;
+    _cancelRequested = false;
+    _autoNudgeCount = 0;
+    _wasRunning = false; // 空链不该触发回合 finalize 补选
+    await session.clearConversation();
+    _reproject();
+  }
+
   /// 发送玩家输入（选项 label 或自由输入同路径）
   Future<void> sendInput(String text) async {
     final session = _session;
