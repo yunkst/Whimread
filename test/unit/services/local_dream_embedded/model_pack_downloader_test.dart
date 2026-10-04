@@ -47,6 +47,11 @@ void main() {
     'clip_v2.mnn': utf8.encode('MNN-BYTES'),
     'pos_emb.bin': utf8.encode('POS'),
     'token_emb.bin': utf8.encode('TOKEN'),
+    // anythingv5 是 sd15npu 包：unet/vae 三件是引擎必需（缺一引擎 exit(1)，
+    // 反馈 #12 的事故形态——旧校验清单漏了它们）
+    'unet.bin': utf8.encode('UNET-BYTES'),
+    'vae_decoder.bin': utf8.encode('VAE-DEC'),
+    'vae_encoder.bin': utf8.encode('VAE-ENC'),
     // DMD2 风格的包内配置：steps/cfg/负向词
     'config.json': utf8.encode(jsonEncode({
       'prompt': 'masterpiece',
@@ -152,7 +157,7 @@ void main() {
 
     final repo = container.read(imageModelRepositoryProvider);
     final latest = await repo.getById(row.id!);
-    expect(latest!.status, ImageModelStatus.ready);
+    expect(latest!.status, ImageModelStatus.ready, reason: latest.errorMessage);
     expect(latest.errorMessage, isEmpty);
 
     // 文件落盘（内容一致）
@@ -361,9 +366,8 @@ void main() {
     expect(await downloader.resumeOrphanDownloads(), 0);
   });
 
-  test('progressSamples：广播细粒度采样（真实字节/速度/百分比，收尾到 100）',
-      () async {
-    final samples = <PackDownloadSample>[];
+  test('progressSamples：下载+解压两阶段采样，各自收尾到 100', () async {
+    final samples = <PackTransferSample>[];
     final sub = downloader.progressSamples.listen(samples.add);
     final row = await downloader.createDownloadingRow(
       entry: entry(),
@@ -373,7 +377,7 @@ void main() {
     await downloader.startDownload(row);
     await sub.cancel();
 
-    expect(samples, isNotEmpty, reason: '下载过程必须广播采样供 UI 细看');
+    expect(samples, isNotEmpty, reason: '下载/解压过程必须广播采样供 UI 细看');
     for (final s in samples) {
       expect(s.modelId, row.id);
       expect(s.bytesPerSecond, greaterThanOrEqualTo(0));
@@ -382,14 +386,22 @@ void main() {
         expect(s.receivedBytes, lessThanOrEqualTo(s.totalBytes!));
       }
     }
-    // 字节只增不减（进度条不会倒退）
+    // 同一阶段内字节只增不减（进度条不倒退）
     for (var i = 1; i < samples.length; i++) {
-      expect(samples[i].receivedBytes,
-          greaterThanOrEqualTo(samples[i - 1].receivedBytes));
+      if (samples[i].phase == samples[i - 1].phase) {
+        expect(samples[i].receivedBytes,
+            greaterThanOrEqualTo(samples[i - 1].receivedBytes));
+      }
     }
-    // 收尾采样：真实百分比走到 100（UI 进度条不卡在 95%）
-    expect(samples.last.percent, 100);
-    expect(samples.last.etaSeconds, 0);
+    // 两个阶段都要有：下载收尾 100% + 解压收尾 100%（解压不再是无提示黑洞）
+    final dl = samples.where((s) => s.phase == PackTransferPhase.download).toList();
+    final ex = samples.where((s) => s.phase == PackTransferPhase.extract).toList();
+    expect(dl, isNotEmpty);
+    expect(dl.last.percent, 100);
+    expect(dl.last.etaSeconds, 0);
+    expect(ex, isNotEmpty, reason: '解压阶段必须可见');
+    expect(ex.first.percent, 0, reason: '解压开始时要立刻切到解压 0%');
+    expect(ex.last.percent, 100);
   });
 
   test('断点已完整（416 且大小吻合）→ 跳过下载直接解压 → ready', () async {

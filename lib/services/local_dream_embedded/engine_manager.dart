@@ -82,6 +82,13 @@ class LocalDreamEngineManager {
   String? _cachedNativeLibDir;
   bool _stopping = false;
 
+  /// 引擎最近输出的环形缓冲（stdout+stderr 混合，仅本次进程）。
+  /// 引擎崩溃的真实原因在 stderr 里，而 LogReporterService 默认只上传
+  /// warning+，d 级转发到不了反馈侧（历史反馈只有 code=1 没有原因）。
+  /// 意外退出时把缓冲以 warning 级吐出去。
+  static const int _engineOutputBufferSize = 60;
+  final List<String> _recentEngineOutput = [];
+
   /// 状态变更广播（启动就绪 / 意外退出 / 主动停止后触发）
   final StreamController<LocalDreamEngineStatus> _statusChanges =
       StreamController<LocalDreamEngineStatus>.broadcast();
@@ -274,6 +281,7 @@ class LocalDreamEngineManager {
     );
     _process = process;
     _stopping = false;
+    _recentEngineOutput.clear();
     _setStatus(LocalDreamEngineStatus(
       running: true,
       pid: process.pid,
@@ -302,6 +310,37 @@ class LocalDreamEngineManager {
           'Local Dream 引擎意外退出: pid=${process.pid}, code=$code',
           category: LogCategory.ai,
           tags: ['local_dream_engine', 'exit']);
+      // 引擎自己打的 stderr/stdout 才有真正原因（缺文件/QNN 加载失败/
+      // HTP 架构不匹配等），随反馈上报
+      if (_recentEngineOutput.isNotEmpty) {
+        LoggerService.instance.w(
+          '引擎最近输出（${_recentEngineOutput.length} 行）:\n'
+          '${_recentEngineOutput.join('\n')}',
+          category: LogCategory.ai,
+          tags: ['local_dream_engine', 'exit-output'],
+        );
+      }
+      // 模型目录实况（只看文件名，不读内容）：引擎报 "File not found" 时能
+      // 直接对照包里到底有什么
+      if (_status.modelDir != null) {
+        try {
+          final files = Directory(_status.modelDir!)
+              .listSync()
+              .whereType<File>()
+              .map((f) => f.uri.pathSegments.last)
+              .toList()
+            ..sort();
+          final shown =
+              files.take(30).join(', ') + (files.length > 30 ? ' …' : '');
+          LoggerService.instance.w(
+            '模型目录实况（${files.length} 个文件）: $shown',
+            category: LogCategory.ai,
+            tags: ['local_dream_engine', 'exit-modeldir'],
+          );
+        } catch (_) {
+          // 目录已删/无权限，忽略
+        }
+      }
       if (identical(_process, process)) {
         _process = null;
         _setStatus(const LocalDreamEngineStatus.stopped());
@@ -361,6 +400,11 @@ class LocalDreamEngineManager {
   void _logEngine(String source, String chunk) {
     for (final line in chunk.split('\n')) {
       if (line.trim().isEmpty) continue;
+      // 环形缓冲保留最近 N 行，退出时随 warning 上报
+      _recentEngineOutput.add('[$source] ${line.trim()}');
+      if (_recentEngineOutput.length > _engineOutputBufferSize) {
+        _recentEngineOutput.removeAt(0);
+      }
       LoggerService.instance.d('引擎[$source] ${line.trim()}',
           category: LogCategory.ai,
           tags: ['local_dream_engine', 'log']);

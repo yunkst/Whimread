@@ -4,7 +4,9 @@
 /// - AppBar：游戏标题 + 查看设定 + 菜单（AI 配置 / 删除游戏）
 /// - 剧情流 ListView：定稿投影（transcript）+ 运行中段（pendingSegments）
 ///   + 打字机内容（streamingParts），自动滚到底部
-/// - 底部：运行状态条（推进中/停止）→ 活动选项按钮 → 自由输入
+/// - 选项组随剧情流内联：回合结束的定稿组紧跟在剧情之后，可点可回溯，
+///   不常驻输入区上方（常驻会长期压掉阅读空间）
+/// - 底部：运行状态条（推进中/停止）→ 自由输入
 /// - 新游戏扉页：标题 + 开场卡（开场情境/世界观，超一屏可滚动）+
 ///   固定「开始游戏」按钮
 ///
@@ -270,15 +272,29 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
           animate: _seededTranscriptLen >= 0 && index >= _seededTranscriptLen,
         );
       case GameChoices():
-        // 活动选项固定渲染在输入区上方（_buildComposer），剧情流内不重复渲染；
-        // 历史选项只读展示（置灰），带锚点的提供「回溯到这一步」。
-        // 历史实例不播入场动画——活动组的动画由 composer 实例承担
-        if (seg.active) return const SizedBox.shrink();
+        // 选项组随剧情流内联渲染：回合结束的定稿组紧跟在剧情之后，看完顺手
+        // 点选，不占阅读空间。运行中的预览组（pendingSegments，index=-1，
+        // active=false）不渲染——它只是投影副产物，灰按钮闪现后紧接着还要
+        // 重播入场，不如等定稿一次性入场。历史组只读展示（置灰），带锚点的
+        // 提供「回溯到这一步」。入场动画按 toolCallId 记账只播一次
+        if (index < 0 && !seg.active) return const SizedBox.shrink();
+        final id = seg.toolCallId;
         return GameChoicesView(
           choices: seg,
+          onSelected: seg.active
+              ? (c) {
+                  _focusNode.unfocus();
+                  ref
+                      .read(textGamePlayControllerProvider(widget.gameId)
+                          .notifier)
+                      .sendChoice(c);
+                }
+              : null,
           onRollback: seg.rollbackUiIndex == null
               ? null
               : () => _confirmRollback(context, seg),
+          animate: seg.active && id != null && !_settledChoiceIds.contains(id),
+          onAnimated: id == null ? null : () => _settledChoiceIds.add(id),
         );
     }
   }
@@ -361,89 +377,59 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     final manualImage = state.game?.settings.rules.imagePolicy ==
         GameImagePolicy.manual;
 
-    // 活动选项（最后一条且 active）放在输入区上方；首次出现播错峰入场
-    // （按 toolCallId 记账，播完标记；历史/页面重入不重播）
-    final activeChoices = state.transcript
-        .whereType<GameChoices>()
-        .where((c) => c.active)
-        .toList();
-    final choicesWidget = activeChoices.isEmpty
-        ? const SizedBox.shrink()
-        : Builder(builder: (context) {
-            final seg = activeChoices.last;
-            final id = seg.toolCallId;
-            return GameChoicesView(
-              choices: seg,
-              onSelected: (c) {
-                _focusNode.unfocus();
-                controller.sendChoice(c);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.4)),
+        ),
+      ),
+      child: Row(
+        children: [
+          if (manualImage)
+            IconButton(
+              tooltip: '生成当前场景插图',
+              onPressed: state.agentRunning
+                  ? null
+                  : () => controller
+                      .sendInput('生成当前场景的插图（只生成插图，不要推进剧情）'),
+              icon: const Icon(Icons.palette_outlined),
+            ),
+          Expanded(
+            child: TextField(
+              controller: _inputController,
+              focusNode: _focusNode,
+              minLines: 1,
+              maxLines: 4,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (text) {
+                if (text.trim().isEmpty) return;
+                _inputController.clear();
+                controller.sendInput(text);
               },
-              animate: id != null && !_settledChoiceIds.contains(id),
-              onAnimated: () {
-                if (id != null) _settledChoiceIds.add(id);
-              },
-            );
-          });
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        choicesWidget,
-        Container(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            border: Border(
-              top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.4)),
+              decoration: const InputDecoration(
+                hintText: '描述你的行动或台词…',
+                border: InputBorder.none,
+                isDense: true,
+              ),
             ),
           ),
-          child: Row(
-            children: [
-              if (manualImage)
-                IconButton(
-                  tooltip: '生成当前场景插图',
-                  onPressed: state.agentRunning
-                      ? null
-                      : () => controller
-                          .sendInput('生成当前场景的插图（只生成插图，不要推进剧情）'),
-                  icon: const Icon(Icons.palette_outlined),
-                ),
-              Expanded(
-                child: TextField(
-                  controller: _inputController,
-                  focusNode: _focusNode,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (text) {
-                    if (text.trim().isEmpty) return;
-                    _inputController.clear();
-                    controller.sendInput(text);
-                  },
-                  decoration: const InputDecoration(
-                    hintText: '描述你的行动或台词…',
-                    border: InputBorder.none,
-                    isDense: true,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: '发送',
-                onPressed: () {
-                  final text = _inputController.text;
-                  if (text.trim().isEmpty) return;
-                  _inputController.clear();
-                  controller.sendInput(text);
-                },
-                icon: Icon(
-                  Icons.send_rounded,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-            ],
+          IconButton(
+            tooltip: '发送',
+            onPressed: () {
+              final text = _inputController.text;
+              if (text.trim().isEmpty) return;
+              _inputController.clear();
+              controller.sendInput(text);
+            },
+            icon: Icon(
+              Icons.send_rounded,
+              color: theme.colorScheme.primary,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

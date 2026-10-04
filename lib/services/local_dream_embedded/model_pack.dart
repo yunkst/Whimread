@@ -56,26 +56,42 @@ enum LocalDreamPackType {
   bool get needsQnnLibs => this != LocalDreamPackType.sd15Cpu;
 
   /// 该类型必需的模型文件（相对包目录）
+  /// 引擎启动必需文件（逐字对齐 main.cpp buildPipeline 的 required 列表：
+  /// 缺任一文件引擎 showHelpAndExit → exit(1)，表现为「引擎意外退出 code=1」）。
+  /// 注意 unet/vae 的扩展名按类型：CPU 走 .mnn，NPU 走 .bin。
   List<String> get requiredFiles {
     switch (this) {
       case LocalDreamPackType.sd15Cpu:
+        return const [
+          'tokenizer.json',
+          'clip_v2.mnn',
+          'pos_emb.bin',
+          'token_emb.bin',
+          'unet.mnn',
+          'vae_decoder.mnn',
+          'vae_encoder.mnn',
+        ];
       case LocalDreamPackType.sd15Npu:
         return const [
           'tokenizer.json',
           'clip_v2.mnn',
           'pos_emb.bin',
           'token_emb.bin',
+          'unet.bin',
+          'vae_decoder.bin',
+          'vae_encoder.bin',
         ];
       case LocalDreamPackType.sdxl:
         return const [
           'tokenizer.json',
           'clip.mnn',
+          'clip_2.mnn',
           'pos_emb.bin',
           'token_emb.bin',
-          'clip_2.mnn',
           'pos_emb_2.bin',
           'token_emb_2.bin',
           'unet.bin',
+          'vae_decoder.bin',
           'vae_encoder.bin',
         ];
     }

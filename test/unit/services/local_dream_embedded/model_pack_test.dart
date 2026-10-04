@@ -22,11 +22,20 @@ void main() {
       expect(LocalDreamPackType.parse('unknown'), isNull);
     });
 
-    test('必需文件清单：SD1.5 四件，SDXL 九件', () {
+    test('必需文件清单：与引擎 main.cpp required 逐字一致（缺一即 exit(1)）',
+        () {
+      // 历史事故反馈 #12：旧清单漏了 vae_decoder.bin 等核心权重，包被误判
+      // ready，引擎启动即退 code=1
+      expect(LocalDreamPackType.sd15Cpu.requiredFiles,
+          ['tokenizer.json', 'clip_v2.mnn', 'pos_emb.bin', 'token_emb.bin',
+           'unet.mnn', 'vae_decoder.mnn', 'vae_encoder.mnn']);
       expect(LocalDreamPackType.sd15Npu.requiredFiles,
-          ['tokenizer.json', 'clip_v2.mnn', 'pos_emb.bin', 'token_emb.bin']);
-      expect(LocalDreamPackType.sdxl.requiredFiles, hasLength(9));
-      expect(LocalDreamPackType.sdxl.requiredFiles, contains('unet.bin'));
+          ['tokenizer.json', 'clip_v2.mnn', 'pos_emb.bin', 'token_emb.bin',
+           'unet.bin', 'vae_decoder.bin', 'vae_encoder.bin']);
+      expect(LocalDreamPackType.sdxl.requiredFiles, hasLength(10));
+      expect(LocalDreamPackType.sdxl.requiredFiles,
+          containsAll(['unet.bin', 'vae_decoder.bin', 'vae_encoder.bin',
+                       'clip_2.mnn', 'token_emb_2.bin']));
     });
 
     test('QNN 库需求与画布尺寸', () {
@@ -157,7 +166,7 @@ void main() {
         LocalDreamModelPack.missingFiles(
             '${tempDir.path}${Platform.pathSeparator}nope',
             LocalDreamPackType.sdxl),
-        hasLength(9),
+        hasLength(10),
       );
     });
   });

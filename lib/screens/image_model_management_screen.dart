@@ -431,47 +431,53 @@ class _ModelCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final isReady = model.status.isReady;
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          model.name,
-                          style: Theme.of(context).textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+    final body = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        model.name,
+                        style: Theme.of(context).textTheme.titleMedium,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      if (model.status != ImageModelStatus.ready) ...[
-                        const SizedBox(width: 6),
-                        _chip(context, _statusLabel(model.status),
-                            _statusColor(model.status, colorScheme)),
-                      ],
-                      if (model.isDefault) ...[
-                        const SizedBox(width: 6),
-                        _chip(context, '默认', colorScheme.primary),
-                      ],
-                      if (!model.isEnabled) ...[
-                        const SizedBox(width: 6),
-                        _chip(context, '已停用', colorScheme.outline),
-                      ],
+                    ),
+                    if (model.status != ImageModelStatus.ready) ...[
+                      const SizedBox(width: 6),
+                      _chip(context, _statusLabel(model.status),
+                          _statusColor(model.status, colorScheme)),
                     ],
-                  ),
+                    if (model.isDefault) ...[
+                      const SizedBox(width: 6),
+                      _chip(context, '默认', colorScheme.primary),
+                    ],
+                    if (!model.isEnabled) ...[
+                      const SizedBox(width: 6),
+                      _chip(context, '已停用', colorScheme.outline),
+                    ],
+                  ],
                 ),
-                PopupMenuButton<String>(
-                  onSelected: (action) => _onMenu(context, ref, action),
-                  itemBuilder: (_) => _menuItems(),
+              ),
+              // 对齐 Local Dream：已就绪模型一键直达测试生图，不用翻菜单
+              if (isReady)
+                IconButton(
+                  tooltip: '测试生图',
+                  icon: Icon(Icons.play_arrow_rounded,
+                      color: colorScheme.primary, size: 28),
+                  onPressed: () => ImageGenTestSheet.show(context, model),
                 ),
-              ],
-            ),
+              PopupMenuButton<String>(
+                onSelected: (action) => _onMenu(context, ref, action),
+                itemBuilder: (_) => _menuItems(),
+              ),
+            ],
+          ),
             // 生命周期区：进度条 / 错误信息 / 状态操作按钮
             if (model.status == ImageModelStatus.downloading) ...[
               const SizedBox(height: 10),
@@ -524,22 +530,21 @@ class _ModelCard extends ConsumerWidget {
                       color: colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
               ),
-              const SizedBox(height: 10),
-              // 测试生图：直出（下载完成后即可验证引擎链路）
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: model.isEnabled
-                      ? () => ImageGenTestSheet.show(context, model)
-                      : null,
-                  icon: const Icon(Icons.image_outlined, size: 18),
-                  label: const Text('测试生图'),
-                ),
-              ),
             ],
           ],
         ),
-      ),
+      );
+    // 已就绪模型：整卡可点直达测试生图（对齐 Local Dream 的「点模型即运行」）
+    return Card(
+      margin: EdgeInsets.zero,
+      child: isReady
+          ? InkWell(
+              onTap: model.isEnabled
+                  ? () => ImageGenTestSheet.show(context, model)
+                  : null,
+              child: body,
+            )
+          : body,
     );
   }
 
@@ -712,8 +717,8 @@ class _LiveDownloadProgress extends ConsumerStatefulWidget {
 
 class _LiveDownloadProgressState
     extends ConsumerState<_LiveDownloadProgress> {
-  StreamSubscription<PackDownloadSample>? _sub;
-  PackDownloadSample? _sample;
+  StreamSubscription<PackTransferSample>? _sub;
+  PackTransferSample? _sample;
 
   @override
   void initState() {
@@ -747,13 +752,31 @@ class _LiveDownloadProgressState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final s = _sample;
+    final isExtract = s?.phase == PackTransferPhase.extract;
     final percent = s?.percent ?? widget.dbPercent;
     final ratio = s?.totalBytes != null && s!.totalBytes! > 0
         ? (s.receivedBytes / s.totalBytes!).clamp(0.0, 1.0)
         : widget.dbPercent / 100.0;
 
-    final parts = <String>['下载中 $percent%'];
-    if (s != null) {
+    final parts = <String>[];
+    if (s == null) {
+      // 冷启动/回前台时还没有采样：DB ≥95% 多半是「下载完、解压没做完」
+      parts.add(widget.dbPercent >= 95 ? '已下载完成，等待解压' : '下载中 $percent%');
+    } else if (isExtract) {
+      parts.add('正在解压 $percent%');
+      parts.add(s.totalBytes != null
+          ? '${FormatUtils.formatFileSize(s.receivedBytes)} / '
+              '${FormatUtils.formatFileSize(s.totalBytes!)}'
+          : FormatUtils.formatFileSize(s.receivedBytes));
+      if (s.bytesPerSecond > 0) {
+        parts.add('${FormatUtils.formatFileSize(s.bytesPerSecond.round())}/s');
+        final eta = s.etaSeconds;
+        if (eta != null) parts.add('剩余 ${_eta(eta)}');
+      } else {
+        parts.add('等待数据…');
+      }
+    } else {
+      parts.add('下载中 $percent%');
       parts.add(s.totalBytes != null
           ? '${FormatUtils.formatFileSize(s.receivedBytes)} / '
               '${FormatUtils.formatFileSize(s.totalBytes!)}'
