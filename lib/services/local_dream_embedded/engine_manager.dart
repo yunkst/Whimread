@@ -20,6 +20,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
+import 'package:path/path.dart' as p;
 
 import '../app_resource_manager.dart';
 import '../logger_service.dart';
@@ -121,23 +122,31 @@ class LocalDreamEngineManager {
   /// 当前运行状态（同步快照）
   LocalDreamEngineStatus get status => _status;
 
-  /// 构造引擎启动命令行（纯函数，便于测试参数矩阵）。
+  /// 构造引擎启动参数（纯函数，便于测试参数矩阵）。
+  ///
+  /// **不要把可执行文件路径放进参数**：Dart 的 `Process.start(path, args)`
+  /// 会自己把 path 作为 argv[0]，重复传入会让引擎的参数解析器先遇到一个
+  /// 非选项 token，报 "Invalid argument passed." + 打印 usage 后 exit(1)
+  /// （历史事故：预览版一直 code=1，引擎从未成功启动过；Local Dream 用 Java
+  /// ProcessBuilder 不传 argv[0] 故正常）。
   ///
   /// 对齐 Local Dream BackendService.startBackend：
-  /// `<exe> --type <t> --model_dir <dir> --port 8081 [--lib_dir <runtime>]`
-  /// （sd15cpu 纯 MNN 不需要 lib_dir；QNN 类型必须提供，缺失抛异常）。
+  /// `--type <t> --model_dir <dir> --port 8081 [--lib_dir <runtime>]`
+  /// `[--use_v_pred] [--lowram]`
+  /// （sd15cpu 纯 MNN 不需要 lib_dir；QNN 类型必须提供，缺失抛异常；
+  ///  SDXL 默认带 --lowram：分阶段加载/释放模型，手机内存必需）。
   @visibleForTesting
   static List<String> buildEngineArgs({
     required LocalDreamPackType type,
     required String modelDir,
-    required String executablePath,
     String? runtimeDir,
+    bool useVPred = false,
+    bool lowram = false,
   }) {
     if (type.needsQnnLibs && runtimeDir == null) {
       throw const LocalDreamEngineException('QNN 运行库目录缺失，无法启动 NPU 引擎');
     }
     return [
-      executablePath,
       '--type',
       type.dbName,
       '--model_dir',
@@ -147,6 +156,10 @@ class LocalDreamEngineManager {
       // 仅 QNN 类型需要 lib_dir（sd15cpu 纯 MNN，即使给了 runtimeDir 也不带）
       if (type.needsQnnLibs && runtimeDir != null)
         ...['--lib_dir', runtimeDir],
+      // v-prediction 模型：包目录里有 V_PRED 标记文件时启用
+      if (useVPred) '--use_v_pred',
+      // SDXL 分阶段加载/释放（Local Dream 默认开启）
+      if (lowram) '--lowram',
     ];
   }
 
@@ -258,23 +271,42 @@ class LocalDreamEngineManager {
     // QNN 运行库目录（启动引导已下载校验，这里纯本地解析）
     final runtimeDir = await _resolveQnnRuntimeDir(type);
 
+    // 对齐 Local Dream startBackend 的设备相关开关：
+    // - v-prediction：包目录有 V_PRED 标记文件时启用
+    // - SDXL 默认 --lowram（分阶段加载/释放模型，手机内存必需；
+    //   Local Dream 的 sdxl_lowram preference 默认 true）
+    final useVPred = File(p.join(modelDir, 'V_PRED')).existsSync();
     final args = buildEngineArgs(
       type: type,
       modelDir: modelDir,
-      executablePath: executable.path,
       runtimeDir: runtimeDir,
+      useVPred: useVPred,
+      lowram: type == LocalDreamPackType.sdxl,
     );
-
+    // 启动日志带完整 argv：传参类问题一眼可见（反馈 #12→#14 的教训）
     LoggerService.instance.i(
-        '启动 Local Dream 引擎: type=${type.dbName}, modelDir=$modelDir',
+        '启动 Local Dream 引擎: type=${type.dbName}, modelDir=$modelDir, '
+        'port=$port, libDir=${runtimeDir ?? "无"}, '
+        'useVPred=$useVPred, lowram=${type == LocalDreamPackType.sdxl}',
         category: LogCategory.ai,
         tags: ['local_dream_engine', 'start']);
 
     final process = await Process.start(
       executable.path,
       args,
+      // 对齐 Local Dream：LD_LIBRARY_PATH 含系统与 vendor 路径（引擎可能
+      // 依赖 GPU/vendor 库），DSP_LIBRARY_PATH 指向 QNN 运行库（DSP 侧），
+      // 工作目录设为 nativeLibraryDir。
+      workingDirectory: nativeDir,
       environment: {
-        if (runtimeDir != null) 'LD_LIBRARY_PATH': runtimeDir,
+        if (runtimeDir != null)
+          'LD_LIBRARY_PATH': [
+            runtimeDir,
+            '/system/lib64',
+            '/vendor/lib64',
+            '/vendor/lib64/egl',
+          ].join(':'),
+        if (runtimeDir != null) 'DSP_LIBRARY_PATH': runtimeDir,
       },
       // 引擎日志走 stdout/stderr，转发到应用日志便于排障
       mode: ProcessStartMode.normal,

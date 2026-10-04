@@ -172,26 +172,54 @@ void main() {
   });
 
   group('LocalDreamEngineManager.buildEngineArgs', () {
-    test('sd15cpu：无 --lib_dir', () {
+    test('参数不含可执行文件路径（Dart 自动作 argv[0]，重复传入引擎判非法参数）',
+        () {
       final args = LocalDreamEngineManager.buildEngineArgs(
         type: LocalDreamPackType.sd15Cpu,
         modelDir: '/models/p1',
-        executablePath: '/native/libstable_diffusion_core.so',
         runtimeDir: '/runtime',
       );
       expect(args, [
-        '/native/libstable_diffusion_core.so',
         '--type', 'sd15cpu',
         '--model_dir', '/models/p1',
         '--port', '8081',
       ]);
+      // 历史事故反馈 #12→#14：参数首位带 .so 路径，引擎 getopt 遇到非选项
+      // token 打印 usage 后 exit(1)，引擎从未成功启动
+      expect(args.where((a) => a.endsWith('.so')), isEmpty);
+    });
+
+    test('SDXL 默认带 --lowram，V_PRED 标记文件触发 --use_v_pred（对齐 Local Dream）',
+        () {
+      final sdxlArgs = LocalDreamEngineManager.buildEngineArgs(
+        type: LocalDreamPackType.sdxl,
+        modelDir: '/models/sdxl',
+        runtimeDir: '/runtime',
+        lowram: true,
+      );
+      expect(sdxlArgs, contains('--lowram'),
+          reason: '手机内存必需：SDXL 分阶段加载/释放');
+      expect(
+        LocalDreamEngineManager.buildEngineArgs(
+          type: LocalDreamPackType.sdxl,
+          modelDir: '/models/sdxl',
+          runtimeDir: '/runtime',
+        ),
+        isNot(contains('--lowram')),
+      );
+      final vPredArgs = LocalDreamEngineManager.buildEngineArgs(
+        type: LocalDreamPackType.sd15Npu,
+        modelDir: '/models/npu',
+        runtimeDir: '/runtime',
+        useVPred: true,
+      );
+      expect(vPredArgs, contains('--use_v_pred'));
     });
 
     test('QNN 类型：带 --lib_dir；缺运行时目录抛异常', () {
       final args = LocalDreamEngineManager.buildEngineArgs(
         type: LocalDreamPackType.sdxl,
         modelDir: '/models/p2',
-        executablePath: '/native/libstable_diffusion_core.so',
         runtimeDir: '/runtime',
       );
       expect(args.sublist(args.indexOf('--lib_dir')),
@@ -202,7 +230,6 @@ void main() {
         () => LocalDreamEngineManager.buildEngineArgs(
           type: LocalDreamPackType.sdxl,
           modelDir: '/models/p2',
-          executablePath: '/native/x',
         ),
         throwsA(isA<LocalDreamEngineException>()),
       );

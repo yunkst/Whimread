@@ -118,7 +118,10 @@ class _ImageModelManagementScreenState
               ...sorted.map((m) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: _ModelCard(
-                        model: m, existingNames: _nameSet(sorted, m)),
+                      model: m,
+                      existingNames: _nameSet(sorted, m),
+                      onRedownload: (m) => _redownload(m, soc?.npuSuffix),
+                    ),
                   )),
               const SizedBox(height: 8),
             ],
@@ -267,6 +270,56 @@ class _ImageModelManagementScreenState
     } finally {
       if (mounted) setState(() => _startingDownload = false);
     }
+  }
+
+  /// 重新下载已就绪的模型包（坏包自愈入口）：删除本地包与记录后，
+  /// 从当前所选下载源重新下载。
+  Future<void> _redownload(ImageModel model, String? socSuffix) async {
+    final entry = _catalogEntryOf(model);
+    if (entry == null) {
+      ToastUtils.showError('目录导入的模型包无法重新下载，请删除后重新导入',
+          context: context);
+      return;
+    }
+    final sourceName = LocalDreamBaseUrl.choices
+        .where((c) => c.$1 == _baseUrl)
+        .map((c) => c.$2)
+        .firstOrNull;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('重新下载'),
+        content: Text(
+          '将删除本地「${model.name}」模型包（约 ${entry.approximateSize}），'
+          '并从 ${sourceName ?? "当前下载源"} 重新下载。确定吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('重新下载'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await ref
+        .read(localDreamPackDownloaderProvider)
+        .cancelAndDelete(model);
+    if (!mounted) return;
+    await _startDownload(entry, socSuffix);
+  }
+
+  /// 按目录 id 找回目录条目（导入的包 catalogId 为空，返回 null）
+  LocalDreamPackEntry? _catalogEntryOf(ImageModel model) {
+    for (final e in localDreamPackCatalog) {
+      if (e.id == model.catalogId) return e;
+    }
+    return null;
   }
 
   /// 导入 Local Dream 模型包目录（选类型 → SAF 选目录 → 拷贝校验落库）
@@ -425,7 +478,14 @@ class _ModelCard extends ConsumerWidget {
   final ImageModel model;
   final Set<String> existingNames;
 
-  const _ModelCard({required this.model, required this.existingNames});
+  /// 重新下载（已就绪的坏包自愈入口，由父 State 复用下载流程）
+  final void Function(ImageModel model)? onRedownload;
+
+  const _ModelCard({
+    required this.model,
+    required this.existingNames,
+    this.onRedownload,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -598,6 +658,8 @@ class _ModelCard extends ConsumerWidget {
         return [
           const PopupMenuItem(value: 'test', child: Text('测试生图')),
           const PopupMenuItem(value: 'edit', child: Text('编辑')),
+          if (model.catalogId.isNotEmpty)
+            const PopupMenuItem(value: 'redownload', child: Text('重新下载')),
           if (!model.isDefault)
             const PopupMenuItem(value: 'default', child: Text('设为默认')),
           PopupMenuItem(
@@ -640,6 +702,9 @@ class _ModelCard extends ConsumerWidget {
       case 'resume':
       case 'retry':
         await admin.resume(model);
+        break;
+      case 'redownload':
+        onRedownload?.call(model);
         break;
       case 'delete':
         if (!context.mounted) return;
