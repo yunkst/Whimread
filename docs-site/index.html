@@ -3,310 +3,682 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>随心阅读 · Whimread · AI 原生小说阅读平台</title>
-<meta name="description" content="Novel Builder 是一个 AI 原生小说阅读平台：读喜欢的小说，用 AI 改写剧情与设定，或从零创作一本。本地书架 + Headless WebView + Agent Chat + ComfyUI + OCR 反爬。" />
+<title>随心阅读 Whimread · AI 原生小说阅读平台</title>
+<meta name="description" content="随心阅读 Whimread：读喜欢的、改不爽的、写自己的。内置浏览器抓任意小说站、AI 标注改写、Agent 陪写创作、文字游戏。全部动画演示，无需截图与视频。" />
+<meta name="theme-color" content="#FFFDF8" />
+<link rel="canonical" href="https://yunkst.github.io/Whimread/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="随心阅读 Whimread" />
+<meta property="og:title" content="随心阅读 Whimread · AI 原生小说阅读平台" />
+<meta property="og:description" content="内置浏览器抓任意小说站、AI 标注改写、Agent 陪写创作、文字游戏——每个功能演示都是 HTML 动画实时模拟的 App 界面，手机上就能交互体验。" />
+<meta property="og:url" content="https://yunkst.github.io/Whimread/" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="随心阅读 Whimread · AI 原生小说阅读平台" />
+<meta name="twitter:description" content="内置浏览器抓任意小说站、AI 标注改写、Agent 陪写创作、文字游戏——全部 HTML 动画演示。" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23B8843A'/%3E%3Ctext x='32' y='45' font-size='36' font-family='serif' text-anchor='middle' fill='%23FFFDF8'%3E%E9%9A%8F%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+<noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>.reveal { opacity: 1 !important; transform: none !important; }</style>
+</noscript>
 <style>
-  /* ============ 浅色阅读风 · 纸张/书卷质感配色 ============ */
-  :root {
-    --bg: #faf7f2;          /* 主背景：温暖纸张白 */
-    --bg-alt: #f3ece0;      /* 区块分隔：略深纸色 */
-    --paper: #fffdf8;       /* 卡片纸张 */
-    --ink: #2b2620;         /* 标题墨黑 */
-    --ink-soft: #6b6358;    /* 正文柔墨灰 */
-    --ink-faint: #9a9186;   /* 弱化文字 */
-    --accent: #a0522d;      /* 书脊赭石 */
-    --accent-deep: #7e3f22; /* 深赭石（hover） */
-    --accent-soft: #e8d5c4; /* 浅赭石底 */
-    --gold: #b8860b;        /* 点缀金 */
-    --line: #e7ddcc;        /* 分割线 */
-    --code-bg: #2b2620;     /* 代码块深底 */
-    --shadow: 0 1px 2px rgba(43,38,32,.04), 0 8px 24px rgba(43,38,32,.06);
-    --shadow-lg: 0 4px 12px rgba(43,38,32,.06), 0 24px 48px rgba(43,38,32,.10);
-    --radius: 14px;
-    --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
-    --sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-    --maxw: 1140px;
-  }
+/* ==================================================================
+   设计令牌 —— 与 App 内「晨读书馆」主题同一套色板
+   （lib/core/theme/app_colors.dart：paper #FFFDF8 / ink #2B2620 /
+     inkSoft #6B6358 / divider #E5DDCC / amber #B8843A / moss #5E7A3C）
+   ================================================================== */
+:root {
+  --bg: #faf7f1;
+  --bg-alt: #f3ecdf;
+  --paper: #fffdf8;
+  --ink: #2b2620;
+  --ink-soft: #6b6358;
+  --ink-faint: #9a9186;
+  --amber: #b8843a;
+  --amber-deep: #8c5a1f;
+  --amber-soft: #f3e6d0;
+  --gold: #d4af37;
+  --moss: #5e7a3c;
+  --line: #e5ddcc;
+  --code-bg: #241f16;
+  --shadow: 0 1px 2px rgba(43,38,32,.04), 0 8px 24px rgba(43,38,32,.07);
+  --shadow-lg: 0 4px 12px rgba(43,38,32,.07), 0 24px 48px rgba(43,38,32,.12);
+  --radius: 14px;
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
+  --sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', Consolas, monospace;
+  --maxw: 1140px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* 网格子项默认 min-width:auto，会被内部宽内容（如代码块）撑破窄屏 */
+.quick-dual > *, .scene > *, .hero-grid > *, .stack-wrap > *, .smart-grid > *, .hosted-grid > *, .stats-grid > *, .foot-grid > * { min-width: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans); color: var(--ink-soft); background: var(--bg);
+  line-height: 1.75; -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body {
-    font-family: var(--sans);
-    color: var(--ink-soft);
-    background: var(--bg);
-    line-height: 1.75;
-    -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-  }
-  a { color: inherit; text-decoration: none; }
-  img { max-width: 100%; display: block; }
-  code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
+/* ============ 导航 ============ */
+header.nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(250,247,241,.85); backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid transparent; transition: border-color .25s, box-shadow .25s;
+}
+header.nav.scrolled { border-bottom-color: var(--line); box-shadow: 0 1px 0 rgba(43,38,32,.04); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 900; color: var(--ink); font-size: 19px; }
+.brand .mark {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--amber), var(--gold));
+  display: grid; place-items: center; color: #fff; font-size: 15px;
+  box-shadow: 0 4px 10px rgba(184,132,58,.35);
+}
+.nav-links { display: flex; align-items: center; gap: 26px; }
+.nav-links a { font-size: 14.5px; color: var(--ink-soft); transition: color .2s; }
+.nav-links a:hover { color: var(--amber); }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 500;
+  padding: 10px 18px; border-radius: 999px; cursor: pointer; border: 1px solid transparent;
+  transition: all .2s; white-space: nowrap;
+}
+.btn-primary { background: var(--ink); color: var(--bg); }
+.btn-primary:hover { background: #000; transform: translateY(-1px); }
+.btn-outline { border-color: var(--line); color: var(--ink); background: var(--paper); }
+.btn-outline:hover { border-color: var(--amber); color: var(--amber); }
+.btn-gh { background: var(--amber); color: #fff; }
+.btn-gh:hover { background: var(--amber-deep); }
+.menu-toggle { display: none; background: none; border: none; font-size: 22px; color: var(--ink); cursor: pointer; }
 
-  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+/* ============ Hero ============ */
+.hero { position: relative; padding: 72px 0 64px; overflow: hidden; }
+.hero::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(620px 380px at 10% 6%, rgba(212,175,55,.12), transparent 60%),
+    radial-gradient(560px 360px at 94% 14%, rgba(184,132,58,.11), transparent 62%);
+}
+.hero-grid { position: relative; display: grid; grid-template-columns: 1.02fr .98fr; gap: 48px; align-items: center; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--amber-deep);
+  font-weight: 500; background: var(--amber-soft); padding: 6px 14px; border-radius: 999px; margin-bottom: 20px;
+}
+.eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.4);opacity:.6} }
+h1.title { font-family: var(--serif); font-weight: 900; color: var(--ink); font-size: clamp(38px, 5.2vw, 58px); line-height: 1.12; letter-spacing: -.5px; }
+h1.title em { font-style: normal; color: var(--amber); }
+.lead-tag { font-family: var(--serif); font-size: 19px; color: var(--amber); font-weight: 600; margin: -8px 0 14px; letter-spacing: 1.5px; }
+.lead { margin: 20px 0 28px; font-size: 17px; color: var(--ink-soft); max-width: 540px; }
+.cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 26px; }
+.badge { font-size: 12.5px; color: var(--ink-soft); background: var(--paper); border: 1px solid var(--line); padding: 5px 11px; border-radius: 6px; }
 
-  /* ============ 导航 ============ */
-  header.nav {
-    position: sticky; top: 0; z-index: 50;
-    background: rgba(250,247,242,.82);
-    backdrop-filter: saturate(180%) blur(12px);
-    border-bottom: 1px solid transparent;
-    transition: border-color .25s, box-shadow .25s;
-  }
-  header.nav.scrolled { border-bottom-color: var(--line); box-shadow: 0 1px 0 rgba(43,38,32,.03); }
-  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-weight: 900; color: var(--ink); font-size: 19px; }
-  .brand .mark {
-    width: 30px; height: 30px; border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), var(--gold));
-    display: grid; place-items: center; color: #fff; font-size: 16px;
-    box-shadow: 0 4px 10px rgba(160,82,45,.35);
-  }
-  .nav-links { display: flex; align-items: center; gap: 28px; }
-  .nav-links a { font-size: 14.5px; color: var(--ink-soft); transition: color .2s; }
-  .nav-links a:hover { color: var(--accent); }
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 14.5px; font-weight: 500; padding: 10px 18px;
-    border-radius: 999px; cursor: pointer; border: 1px solid transparent;
-    transition: all .2s; white-space: nowrap;
-  }
-  .btn-primary { background: var(--ink); color: var(--bg); }
-  .btn-primary:hover { background: #000; transform: translateY(-1px); }
-  .btn-outline { border-color: var(--line); color: var(--ink); background: var(--paper); }
-  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-gh { background: var(--accent); color: #fff; }
-  .btn-gh:hover { background: var(--accent-deep); }
-  .menu-toggle { display: none; background: none; border: none; font-size: 22px; color: var(--ink); cursor: pointer; }
+/* ============ 通用 section ============ */
+section.block { padding: 84px 0; }
+.sec-head { text-align: center; max-width: 700px; margin: 0 auto 52px; }
+.sec-kicker { font-size: 13px; color: var(--amber); font-weight: 600; letter-spacing: 2px; }
+h2.sec-title { font-family: var(--serif); font-weight: 800; color: var(--ink); font-size: clamp(27px, 3.4vw, 37px); margin: 12px 0 14px; line-height: 1.25; }
+.sec-sub { color: var(--ink-soft); font-size: 16px; }
 
-  /* ============ Hero ============ */
-  .hero { position: relative; padding: 84px 0 72px; overflow: hidden; }
-  .hero::before {
-    content: ''; position: absolute; inset: 0;
-    background:
-      radial-gradient(620px 380px at 12% 8%, rgba(184,134,11,.10), transparent 60%),
-      radial-gradient(560px 360px at 92% 12%, rgba(160,82,45,.10), transparent 62%);
-    pointer-events: none;
-  }
-  .hero-grid { position: relative; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
-  .eyebrow {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 13px; color: var(--accent-deep); font-weight: 500;
-    background: var(--accent-soft); padding: 6px 14px; border-radius: 999px; margin-bottom: 22px;
-  }
-  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-  h1.title {
-    font-family: var(--serif); font-weight: 900; color: var(--ink);
-    font-size: clamp(38px, 5.4vw, 60px); line-height: 1.12; letter-spacing: -.5px;
-  }
-  h1.title em { font-style: normal; color: var(--accent); }
-  .lead { margin: 22px 0 30px; font-size: 17.5px; color: var(--ink-soft); max-width: 540px; }
-  .lead-subname {
-    font-family: var(--serif);
-    font-size: 18px;
-    color: var(--accent);
-    font-weight: 600;
-    margin: -10px 0 14px;
-    letter-spacing: 1px;
-  }
-  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
-  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 28px; }
-  .badge { font-size: 12.5px; color: var(--ink-soft); background: var(--paper); border: 1px solid var(--line); padding: 5px 11px; border-radius: 6px; }
+/* ============ 场景布局（手机 + 说明） ============ */
+.scene { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+.scene + .scene { margin-top: 96px; }
+.scene.flip .scene-copy { order: 2; }
+.scene-copy h3.sc-title { font-family: var(--serif); color: var(--ink); font-size: 26px; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+.scene-copy .sc-step { font-size: 13px; color: var(--amber); font-weight: 600; letter-spacing: 1px; margin-bottom: 14px; }
+.scene-copy p.sc-desc { font-size: 15px; margin-bottom: 18px; }
+.scene-copy ul.sc-points { list-style: none; }
+.scene-copy ul.sc-points li { position: relative; padding-left: 26px; margin-bottom: 10px; font-size: 14.5px; }
+.scene-copy ul.sc-points li::before {
+  content: ''; position: absolute; left: 4px; top: 11px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--amber);
+}
+.scene-copy ul.sc-points li b { color: var(--ink); font-weight: 600; }
+.scene-stage {
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+}
+.scene-caption {
+  min-height: 44px; text-align: center; font-size: 14px; color: var(--ink-soft);
+  max-width: 380px; transition: opacity .3s;
+}
+.scene-caption b { color: var(--amber-deep); }
+.replay {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 13px; color: var(--ink-soft); background: var(--paper); border: 1px solid var(--line);
+  padding: 7px 16px; border-radius: 999px; transition: all .2s; user-select: none;
+}
+.replay:hover { color: var(--amber); border-color: var(--amber); }
+.replay .ic { font-size: 13px; }
 
-  /* Hero 右侧：阅读器 mockup */
-  .mockup {
-    position: relative; border-radius: 26px;
-    background: linear-gradient(160deg, #fffdf8, #f3ece0);
-    box-shadow: var(--shadow-lg);
-    border: 1px solid var(--line); overflow: hidden;
-    aspect-ratio: 4 / 3;
-  }
-  .mockup .reader {
-    position: absolute; inset: 0; padding: 30px;
-    display: flex; flex-direction: column; gap: 14px;
-  }
-  .reader .bar { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-  .reader .bar .back { color: var(--accent); font-size: 18px; }
-  .reader .bar .ch { font-family: var(--serif); color: var(--ink); font-weight: 700; font-size: 15px; }
-  .reader .lines { display: flex; flex-direction: column; gap: 10px; }
-  .reader .ln { height: 9px; border-radius: 4px; background: var(--line); }
-  .reader .ln.s { width: 55%; }
-  .reader .ln.m { width: 82%; }
-  .reader .ln.l { width: 92%; }
-  .reader .ln.indent { margin-left: 24px; }
-  .reader .page-no { margin-top: auto; align-self: center; font-size: 12px; color: var(--ink-faint); }
-  .mockup .float-tag {
-    position: absolute; right: -14px; top: 28px;
-    background: var(--ink); color: var(--bg);
-    font-size: 12.5px; padding: 8px 14px; border-radius: 10px;
-    box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 7px;
-  }
+/* ==================================================================
+   手机组件 —— 按 App 真实结构绘制
+   ================================================================== */
+.phone {
+  width: 296px; height: 610px; border-radius: 40px; background: #17130e;
+  padding: 9px; position: relative; flex-shrink: 0;
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(43,38,32,.28);
+}
+.phone::after { /* 侧键 */
+  content: ''; position: absolute; right: -2px; top: 150px; width: 3px; height: 74px;
+  border-radius: 2px; background: #2c251b;
+}
+.screen {
+  width: 100%; height: 100%; border-radius: 32px; overflow: hidden; position: relative;
+  background: var(--p-paper, #fffdf8); color: var(--p-ink, #2b2620);
+  display: flex; flex-direction: column;
+  --p-paper: #fffdf8; --p-ink: #2b2620; --p-ink-soft: #6b6358; --p-ink-faint: #9c8a6e;
+  --p-line: #e5ddcc; --p-amber: #b8843a; --p-amber-deep: #8c5a1f;
+  --p-amber-soft: #f3e6d0; --p-moss: #5e7a3c; --p-input: #ebe3d2;
+}
+.screen[data-theme="dark"] {
+  --p-paper: #241f16; --p-ink: #e8dcc4; --p-ink-soft: #b5a482; --p-ink-faint: #7a6b52;
+  --p-line: #3a3128; --p-amber: #d9a05b; --p-amber-deep: #b8843a;
+  --p-amber-soft: #34291a; --p-moss: #7a9a55; --p-input: #2d2619;
+}
+.screen .island {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  width: 74px; height: 20px; border-radius: 12px; background: #17130e; z-index: 30;
+}
+/* 状态栏浮在视图之上（视图是绝对定位的，会盖住普通流里的状态栏） */
+.statusbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 22px 4px; font-size: 11px; color: var(--p-ink); font-weight: 600;
+  flex-shrink: 0; position: relative; z-index: 26;
+}
+.statusbar .sb-r { display: flex; gap: 4px; align-items: center; font-size: 10px; }
 
-  /* ============ 亮点条 ============ */
-  .stats { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg-alt); padding: 38px 0; }
-  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; text-align: center; }
-  .stat .num { font-family: var(--serif); font-weight: 900; color: var(--ink); font-size: 36px; line-height: 1; }
-  .stat .num em { font-style: normal; color: var(--accent); }
-  .stat .lbl { margin-top: 8px; font-size: 13.5px; color: var(--ink-soft); }
+/* App 顶栏 */
+.app-bar { padding: 8px 18px 10px; flex-shrink: 0; }
+.app-bar .ab-row { display: flex; align-items: center; justify-content: space-between; }
+.app-bar .ab-title { font-family: var(--serif); font-size: 20px; font-weight: 700; color: var(--p-ink); line-height: 1.2; }
+.app-bar .ab-sub { font-family: var(--serif); font-style: italic; font-size: 10px; color: var(--p-ink-faint); letter-spacing: .5px; }
+.app-bar .ab-actions { display: flex; gap: 14px; color: var(--p-ink-soft); font-size: 15px; }
 
-  /* ============ 通用 section ============ */
-  section.block { padding: 88px 0; }
-  .sec-head { text-align: center; max-width: 680px; margin: 0 auto 56px; }
-  .sec-kicker { font-size: 13px; color: var(--accent); font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
-  h2.sec-title { font-family: var(--serif); font-weight: 800; color: var(--ink); font-size: clamp(28px, 3.4vw, 38px); margin: 12px 0 14px; line-height: 1.2; }
-  .sec-sub { color: var(--ink-soft); font-size: 16px; }
+/* 底部导航（书架/文字游戏/浏览器/设置）
+   .view 是绝对定位、不占文档流高度，视图撑不满屏幕，
+   所以 tabbar 需要 margin-top:auto 才会被顶到屏幕底部。 */
+.tabbar {
+  flex-shrink: 0; display: flex; background: var(--p-paper); border-top: 1px solid var(--p-line);
+  padding: 6px 4px 12px; position: relative; z-index: 25; margin-top: auto;
+}
+.tabbar .tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 10.5px; color: var(--p-ink-soft); cursor: pointer; transition: color .2s;
+}
+.tabbar .tab .ti { font-size: 19px; line-height: 1.2; }
+.tabbar .tab.active { color: var(--p-amber); font-weight: 600; }
 
-  /* ============ 功能卡片 ============ */
-  .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
-  .feat {
-    background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 30px 28px; box-shadow: var(--shadow); transition: transform .25s, box-shadow .25s, border-color .25s;
-  }
-  .feat:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--accent-soft); }
-  .feat .ico { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; margin-bottom: 18px; background: var(--accent-soft); color: var(--accent-deep); }
-  .feat h3 { font-family: var(--serif); color: var(--ink); font-size: 20px; margin-bottom: 8px; }
-  .feat p { font-size: 14.5px; color: var(--ink-soft); }
+/* 视图切换（绝对定位铺满状态栏以下、Tab 栏以上的区域） */
+.view {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 60px;
+  display: flex; flex-direction: column; opacity: 0; pointer-events: none;
+  transition: opacity .28s; padding-top: 30px; background: var(--p-paper, #fffdf8);
+}
+.view.active { opacity: 1; pointer-events: auto; }
+.view-scroll { flex: 1; overflow: hidden; position: relative; }
 
-  /* ============ 越用越懂你（强调区）============ */
-  .smart {
-    background:
-      linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
-    border-top: 1px solid var(--line);
-    position: relative; overflow: hidden;
-  }
-  .smart::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background:
-      radial-gradient(540px 340px at 8% 0%, rgba(184,134,11,.10), transparent 60%),
-      radial-gradient(520px 320px at 96% 100%, rgba(160,82,45,.08), transparent 62%);
-  }
-  .smart .wrap { position: relative; }
-  .smart-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
-  .smart-card {
-    background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 32px 28px; box-shadow: var(--shadow); transition: transform .25s, box-shadow .25s, border-color .25s;
-    position: relative;
-  }
-  .smart-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
-  .smart-card .ico {
-    width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center;
-    font-size: 24px; margin-bottom: 20px;
-    background: linear-gradient(135deg, var(--accent), var(--gold)); color: #fff;
-    box-shadow: 0 6px 16px rgba(160,82,45,.28);
-  }
-  .smart-card h3 { font-family: var(--serif); color: var(--ink); font-size: 21px; margin-bottom: 6px; }
-  .smart-card .sub { font-size: 13px; color: var(--accent); font-weight: 600; margin-bottom: 14px; letter-spacing: .3px; }
-  .smart-card p { font-size: 14.5px; color: var(--ink-soft); }
-  .smart-card p b { color: var(--ink); font-weight: 600; }
-  .smart-quote {
-    margin-top: 40px; text-align: center; max-width: 720px;
-    margin-left: auto; margin-right: auto;
-    font-family: var(--serif); font-size: 17px; color: var(--ink); line-height: 1.7;
-    padding: 24px 28px; background: var(--paper); border: 1px solid var(--accent-soft);
-    border-left: 4px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0;
-    box-shadow: var(--shadow);
-  }
-  .smart-quote .em { color: var(--accent-deep); font-weight: 700; }
-  @media (max-width: 920px) {
-    .smart-grid { grid-template-columns: 1fr; }
-  }
+/* —— 书架视图 —— */
+.shelf-tabs { display: flex; gap: 18px; padding: 2px 18px 8px; border-bottom: 1px solid var(--p-line); font-size: 12.5px; color: var(--p-ink-soft); }
+.shelf-tabs span { position: relative; padding-bottom: 6px; cursor: pointer; }
+.shelf-tabs span.active { color: var(--p-amber); font-weight: 600; }
+.shelf-tabs span.active::after { content: ''; position: absolute; left: 20%; right: 20%; bottom: 0; height: 2.5px; border-radius: 2px; background: var(--p-amber); }
+.shelf-meta { display: flex; gap: 14px; padding: 8px 18px 2px; font-size: 10.5px; color: var(--p-ink-faint); }
+.shelf-meta .m1 { color: var(--p-amber); }
+.shelf-meta .m2 { color: var(--p-moss); }
+.book-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 8px 16px 12px; }
+.book-card {
+  background: var(--p-paper); border: 1px solid var(--p-line); border-radius: 14px;
+  overflow: hidden; box-shadow: 0 2px 8px rgba(43,38,32,.07);
+}
+.cover { height: 108px; position: relative; display: grid; place-items: center; color: #f5ecd8; }
+.cover .ct { font-family: var(--serif); font-size: 14px; font-weight: 700; text-align: center; padding: 0 10px; text-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.cover .seal {
+  position: absolute; top: 6px; left: 6px; font-size: 8.5px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(240,184,112,.9); color: #241f16; font-weight: 700;
+}
+.cover .cv-1 { background: linear-gradient(150deg, #0e1f22, #2e5c4e); }
+.cover .cv-2 { background: linear-gradient(150deg, #1f0a0a, #7a2424); }
+.cover .cv-3 { background: linear-gradient(150deg, #0a1428, #244b8a); }
+.cover .cv-4 { background: linear-gradient(150deg, #1f160a, #8a6624); }
+.cover .cv-5 { background: linear-gradient(150deg, #140a1f, #4a2e6e); }
+.cover .cv-new { background: linear-gradient(150deg, #4d3319, #b8843a); }
+.bc-info { padding: 7px 9px 9px; }
+.bc-title { font-family: var(--serif); font-size: 11.5px; font-weight: 600; color: var(--p-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-author { font-size: 9px; font-style: italic; color: var(--p-ink-faint); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dprog { display: flex; flex-direction: column; gap: 3px; }
+.dprog .dp-row { display: flex; align-items: center; gap: 4px; font-size: 8px; }
+.dprog .dp-lab { width: 10px; color: var(--p-amber); font-weight: 700; }
+.dprog .dp-lab.moss { color: var(--p-moss); }
+.dprog .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--p-line); overflow: hidden; }
+.dprog .fill { display: block; height: 100%; width: 0; border-radius: 2px; transition: width 1.4s cubic-bezier(.2,.7,.3,1); }
+.dprog .fill.amber { background: var(--p-amber); }
+.dprog .fill.moss { background: var(--p-moss); }
+.dprog .pct { width: 24px; text-align: right; color: var(--p-ink-faint); }
+.bc-btn {
+  margin-top: 6px; display: inline-flex; align-items: center; gap: 3px;
+  font-size: 9px; color: var(--p-amber); border: 1px solid rgba(184,132,58,.5);
+  padding: 2px 7px; border-radius: 6px;
+}
 
-  /* ============ 技术栈 ============ */
-  .stack-wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
-  .stack-col { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 26px; box-shadow: var(--shadow); }
-  .stack-col h3 { font-family: var(--serif); color: var(--ink); font-size: 18px; margin-bottom: 18px; display: flex; align-items: center; gap: 10px; }
-  .stack-col h3 .tag { font-size: 18px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 9px; }
-  .chip { font-size: 13px; padding: 6px 12px; border-radius: 7px; background: var(--bg-alt); border: 1px solid var(--line); color: var(--ink-soft); }
+/* AI 悬浮球（可拖动 FAB） */
+.ai-fab {
+  position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--p-amber-deep), var(--p-amber));
+  display: grid; place-items: center; color: #fff; font-size: 19px; z-index: 20;
+  box-shadow: 0 4px 14px rgba(184,132,58,.45); cursor: pointer;
+}
+.ai-fab .nail {
+  position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 3px;
+  border-radius: 9px; background: #b23a2e; color: #fff; font-size: 9.5px; font-weight: 700;
+  display: none; place-items: center; border: 1.5px solid var(--p-paper);
+}
+.ai-fab.badged .nail { display: grid; }
+@keyframes fabPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+.ai-fab.attn { animation: fabPulse 1.4s ease-in-out infinite; }
 
-  /* ============ 快速开始（双轨） ============ */
-  .quick { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .quick-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; max-width: 1000px; margin: 0 auto; align-items: stretch; }
-  .quick-track {
-    background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 32px 28px; box-shadow: var(--shadow); display: flex; flex-direction: column;
-  }
-  .quick-apk { border-top: 3px solid var(--accent); }
-  .quick-src { border-top: 3px solid var(--ink); }
-  .track-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
-  .track-head .track-ico { font-size: 32px; }
-  .track-head h3 { font-family: var(--serif); color: var(--ink); font-size: 20px; }
-  .track-head .track-sub { font-size: 13px; color: var(--ink-faint); margin-top: 2px; }
-  .btn-apk {
-    display: flex; flex-direction: column; gap: 4px;
-    background: linear-gradient(135deg, var(--accent), var(--accent-deep)); color: #fff;
-    padding: 18px 22px; border-radius: 12px; box-shadow: 0 8px 20px rgba(160,82,45,.28);
-    transition: transform .2s, box-shadow .2s;
-  }
-  .btn-apk:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(160,82,45,.36); }
-  .apk-main { font-size: 17px; font-weight: 700; }
-  .apk-meta { font-size: 13px; opacity: .85; }
-  .apk-alts { margin-top: 16px; font-size: 13.5px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-  .apk-alts a { color: var(--accent-deep); border-bottom: 1px dashed var(--accent-soft); padding-bottom: 1px; }
-  .apk-alts a:hover { color: var(--accent); }
-  .apk-sha { display: inline-block; margin-top: 14px; font-size: 13px; color: var(--ink-soft); }
-  .apk-sha:hover { color: var(--accent); }
-  .track-note { margin-top: 16px; font-size: 13px; color: var(--ink-faint); }
-  .track-note a { color: var(--accent-deep); }
-  /* 源码运行终端卡片 */
-  .quick-card { background: var(--code-bg); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
-  .quick-bar { display: flex; align-items: center; gap: 8px; padding: 14px 18px; background: #211d18; }
-  .quick-bar .d { width: 12px; height: 12px; border-radius: 50%; }
-  .quick-bar .d1 { background: #ff5f57; } .quick-bar .d2 { background: #febc2e; } .quick-bar .d3 { background: #28c840; }
-  .quick-bar .fn { margin-left: 12px; color: #9a9186; font-size: 12.5px; }
-  pre.code { padding: 22px 24px; overflow-x: auto; color: #e7ddcc; font-size: 13.5px; line-height: 1.85; }
-  pre.code .c { color: #8a8174; }   /* comment */
-  pre.code .k { color: #d4a06a; }   /* keyword/cmd */
+/* —— 浏览器视图 —— */
+.addr-bar { padding: 6px 14px 8px; }
+.addr {
+  display: flex; align-items: center; gap: 7px; border: 1px solid var(--p-line);
+  border-radius: 22px; padding: 6px 12px; font-size: 11px; color: var(--p-ink-soft);
+  background: var(--p-paper); font-family: var(--mono);
+}
+.addr .lk { color: var(--p-amber); font-size: 12px; }
+.addr .url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.load-track { height: 2.5px; background: rgba(184,132,58,.15); overflow: hidden; }
+.load-fill { height: 100%; width: 0; background: var(--p-amber); }
+.webpage { padding: 12px 14px 90px; font-size: 11px; }
+.site-head { font-family: var(--serif); font-size: 16px; color: var(--p-ink); font-weight: 700; margin-bottom: 2px; }
+.site-meta { font-size: 9.5px; color: var(--p-ink-faint); margin-bottom: 10px; }
+.ad-block {
+  border: 1px dashed #d8b9b9; background: #fbf1f1; color: #a05a5a; border-radius: 8px;
+  font-size: 9.5px; text-align: center; padding: 7px 4px; margin-bottom: 9px;
+}
+.ad-block.floaty { position: absolute; right: 10px; top: 46%; z-index: 5; width: 120px; padding: 8px 6px; box-shadow: 0 6px 16px rgba(160,90,90,.25); }
+.chap-item {
+  display: flex; justify-content: space-between; padding: 7px 2px; border-bottom: 1px solid var(--p-line);
+  font-size: 11px; color: var(--p-ink-soft);
+}
+.chap-item .cn { font-family: var(--serif); }
+.chap-item .cm { font-size: 8.5px; color: var(--p-ink-faint); }
+.web-fabs { position: absolute; right: 12px; bottom: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 22; }
+.wfab {
+  display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 13px; border-radius: 17px;
+  color: #fff; font-size: 11px; font-weight: 600; box-shadow: 0 4px 12px rgba(43,38,32,.3); cursor: pointer;
+}
+.wfab .wi { font-size: 14px; }
+.wfab.amber { background: var(--p-amber-deep); }
+.wfab.gold { background: var(--gold); }
+@keyframes fabGlow { 0%,100%{box-shadow:0 4px 12px rgba(43,38,32,.3), 0 0 0 0 rgba(212,175,55,.55)} 50%{box-shadow:0 4px 12px rgba(43,38,32,.3), 0 0 0 9px rgba(212,175,55,0)} }
+.wfab.gold.attn { animation: fabGlow 1.3s ease-out infinite; }
 
-  /* ============ 页脚 ============ */
-  footer { background: var(--ink); color: #c9bfae; padding: 60px 0 36px; }
-  .foot-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 36px; }
-  .foot-brand { font-family: var(--serif); font-weight: 900; color: #fff; font-size: 19px; margin-bottom: 12px; }
-  .foot-grid p { font-size: 14px; }
-  footer h4 { color: #fff; font-size: 14px; margin-bottom: 14px; font-weight: 600; }
-  footer ul { list-style: none; }
-  footer li { margin-bottom: 9px; }
-  footer li a { font-size: 13.5px; color: #b5a991; transition: color .2s; }
-  footer li a:hover { color: #fff; }
-  .foot-bottom { margin-top: 44px; padding-top: 22px; border-top: 1px solid #3d362e; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #8a8174; }
+/* —— 底部抽屉（预览/版本历史/设定） —— */
+.sheet-mask { position: absolute; inset: 0; background: rgba(23,19,14,.42); opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 40; }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; background: var(--p-paper);
+  border-radius: 18px 18px 0 0; z-index: 41; padding: 12px 16px 18px;
+  transform: translateY(105%); transition: transform .42s cubic-bezier(.3,.8,.3,1);
+  max-height: 74%; display: flex; flex-direction: column; box-shadow: 0 -8px 30px rgba(43,38,32,.18);
+}
+.sheet-mask.on { opacity: 1; pointer-events: auto; }
+.sheet.on { transform: translateY(0); }
+.sheet .grip { width: 34px; height: 4px; border-radius: 3px; background: var(--p-line); margin: 0 auto 10px; }
+.sheet h4 { font-family: var(--serif); font-size: 14px; color: var(--p-ink); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+.sheet h4 .x { color: var(--p-ink-faint); font-size: 13px; font-weight: 400; }
+.preview-head { display: flex; gap: 10px; margin-bottom: 10px; }
+.preview-cover { width: 54px; height: 74px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; color: #f5ecd8; font-family: var(--serif); font-size: 10px; text-align: center; padding: 4px; background: linear-gradient(150deg, #4d3319, #b8843a); }
+.preview-meta { font-size: 11px; color: var(--p-ink-soft); }
+.preview-meta .pm-t { font-family: var(--serif); font-size: 14px; color: var(--p-ink); font-weight: 700; margin-bottom: 3px; }
+.preview-meta .pm-line { margin-bottom: 2px; }
+.preview-meta .pm-line b { color: var(--p-amber-deep); font-weight: 600; }
+.sheet-btn {
+  margin-top: 10px; align-self: center; background: var(--p-amber); color: #fff;
+  font-size: 12.5px; font-weight: 600; padding: 9px 34px; border-radius: 22px;
+  box-shadow: 0 4px 12px rgba(184,132,58,.35);
+}
 
-  /* ============ 滚动渐入 ============ */
-  .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s ease; }
-  .reveal.in { opacity: 1; transform: none; }
+/* AI 提取工具卡 */
+.tool-card {
+  border: 1px solid var(--p-line); border-left: 3px solid var(--p-amber); border-radius: 9px;
+  padding: 8px 11px; margin-bottom: 8px; background: var(--p-paper); font-size: 11px;
+  display: flex; align-items: center; gap: 8px; color: var(--p-ink-soft);
+}
+.tool-card .tc-ic { color: var(--p-amber); font-size: 13px; }
+.tool-card .tc-name { font-family: var(--mono); font-size: 10px; color: var(--p-amber-deep); font-weight: 600; }
+.tool-card .tc-ok { margin-left: auto; color: var(--p-moss); font-size: 11px; opacity: 0; transition: opacity .3s; }
+.tool-card.done .tc-ok { opacity: 1; }
+.tool-card.done .spinner { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--p-line); border-top-color: var(--p-amber);
+  animation: spin .8s linear infinite; display: inline-block;
+}
+.status-strip {
+  display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--p-amber-deep);
+  background: var(--p-amber-soft); border-radius: 16px; padding: 6px 12px; margin-bottom: 10px;
+}
+.status-strip .stop { margin-left: auto; font-size: 10px; color: var(--p-ink-soft); border: 1px solid var(--p-line); padding: 1px 8px; border-radius: 10px; }
 
-  /* ============ 响应式 ============ */
-  @media (max-width: 920px) {
-    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
-    .mockup { max-width: 520px; }
-    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 30px; }
-    .feat-grid, .stack-wrap { grid-template-columns: 1fr; }
-    .quick-dual { grid-template-columns: 1fr; gap: 22px; }
-    .foot-grid { grid-template-columns: 1fr 1fr; }
-  }
-  @media (max-width: 640px) {
-    .nav-links { display: none; }
-    .nav-links.open { display: flex; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column; background: var(--paper); padding: 18px 24px; border-bottom: 1px solid var(--line); gap: 16px; box-shadow: var(--shadow); }
-    .menu-toggle { display: block; }
-    section.block { padding: 64px 0; }
-    .foot-grid { grid-template-columns: 1fr; }
-  }
+/* —— 阅读器视图 —— */
+.reader-top {
+  position: absolute; top: 30px; left: 0; right: 0; z-index: 12;
+  background: color-mix(in srgb, var(--p-paper) 92%, transparent);
+  backdrop-filter: blur(4px); border-bottom: 1px solid var(--p-line);
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  opacity: 0; transform: translateY(-8px); transition: all .35s;
+}
+.reader-top.on { opacity: 1; transform: none; }
+.reader-top .rt-back { color: var(--p-amber); font-size: 16px; }
+.reader-top .rt-title { font-family: var(--serif); font-size: 12.5px; font-weight: 700; color: var(--p-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader-top .rt-actions { margin-left: auto; display: flex; gap: 12px; color: var(--p-ink-soft); font-size: 13px; }
+.reader-body { flex: 1; padding: 46px 20px 12px; overflow: hidden; position: relative; }
+.reader-body .rb-chap { font-family: var(--serif); font-size: 16px; font-weight: 700; color: var(--p-ink); text-align: center; margin-bottom: 14px; }
+.reader-body p.para {
+  font-family: var(--serif); font-size: 12.5px; line-height: 2.05; color: var(--p-ink);
+  margin-bottom: 10px; text-indent: 2em; transition: background .3s; border-radius: 4px;
+}
+.reader-body p.para.garbled { color: var(--p-ink-faint); }
+.reader-body p.para .fix { background: rgba(212,175,55,.28); border-radius: 3px; padding: 0 1px; transition: background 1s; }
+.reader-body p.para .fix.calm { background: transparent; }
+.reader-bottom {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 14px 14px; border-top: 1px solid var(--p-line); background: var(--p-paper);
+}
+.rb-btn { font-size: 10.5px; color: var(--p-amber-deep); border: 1px solid var(--p-line); background: var(--p-paper); padding: 5px 12px; border-radius: 8px; display: flex; align-items: center; gap: 4px; }
+.rb-pos { font-size: 11px; color: var(--p-ink-faint); font-family: var(--mono); }
+.cache-pill {
+  position: absolute; right: 14px; bottom: 62px; z-index: 14; font-size: 9.5px; color: var(--p-moss);
+  background: color-mix(in srgb, var(--p-paper) 94%, transparent); border: 1px solid var(--p-moss);
+  padding: 4px 10px; border-radius: 12px; opacity: 0; transform: translateY(8px); transition: all .4s;
+  display: flex; align-items: center; gap: 4px;
+}
+.cache-pill.on { opacity: 1; transform: none; }
+.scroll-fab {
+  position: absolute; right: 14px; bottom: 104px; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--p-amber-deep); color: #fff; display: grid; place-items: center; font-size: 13px; z-index: 13;
+  box-shadow: 0 3px 10px rgba(140,90,31,.4); opacity: 0; transition: opacity .35s;
+}
+.scroll-fab.on { opacity: 1; }
 
-  /* ============ 竖屏视频（9:16 B 站 iframe）============ */
-  .video-portrait-wrap {
-    max-width: 380px; margin: 0 auto; position: relative;
-    aspect-ratio: 9 / 16; background: var(--ink);
-    border-radius: var(--radius); overflow: hidden;
-    box-shadow: var(--shadow-lg); border: 1px solid var(--line);
-  }
-  .video-portrait-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .video-portrait-tip { text-align: center; color: var(--ink-soft); font-size: 14px; margin-top: 18px; }
-  .video-portrait-tip a { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .video-portrait-tip a:hover { text-decoration: underline; }
-  @media (max-width: 640px) {
-    .video-portrait-wrap { max-width: 78%; }
-  }
+/* 改写：标注 + diff + 横幅 */
+.para.annotated { background: rgba(212,175,55,.16); box-shadow: inset 0 0 0 1px rgba(212,175,55,.4); }
+.note-pop {
+  position: absolute; z-index: 16; left: 14px; top: 236px; font-size: 10px; color: var(--p-ink);
+  background: var(--p-paper); border: 1px solid var(--p-line); border-left: 3px solid var(--p-amber);
+  border-radius: 9px; padding: 7px 10px; box-shadow: 0 6px 16px rgba(43,38,32,.16); max-width: 240px;
+  opacity: 0; transform: translateY(6px); transition: all .35s;
+}
+.note-pop.on { opacity: 1; transform: none; }
+.note-pop .np-hint { font-size: 8.5px; color: var(--p-ink-faint); margin-top: 2px; }
+.rewrite-banner {
+  position: absolute; top: 52px; left: 10px; right: 10px; z-index: 18;
+  background: rgba(184,132,58,.96); color: #fff; border-radius: 10px; padding: 8px 12px;
+  font-size: 10.5px; display: flex; align-items: center; gap: 7px;
+  opacity: 0; transform: translateY(-12px); transition: all .4s;
+}
+.rewrite-banner.on { opacity: 1; transform: none; }
+.rewrite-banner .rb-undo { margin-left: auto; font-size: 9.5px; background: rgba(255,255,255,.18); padding: 2px 9px; border-radius: 9px; }
+.diff-new { background: rgba(94,122,60,.22); border-radius: 3px; padding: 0 1px; }
+.ver-row { display: flex; align-items: center; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--p-line); font-size: 10.5px; }
+.ver-row .vi { width: 22px; height: 22px; border-radius: 7px; background: var(--p-amber-soft); color: var(--p-amber-deep); display: grid; place-items: center; font-size: 11px; flex-shrink: 0; }
+.ver-row .vt b { display: block; font-size: 11px; color: var(--p-ink); font-weight: 600; }
+.ver-row .vt span { font-size: 9px; color: var(--p-ink-faint); }
+.ver-row .restore { margin-left: auto; color: var(--p-amber-deep); border: 1px solid var(--p-line); border-radius: 8px; padding: 3px 9px; font-size: 9.5px; }
+.toast {
+  position: absolute; left: 50%; bottom: 84px; transform: translate(-50%, 8px); z-index: 46;
+  background: rgba(23,19,14,.88); color: #f3ecdf; font-size: 10px; padding: 7px 14px; border-radius: 16px;
+  opacity: 0; transition: all .35s; white-space: nowrap;
+}
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* —— Agent Chat 视图 —— */
+.chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px 6px; border-bottom: 1px solid var(--p-line); }
+.chat-head .ch-ic { width: 24px; height: 24px; border-radius: 7px; background: var(--p-amber-soft); display: grid; place-items: center; font-size: 12px; }
+.chat-head .ch-t { font-family: var(--serif); font-size: 12.5px; font-weight: 700; color: var(--p-ink); }
+.chat-head .ch-model { margin-left: auto; font-size: 8.5px; font-family: var(--mono); color: var(--p-amber-deep); border: 1px solid var(--p-line); border-radius: 9px; padding: 2px 7px; }
+.chat-head .ch-quota { font-size: 8.5px; color: var(--p-amber-deep); background: var(--p-amber-soft); border-radius: 9px; padding: 2px 7px; font-weight: 600; }
+.chat-msgs { flex: 1; overflow: hidden; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.bubble { max-width: 88%; font-size: 11px; line-height: 1.7; padding: 8px 11px; border-radius: 13px; }
+.bubble.user {
+  align-self: flex-end; background: rgba(184,132,58,.1); border: 1px solid rgba(184,132,58,.22);
+  border-top-right-radius: 4px; color: var(--p-ink);
+}
+.bubble.ai {
+  align-self: flex-start; background: var(--p-paper); border: 1px solid var(--p-line);
+  border-top-left-radius: 4px; color: var(--p-ink);
+}
+.bubble .caret { display: inline-block; width: 1.5px; height: 11px; background: var(--p-amber); vertical-align: -1px; margin-left: 1px; animation: blink .8s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.composer { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px 14px; border-top: 1px solid var(--p-line); background: var(--p-paper); }
+.composer .ci {
+  flex: 1; background: var(--p-input); border: 1px solid var(--p-line); border-radius: 13px;
+  font-size: 10.5px; color: var(--p-ink-faint); padding: 8px 12px;
+}
+.composer .send { width: 30px; height: 30px; border-radius: 10px; background: var(--p-amber); color: #fff; display: grid; place-items: center; font-size: 13px; box-shadow: 0 3px 8px rgba(184,132,58,.4); flex-shrink: 0; }
+
+/* —— 文字游戏视图 —— */
+.game-flow { flex: 1; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; gap: 9px; }
+.gm-para { font-family: var(--serif); font-size: 11.5px; line-height: 1.95; color: var(--p-ink); }
+.npc-line { display: flex; gap: 7px; align-items: flex-start; }
+.npc-line .ava {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  font-size: 12px; color: #fff; background: linear-gradient(140deg, #5e452a, #b8843a);
+}
+.npc-line .nl-bubble { background: var(--p-paper); border: 1px solid var(--p-line); border-radius: 4px 12px 12px 12px; padding: 7px 10px; font-size: 10.5px; line-height: 1.7; color: var(--p-ink); }
+.npc-line .nl-name { font-size: 8.5px; color: var(--p-amber-deep); font-weight: 600; margin-bottom: 2px; }
+.dice-card { border: 1px solid var(--p-line); border-radius: 11px; padding: 9px 11px; font-size: 10px; background: var(--p-paper); }
+.dice-card .dc-head { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--p-ink); font-size: 10.5px; margin-bottom: 7px; }
+.dice-card .dc-head .di { font-size: 13px; display: inline-block; }
+.dice-card .dc-head .di.rolling { animation: spin 0.7s linear infinite; }
+.dice-branch { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; font-size: 9.5px; color: var(--p-ink-soft); position: relative; overflow: hidden; border-radius: 6px; }
+.dice-branch .db-track { position: absolute; inset: 0; background: var(--p-amber-soft); transform: scaleX(0); transform-origin: left; transition: transform 1.1s cubic-bezier(.2,.7,.3,1); }
+.dice-branch .db-lab { position: relative; flex: 1; }
+.dice-branch .db-pct { position: relative; font-family: var(--mono); font-size: 9px; color: var(--p-amber-deep); }
+.dice-branch.win { outline: 1.5px solid var(--p-amber); outline-offset: 0; }
+.dice-branch.win .db-lab { color: var(--p-amber-deep); font-weight: 700; }
+.choice-btn {
+  border: 1px solid var(--p-line); background: var(--p-paper); border-radius: 11px;
+  padding: 8px 11px; font-size: 10.5px; color: var(--p-ink); display: flex; align-items: center; gap: 7px;
+  opacity: 0; transform: translateY(6px); transition: all .35s;
+}
+.choice-btn.on { opacity: 1; transform: none; }
+.choice-btn .cb-i { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--p-amber); color: var(--p-amber-deep); font-size: 8.5px; display: grid; place-items: center; flex-shrink: 0; }
+.choice-btn.dim { opacity: .42; }
+.choice-btn.picked { border-color: var(--p-amber); background: var(--p-amber-soft); }
+.game-strip { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--p-amber-deep); }
+.game-strip .ellipsis::after { content: '…'; animation: dots 1.4s steps(4) infinite; }
+@keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'…'} }
+
+/* —— 人物卡 / 关系图 —— */
+.char-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 8px 14px; }
+.char-card { border: 1px solid var(--p-line); border-radius: 12px; overflow: hidden; background: var(--p-paper); }
+.char-card .cc-ava { height: 62px; display: grid; place-items: center; font-size: 24px; }
+.char-card .cc-ava.m { background: rgba(25,118,210,.14); }
+.char-card .cc-ava.f { background: rgba(233,30,99,.12); }
+.char-card .cc-ava.n { background: rgba(156,39,176,.1); }
+.char-card .cc-info { padding: 6px 9px 8px; }
+.char-card .cc-name { font-family: var(--serif); font-size: 11px; font-weight: 700; color: var(--p-ink); }
+.char-card .cc-meta { font-size: 8.5px; color: var(--p-ink-faint); }
+.rel-graph { flex: 1; position: relative; }
+.rel-graph svg { width: 100%; height: 100%; }
+/* 注意：不能给 left/top 加 transition —— JS 每帧改这两个值，
+   过渡会让节点永远追不上连线，出现十几像素的错位 */
+.rel-node {
+  position: absolute; transform: translate(-50%,-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  animation: nodeIn .7s cubic-bezier(.2,.8,.3,1) both;
+}
+.rel-node:nth-child(3) { animation-delay: .1s; }
+.rel-node:nth-child(4) { animation-delay: .18s; }
+.rel-node:nth-child(5) { animation-delay: .26s; }
+.rel-node:nth-child(6) { animation-delay: .34s; }
+@keyframes nodeIn { from { opacity: 0; transform: translate(-50%,-50%) scale(.55); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+.rel-node .rn-dot { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; color: #fff; box-shadow: 0 3px 10px rgba(43,38,32,.25); }
+.rel-node .rn-name { font-size: 9px; color: var(--p-ink); background: color-mix(in srgb, var(--p-paper) 88%, transparent); padding: 0 5px; border-radius: 6px; }
+.rel-edge { stroke: var(--p-line); stroke-width: 1.5; transition: all 1.6s cubic-bezier(.3,.7,.3,1); }
+.rel-edge-lab { font-size: 7.5px; fill: var(--p-ink-faint); }
+
+/* —— 设置视图 —— */
+.set-group { padding: 4px 14px 10px; }
+.set-group .sg-t { font-size: 9.5px; font-weight: 700; color: var(--p-amber-deep); letter-spacing: 1px; margin: 8px 0 5px; }
+.set-row { display: flex; align-items: center; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--p-line); font-size: 11px; color: var(--p-ink); }
+.set-row .si { font-size: 13px; width: 18px; text-align: center; }
+.set-row .sr-arrow { margin-left: auto; color: var(--p-ink-faint); font-size: 10px; }
+.set-row .sr-badge { margin-left: auto; font-size: 8.5px; color: var(--p-moss); }
+
+/* ============ 亮点条 ============ */
+.stats { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg-alt); padding: 36px 0; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; text-align: center; }
+.stat .num { font-family: var(--serif); font-weight: 900; color: var(--ink); font-size: 34px; line-height: 1; }
+.stat .num em { font-style: normal; color: var(--amber); }
+.stat .lbl { margin-top: 8px; font-size: 13px; color: var(--ink-soft); }
+
+/* ============ 功能地图 ============ */
+.fmap-tabs { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 34px; }
+.fmap-tab {
+  font-size: 14px; padding: 9px 18px; border-radius: 999px; cursor: pointer;
+  background: var(--paper); border: 1px solid var(--line); color: var(--ink-soft);
+  transition: all .2s; font-family: var(--sans);
+}
+.fmap-tab:hover { color: var(--amber); border-color: var(--amber); }
+.fmap-tab.active { background: var(--amber); border-color: var(--amber); color: #fff; font-weight: 600; }
+.fmap-panel { display: none; }
+.fmap-panel.active { display: block; animation: fmapIn .45s ease both; }
+@keyframes fmapIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.fmap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.fitem {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px 20px 18px; box-shadow: var(--shadow);
+  transition: transform .22s, box-shadow .22s, border-color .22s;
+}
+.fitem:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--amber-soft); }
+.fitem .fi-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.fitem .fi-ico { font-size: 18px; }
+.fitem h3 { font-family: var(--serif); color: var(--ink); font-size: 16px; font-weight: 700; }
+.fitem p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.7; }
+.fitem .fi-where { display: inline-block; margin-top: 9px; font-size: 11.5px; color: var(--ink-faint);
+  background: var(--bg-alt); border-radius: 5px; padding: 2px 8px; }
+.fitem .fi-where b { color: var(--amber-deep); font-weight: 600; }
+@media (max-width: 980px) { .fmap-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .fmap-grid { grid-template-columns: 1fr; } .fmap-tab { font-size: 13px; padding: 8px 14px; } }
+
+/* ============ 弹药库 ============ */
+.smart { background: linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%); border-top: 1px solid var(--line); }
+.smart-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.smart-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 30px 26px; box-shadow: var(--shadow); transition: transform .25s, box-shadow .25s, border-color .25s;
+}
+.smart-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--amber); }
+.smart-card .ico {
+  width: 50px; height: 50px; border-radius: 13px; display: grid; place-items: center; font-size: 23px;
+  margin-bottom: 18px; background: linear-gradient(135deg, var(--amber), var(--gold)); color: #fff;
+  box-shadow: 0 6px 16px rgba(184,132,58,.3);
+}
+.smart-card h3 { font-family: var(--serif); color: var(--ink); font-size: 20px; margin-bottom: 4px; }
+.smart-card .sub { font-size: 12.5px; color: var(--amber); font-weight: 600; margin-bottom: 12px; }
+.smart-card p { font-size: 14px; color: var(--ink-soft); }
+.smart-card p b { color: var(--ink); font-weight: 600; }
+.smart-quote {
+  margin: 38px auto 0; max-width: 720px; text-align: center; font-family: var(--serif);
+  font-size: 16.5px; color: var(--ink); line-height: 1.7; padding: 22px 26px;
+  background: var(--paper); border: 1px solid var(--amber-soft); border-left: 4px solid var(--amber);
+  border-radius: 0 var(--radius) var(--radius) 0; box-shadow: var(--shadow);
+}
+.smart-quote .em { color: var(--amber-deep); font-weight: 700; }
+
+/* ============ 托管 AI ============ */
+.hosted-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.hosted-card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 24px; box-shadow: var(--shadow); }
+.hosted-card .hi { font-size: 26px; margin-bottom: 14px; }
+.hosted-card h3 { font-family: var(--serif); color: var(--ink); font-size: 17px; margin-bottom: 8px; }
+.hosted-card p { font-size: 13.5px; color: var(--ink-soft); }
+.hosted-card p b { color: var(--ink); font-weight: 600; }
+
+/* ============ 技术栈 ============ */
+.stack-wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.stack-col { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 26px; box-shadow: var(--shadow); }
+.stack-col h3 { font-family: var(--serif); color: var(--ink); font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 9px; }
+.chip { font-size: 13px; padding: 6px 12px; border-radius: 7px; background: var(--bg-alt); border: 1px solid var(--line); color: var(--ink-soft); }
+
+/* ============ 快速开始 ============ */
+.quick { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.quick-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; max-width: 1000px; margin: 0 auto; align-items: stretch; }
+.quick-track { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 32px 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+.quick-apk { border-top: 3px solid var(--amber); }
+.quick-src { border-top: 3px solid var(--ink); }
+.track-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.track-head .track-ico { font-size: 30px; }
+.track-head h3 { font-family: var(--serif); color: var(--ink); font-size: 20px; }
+.track-head .track-sub { font-size: 13px; color: var(--ink-faint); margin-top: 2px; }
+.btn-apk {
+  display: flex; flex-direction: column; gap: 4px; background: linear-gradient(135deg, var(--amber), var(--amber-deep));
+  color: #fff; padding: 18px 22px; border-radius: 12px; box-shadow: 0 8px 20px rgba(184,132,58,.3);
+  transition: transform .2s, box-shadow .2s;
+}
+.btn-apk:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(184,132,58,.4); }
+.apk-main { font-size: 17px; font-weight: 700; }
+.apk-meta { font-size: 13px; opacity: .85; }
+.apk-alts { margin-top: 16px; font-size: 13.5px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.apk-alts a { color: var(--amber-deep); border-bottom: 1px dashed var(--amber-soft); padding-bottom: 1px; }
+.apk-alts a:hover { color: var(--amber); }
+.apk-sha { display: inline-block; margin-top: 14px; font-size: 13px; color: var(--ink-soft); }
+.apk-sha:hover { color: var(--amber); }
+.track-note { margin-top: 16px; font-size: 13px; color: var(--ink-faint); }
+.track-note a { color: var(--amber-deep); }
+.quick-card { background: var(--code-bg); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+.quick-bar { display: flex; align-items: center; gap: 8px; padding: 14px 18px; background: #1c1811; }
+.quick-bar .d { width: 12px; height: 12px; border-radius: 50%; }
+.quick-bar .d1 { background: #ff5f57; } .quick-bar .d2 { background: #febc2e; } .quick-bar .d3 { background: #28c840; }
+.quick-bar .fn { margin-left: 12px; color: #9a9186; font-size: 12.5px; }
+pre.code { padding: 22px 24px; overflow-x: auto; color: #e7ddcc; font-size: 13.5px; line-height: 1.85; }
+pre.code .c { color: #8a8174; }
+pre.code .k { color: #d4a06a; }
+
+/* ============ 页脚 ============ */
+footer { background: var(--ink); color: #c9bfae; padding: 56px 0 34px; }
+.foot-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 36px; }
+.foot-brand { font-family: var(--serif); font-weight: 900; color: #fff; font-size: 19px; margin-bottom: 12px; }
+.foot-grid p { font-size: 14px; }
+footer h4 { color: #fff; font-size: 14px; margin-bottom: 14px; font-weight: 600; }
+footer ul { list-style: none; }
+footer li { margin-bottom: 9px; }
+footer li a { font-size: 13.5px; color: #b5a991; transition: color .2s; }
+footer li a:hover { color: #fff; }
+.foot-bottom { margin-top: 42px; padding-top: 22px; border-top: 1px solid #3d362e; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #8a8174; }
+
+/* ============ 滚动渐入 ============ */
+.reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+/* ============ 响应式 ============ */
+@media (max-width: 980px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+  .scene, .scene.flip { grid-template-columns: 1fr; gap: 32px; }
+  .scene.flip .scene-copy { order: 0; }
+  .scene-copy { text-align: center; }
+  .scene-copy ul.sc-points li { text-align: left; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 28px; }
+  .smart-grid, .hosted-grid, .stack-wrap { grid-template-columns: 1fr; }
+  .quick-dual { grid-template-columns: 1fr; gap: 22px; }
+  .foot-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 640px) {
+  .nav-links { display: none; }
+  .nav-links.open { display: flex; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column; background: var(--paper); padding: 18px 24px; border-bottom: 1px solid var(--line); gap: 16px; box-shadow: var(--shadow); align-items: flex-start; }
+  .menu-toggle { display: block; }
+  section.block { padding: 60px 0; }
+  .scene + .scene { margin-top: 68px; }
+  .foot-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 </style>
 </head>
 <body>
@@ -315,292 +687,834 @@
 <header class="nav" id="nav">
   <div class="wrap nav-inner">
     <a class="brand" href="#top">
-      <span class="mark">书</span>
-      Novel Builder
+      <span class="mark">随</span>
+      随心阅读
     </a>
     <nav class="nav-links" id="navLinks">
-      <a href="#smart">越用越懂你</a>
-      <a href="#features">功能特性</a>
-      <a href="#stack">技术栈</a>
-      <a href="#quick">快速开始</a>
+      <a href="#read">读</a>
+      <a href="#rewrite">改</a>
+      <a href="#write">写</a>
+      <a href="#game">文字游戏</a>
+      <a href="#features">功能地图</a>
+      <a href="#hosted">AI 内置</a>
+      <a href="#quick">下载</a>
       <a class="btn btn-gh" href="https://github.com/yunkst/Whimread" target="_blank" rel="noopener">★ GitHub</a>
-      <a href="https://github.com/yunkst/Whimread" target="_blank" rel="noopener">⭐ Star</a>
     </nav>
     <button class="menu-toggle" id="menuToggle" aria-label="菜单">☰</button>
   </div>
 </header>
 
-<!-- ===================== Hero ===================== -->
 <main id="top">
-  <section class="hero">
-    <div class="wrap hero-grid">
-      <div class="hero-text">
-        <span class="eyebrow"><span class="dot"></span> 开源 · 全栈 · AI 增强</span>
-        <h1 class="title">随心阅读 <em style="font-size:0.5em;color:var(--ink-soft);font-weight:600">Novel Builder</em></h1>
-        <p class="lead-subname">读喜欢的 · 改不爽的 · 写自己的</p>
-        <p class="lead">
-          读一本喜欢的小说，用 AI 改写不爽的剧情与设定，或从零开始创作一本属于你的。
-          离线优先的本地书架 + Headless WebView 章节提取 + Agent Chat + ComfyUI，
-          让阅读从「被动读」到「主动创」。
-        </p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/yunkst/Whimread" target="_blank" rel="noopener">查看 GitHub →</a>
-          <a class="btn btn-outline" href="#quick">⬇ 立即下载</a>
-          <a class="btn btn-gh" href="https://github.com/yunkst/Whimread" target="_blank" rel="noopener" aria-label="GitHub Star">⭐ Star</a>
-        </div>
-        <div class="badges">
-          <span class="badge">Flutter 3.0+</span>
-          <span class="badge">Riverpod</span>
-          <span class="badge">Agent Chat</span>
-          <span class="badge">ComfyUI</span>
-          <span class="badge">PP-OCRv6</span>
-          <span class="badge">MIT License</span>
-        </div>
-      </div>
+<noscript>
+  <div class="wrap" style="padding:18px 24px;background:var(--amber-soft);color:var(--amber-deep);font-size:14px;border-bottom:1px solid var(--line)">
+    本页的功能演示是用 HTML 动画实时模拟的，需要开启 JavaScript 才能观看；下面是文字版介绍，功能完全一致。
+  </div>
+</noscript>
 
-      <!-- ====== 占位：Hero 阅读器截图 ======
-           【需要的图片】
-           建议替换为一张真实的「阅读界面」截图（手机/桌面均可）。
-           推荐尺寸：约 960×720（4:3），PNG/JPG，体现书卷质感即可。
-           可直接替换下方 .mockup 结构为 <img src="assets/reader-preview.png" />
-      -->
-      <div class="mockup">
-        <div class="reader">
-          <div class="bar">
-            <span class="back">‹</span>
-            <span class="ch">第七章 · 风起</span>
-          </div>
-          <div class="lines">
-            <div class="ln l"></div>
-            <div class="ln m"></div>
-            <div class="ln l indent"></div>
-            <div class="ln m"></div>
-            <div class="ln s"></div>
-            <div class="ln l"></div>
-            <div class="ln m indent"></div>
-            <div class="ln l"></div>
-          </div>
-          <div class="page-no">— 1 / 24 —</div>
-        </div>
-        <div class="float-tag">📖 离线可读</div>
+<!-- ===================== Hero ===================== -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <span class="eyebrow"><span class="dot"></span> AI 原生 · 本地优先 · 开源客户端</span>
+      <h1 class="title">随心阅读 <em style="font-size:.48em;color:var(--ink-soft);font-weight:600">Whimread</em></h1>
+      <p class="lead-tag">读喜欢的 · 改不爽的 · 写自己的</p>
+      <p class="lead">
+        内置浏览器逛任意小说站，AI 现场生成提取脚本把书收进本地书架；
+        读到意难平让 AI 当场改；想写自己的故事，Agent 从大纲、人物卡陪你写到逐章正文——
+        还有把小说变成互动文字游戏的「文字游戏」。
+        <b style="color:var(--ink)">下面的手机全是 HTML 动画实时演的，不是截图。</b>
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#quick">⬇ 下载 APK</a>
+        <a class="btn btn-outline" href="#read">看功能演示 ↓</a>
+        <a class="btn btn-gh" href="https://github.com/yunkst/Whimread" target="_blank" rel="noopener">⭐ Star</a>
+      </div>
+      <div class="badges">
+      <span class="badge">Flutter 3.35</span>
+      <span class="badge">Agent Chat</span>
+      <span class="badge">端侧 OCR</span>
+      <span class="badge">端侧生图</span>
+      <span class="badge">本地 SQLite</span>
       </div>
     </div>
-  </section>
 
-  <!-- ===================== 亮点条 ===================== -->
-  <section class="stats">
-    <div class="wrap stats-grid">
-      <div class="stat reveal"><div class="num">读</div><div class="lbl">离线书架 · 断网畅读</div></div>
-      <div class="stat reveal"><div class="num">改</div><div class="lbl">AI 重写剧情与设定</div></div>
-      <div class="stat reveal"><div class="num">创</div><div class="lbl">AI 创作一本新书</div></div>
-      <div class="stat reveal"><div class="num">3</div><div class="lbl">跨平台（Android / iOS / Windows）</div></div>
-    </div>
-  </section>
+    <!-- ====== Hero 手机：可点击的四 Tab 真机模拟 ====== -->
+    <div class="scene-stage">
+      <div class="phone" id="heroPhone">
+        <div class="screen" id="heroScreen">
+          <div class="island"></div>
+          <div class="statusbar"><span>21:36</span><span class="sb-r">📶 🔋</span></div>
 
-  <!-- ===================== 介绍视频（竖屏）===================== -->
-  <section class="block" id="intro-video" style="background: var(--bg-alt); border-top:1px solid var(--line); border-bottom:1px solid var(--line);">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <div class="sec-kicker">DEMO VIDEO</div>
-        <h2 class="sec-title">一分钟看完这个 APP</h2>
-        <p class="sec-sub">视频比文字更直观 —— 看看书架、阅读、AI 改写与创作是怎么跑起来的。</p>
-      </div>
-      <div class="reveal" style="max-width: 380px; margin: 0 auto;">
-        <div class="video-portrait-wrap">
-          <iframe
-            src="//player.bilibili.com/player.html?isOutside=true&aid=117002224277450&bvid=BV1Vj3C6zEAa&cid=40403796793&p=1&autoplay=0&high_quality=1&danmaku=0"
-            scrolling="no" border="0" frameborder="no" framespacing="0"
-            allowfullscreen="true" sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-            referrerpolicy="no-referrer-when-downgrade"
-            loading="lazy">
-          </iframe>
-        </div>
-        <p class="video-portrait-tip">加载不出来？<a href="https://www.bilibili.com/video/BV1Vj3C6zEAa" target="_blank" rel="noopener">在 B 站打开 ›</a></p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== 越用越懂你（强调区）===================== -->
-  <section class="block smart" id="smart">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <div class="sec-kicker">YOUR AI TOOLKIT</div>
-        <h2 class="sec-title">越用越懂你 · AI 的弹药库随你越攒越满</h2>
-        <p class="sec-sub">不是玄学推荐算法。AI 看到的上下文会随你的使用真实增长——下面三件事你做得越多，每次写章节 AI 能调用的素材就越丰富。</p>
-      </div>
-      <div class="smart-grid">
-        <div class="smart-card reveal">
-          <div class="ico">🏷️</div>
-          <h3>写作标签库</h3>
-          <div class="sub">全局共享 · 不绑书</div>
-          <p>在「设置 → 提示词标签管理」里建标签——每个标签就是一段 prompt 文本（赛博朋克、暗黑、轻松日常……）。同一名字还能存多条变体，<b>AI 写章节时随机抽一条</b>拼到输入里。<b>你在 A 书建的标签，B 书直接复用。</b></p>
-        </div>
-        <div class="smart-card reveal">
-          <div class="ico">🧠</div>
-          <h3>经验记忆</h3>
-          <div class="sub">跨会话跨书 · 可手改</div>
-          <p>在 Agent Chat 里交代的偏好（"别写错别字""每章结尾留个钩子""反派要立体别扁平"），AI 会<b>主动用 patch_memory 工具记下来</b>，换次开聊不用重新交代。<b>「设置 → Agent 记忆管理」可逐条查看、改写、删除</b>——你想收拾随时收拾。</p>
-        </div>
-        <div class="smart-card reveal">
-          <div class="ico">✍️</div>
-          <h3>AI 作家设定</h3>
-          <div class="sub">每章都套用 · 风格可控</div>
-          <p>在「设置 → AI 配置」里给 AI 定个调（"参考烽火戏诸侯的文风""冷峻克制不滥用形容词"），AI 把这段话作为 system prompt 头部<b>每次写章节都套用</b>。配合标签组合，每章都能套不同风格。</p>
-        </div>
-      </div>
-      <div class="smart-quote reveal">
-        一句话：<span class="em">你把角色卡、大纲、标签、风格、记忆这些素材整理得越扎实，AI 每次写章节能调用的"弹药库"就越满</span>——输出自然更稳、更连贯、更对你胃口。
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== 功能特性 ===================== -->
-  <section class="block" id="features">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <div class="sec-kicker">FEATURES</div>
-        <h2 class="sec-title">为追书而生的每一处细节</h2>
-        <p class="sec-sub">从书架管理到 AI 增强，覆盖找书、读书、品书的完整体验。</p>
-      </div>
-      <div class="feat-grid">
-        <div class="feat reveal">
-          <div class="ico">📚</div>
-          <h3>书架管理</h3>
-          <p>本地收藏与阅读进度跟踪，多端一致的私人书库，打开即续读。</p>
-        </div>
-        <div class="feat reveal">
-          <div class="ico">✏️</div>
-          <h3>AI 改写剧情</h3>
-          <p>不爽原著走向？用 AI 重写章节、调整设定，把故事掰回你想要的样子。</p>
-        </div>
-        <div class="feat reveal">
-          <div class="ico">✨</div>
-          <h3>AI 创作新书</h3>
-          <p>从零开始写一本属于你的：大纲、角色、章节，Agent Chat 全程协助。</p>
-        </div>
-        <div class="feat reveal">
-          <div class="ico">🤖</div>
-          <h3>AI 对话与工作流</h3>
-          <p>DSL Engine 本地工作流 + Agent Chat 智能对话，信息提取与创意写作两不误。</p>
-        </div>
-        <div class="feat reveal">
-          <div class="ico">🎨</div>
-          <h3>AI 场景插图</h3>
-          <p>ComfyUI 后端生成场景插图，支持负向提示词，把文字读成画面。</p>
-        </div>
-        <div class="feat reveal">
-          <div class="ico">🕸️</div>
-          <h3>角色关系图</h3>
-          <p>智能提取章节角色信息，可视化人物关系网络，理清长篇人物脉络。</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== 技术栈 ===================== -->
-  <section class="block" id="stack">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <div class="sec-kicker">TECH STACK</div>
-        <h2 class="sec-title">现代而务实的技术选型</h2>
-        <p class="sec-sub">Flutter 客户端 + FastAPI 后端 + ComfyUI 文生图，容器化一键部署。</p>
-      </div>
-      <div class="stack-wrap">
-        <div class="stack-col reveal">
-          <h3><span class="tag">📱</span> 移动应用</h3>
-          <div class="chips">
-            <span class="chip">Flutter 3.0+</span>
-            <span class="chip">Dart</span>
-            <span class="chip">Riverpod</span>
-            <span class="chip">Material Design 3</span>
-            <span class="chip">SQLite</span>
-          </div>
-        </div>
-        <div class="stack-col reveal">
-          <h3><span class="tag">🌐</span> 后端服务</h3>
-          <div class="chips">
-            <span class="chip">FastAPI</span>
-            <span class="chip">PostgreSQL</span>
-            <span class="chip">SQLAlchemy</span>
-            <span class="chip">Alembic</span>
-            <span class="chip">ComfyUI 客户端</span>
-          </div>
-        </div>
-        <div class="stack-col reveal">
-          <h3><span class="tag">🔧</span> 基础设施</h3>
-          <div class="chips">
-            <span class="chip">Docker Compose</span>
-            <span class="chip">Alembic</span>
-            <span class="chip">OpenAPI</span>
-            <span class="chip">GitHub Actions</span>
-            <span class="chip">ComfyUI</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== 快速开始（双轨） ===================== -->
-  <section class="block quick" id="quick">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <div class="sec-kicker">GET STARTED</div>
-        <h2 class="sec-title">两种方式，开始体验</h2>
-        <p class="sec-sub">下载 APK 即可体验，或从源码运行参与开发。</p>
-      </div>
-      <div class="quick-dual reveal">
-        <!-- 左：APK 下载（普通用户） -->
-        <div class="quick-track quick-apk">
-          <div class="track-head">
-            <span class="track-ico">📱</span>
-            <div>
-              <h3>下载体验</h3>
-              <p class="track-sub">正式版 v2.0.2 · 2026-07-29 · Android</p>
+          <!-- 书架 -->
+          <div class="view active" data-v="shelf">
+            <div class="app-bar">
+              <div class="ab-row">
+                <div><div class="ab-title">我的书架</div><div class="ab-sub">Midnight Library</div></div>
+                <div class="ab-actions"><span>🔍</span></div>
+              </div>
+            </div>
+            <div class="shelf-tabs"><span class="active">全部</span><span>原创</span><span>联网</span></div>
+            <div class="shelf-meta"><span class="m1">📋 馆藏 4</span><span class="m2">⬇ 已缓存 31 / 512</span><span style="margin-left:auto">长按管理</span></div>
+            <div class="view-scroll">
+              <div class="book-grid">
+                <div class="book-card">
+                  <div class="cover cv-1"><span class="seal">原</span><span class="ct">灰栈之雨</span></div>
+                  <div class="bc-info">
+                    <div class="bc-title">灰栈之雨</div><div class="bc-author">佚名 · 本地创作</div>
+                    <div class="dprog">
+                      <div class="dp-row"><span class="dp-lab">读</span><span class="bar"><span class="fill amber" data-w="34%"></span></span><span class="pct">34%</span></div>
+                      <div class="dp-row"><span class="dp-lab moss">缓</span><span class="bar"><span class="fill moss" data-w="100%"></span></span><span class="pct">100%</span></div>
+                    </div>
+                    <span class="bc-btn">📖 继续阅读</span>
+                  </div>
+                </div>
+                <div class="book-card">
+                  <div class="cover cv-2"><span class="ct">诡秘之主</span></div>
+                  <div class="bc-info">
+                    <div class="bc-title">诡秘之主</div><div class="bc-author">爱潜水的乌贼</div>
+                    <div class="dprog">
+                      <div class="dp-row"><span class="dp-lab">读</span><span class="bar"><span class="fill amber" data-w="72%"></span></span><span class="pct">72%</span></div>
+                      <div class="dp-row"><span class="dp-lab moss">缓</span><span class="bar"><span class="fill moss" data-w="81%"></span></span><span class="pct">81%</span></div>
+                    </div>
+                    <span class="bc-btn">📖 继续阅读</span>
+                  </div>
+                </div>
+                <div class="book-card">
+                  <div class="cover cv-3"><span class="ct">夜行者手记</span></div>
+                  <div class="bc-info">
+                    <div class="bc-title">夜行者手记</div><div class="bc-author">街角旧书店</div>
+                    <div class="dprog">
+                      <div class="dp-row"><span class="dp-lab">读</span><span class="bar"><span class="fill amber" data-w="12%"></span></span><span class="pct">12%</span></div>
+                      <div class="dp-row"><span class="dp-lab moss">缓</span><span class="bar"><span class="fill moss" data-w="26%"></span></span><span class="pct">26%</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="book-card">
+                  <div class="cover cv-5"><span class="ct">长安十二时辰</span></div>
+                  <div class="bc-info">
+                    <div class="bc-title">长安十二时辰</div><div class="bc-author">马伯庸</div>
+                    <div class="dprog">
+                      <div class="dp-row"><span class="dp-lab">读</span><span class="bar"><span class="fill amber" data-w="58%"></span></span><span class="pct">58%</span></div>
+                      <div class="dp-row"><span class="dp-lab moss">缓</span><span class="bar"><span class="fill moss" data-w="60%"></span></span><span class="pct">60%</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="ai-fab" title="AI 写作助手">✨</div>
             </div>
           </div>
-          <a class="btn-apk" href="https://github.com/yunkst/Whimread/releases/latest" target="_blank" rel="noopener">
-            <span class="apk-main">⬇ 下载 APK（arm64-v8a）</span>
-            <span class="apk-meta">98 MB · 主流手机推荐</span>
-          </a>
-          <div class="apk-alts">
-            <span>其他架构：</span>
-            <a href="https://github.com/yunkst/Whimread/releases/download/v2.0.2/app-armeabi-v7a-release.apk" target="_blank" rel="noopener">armv7a（老设备）</a>
-            <a href="https://github.com/yunkst/Whimread/releases/download/v2.0.2/app-x86_64-release.apk" target="_blank" rel="noopener">x86_64（模拟器）</a>
-          </div>
-          <a class="apk-sha" href="https://github.com/yunkst/Whimread/releases/latest" target="_blank" rel="noopener">🔏 SHA256SUMS 校验</a>
-          <p class="track-note">首次安装请允许「未知来源」。iOS 暂需自行编译。</p>
-        </div>
 
-        <!-- 右：源码运行（开发者） -->
-        <div class="quick-track quick-src">
-          <div class="track-head">
-            <span class="track-ico">💻</span>
-            <div>
-              <h3>源码运行</h3>
-              <p class="track-sub">面向开发者 · Flutter 3.0+ / Python 3.11+</p>
+          <!-- 文字游戏 -->
+          <div class="view" data-v="game">
+            <div class="app-bar">
+              <div class="ab-row">
+                <div class="ab-title">文字游戏</div>
+                <div class="ab-actions"><span>🎛️</span></div>
+              </div>
+            </div>
+            <div class="view-scroll" style="padding:10px 14px">
+              <div class="book-card" style="padding:11px 12px;margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">
+                  <span style="font-family:var(--serif);font-size:13px;font-weight:700;color:var(--p-ink)">雨夜酒馆</span>
+                  <span style="font-size:8.5px;color:#fff;background:var(--p-amber);border-radius:8px;padding:1px 7px">剧情推进中</span>
+                </div>
+                <div style="font-size:9.5px;color:var(--p-ink-faint)">改编自《灰栈之雨》 · 进行中 · 上次游玩 3 分钟前</div>
+              </div>
+              <div class="book-card" style="padding:11px 12px">
+                <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px">
+                  <span style="font-family:var(--serif);font-size:13px;font-weight:700;color:var(--p-ink)">雾港谜案</span>
+                </div>
+                <div style="font-size:9.5px;color:var(--p-ink-faint)">自定义设定 · 已完结 · 上次游玩 2 天前</div>
+              </div>
+              <div style="position:absolute;right:14px;bottom:16px;background:var(--p-amber);color:#fff;font-size:11px;font-weight:600;padding:8px 15px;border-radius:20px;box-shadow:0 4px 12px rgba(184,132,58,.4)">＋ 新建游戏</div>
             </div>
           </div>
-          <div class="quick-card">
-            <div class="quick-bar">
-              <span class="d d1"></span><span class="d d2"></span><span class="d d3"></span>
-              <span class="fn">bash</span>
+
+          <!-- 浏览器 -->
+          <div class="view" data-v="web">
+            <div class="addr-bar">
+              <div class="addr"><span class="lk">🔗</span><span class="url">m.yunshuge.top/book/9f2a</span></div>
             </div>
-<pre class="code"><span class="c"># 后端：docker compose 一键起</span>
+            <div class="load-track"><div class="load-fill" id="heroLoad"></div></div>
+            <div class="view-scroll">
+              <div class="webpage">
+                <div class="site-head">云书阁 · 灰栈之雨</div>
+                <div class="site-meta">作者：落桜声客 · 科幻悬疑 · 共 128 章</div>
+                <div class="ad-block">📢 立即下载 APP 畅读无广告 →</div>
+                <div class="chap-item"><span class="cn">第七章 风起</span><span class="cm">今天 08:12</span></div>
+                <div class="chap-item"><span class="cn">第六章 记忆贩子</span><span class="cm">昨天</span></div>
+                <div class="chap-item"><span class="cn">第五章 断掉的线索</span><span class="cm">昨天</span></div>
+                <div class="chap-item"><span class="cn">第四章 雨夜来客</span><span class="cm">3 天前</span></div>
+                <div class="ad-block floaty">🎁 点击领取<br>限时VIP</div>
+              </div>
+              <div class="web-fabs">
+                <div class="wfab amber"><span class="wi">📚</span>导入我的书架</div>
+                <div class="wfab gold" id="heroAddFab"><span class="wi">➕</span>添加小说</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 设置 -->
+          <div class="view" data-v="set">
+            <div class="app-bar"><div class="ab-row"><div class="ab-title">设置</div></div></div>
+            <div class="view-scroll">
+              <div class="set-group">
+                <div class="sg-t">AI</div>
+                <div class="set-row"><span class="si">✍️</span>写作技巧管理<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">🖼️</span>生图模型管理<span class="sr-badge">Beta</span><span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">🧠</span>Agent 记忆管理<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">🤖</span>AI 模型选择<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">⭐</span>点 Star 补充 AI 额度<span class="sr-arrow">›</span></div>
+              </div>
+              <div class="set-group">
+                <div class="sg-t">数据</div>
+                <div class="set-row"><span class="si">🩺</span>修复数据库<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">📜</span>应用日志<span class="sr-arrow">›</span></div>
+              </div>
+              <div class="set-group">
+                <div class="sg-t">诊断</div>
+                <div class="set-row"><span class="si">⏳</span>预加载队列<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">🖼️</span>媒体缓存<span class="sr-arrow">›</span></div>
+              </div>
+              <div class="set-group">
+                <div class="sg-t">关于</div>
+                <div class="set-row"><span class="si">🌓</span>主题模式 · 跟随系统<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">🔄</span>检查更新<span class="sr-arrow">›</span></div>
+                <div class="set-row"><span class="si">📮</span>问题反馈<span class="sr-arrow">›</span></div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tabbar" id="heroTabs">
+            <div class="tab active" data-t="shelf"><span class="ti">📖</span>书架</div>
+            <div class="tab" data-t="game"><span class="ti">🎲</span>文字游戏</div>
+            <div class="tab" data-t="web"><span class="ti">🌐</span>浏览器</div>
+            <div class="tab" data-t="set"><span class="ti">⚙️</span>设置</div>
+          </nav>
+        </div>
+      </div>
+      <div class="scene-caption">👆 <b>能点</b>——这四页不是图片，是 HTML 复刻的 App 真实界面，试试切 Tab。</div>
+      <button class="replay" id="themeToggle"><span class="ic">🌗</span> 切到「暗夜书馆」主题</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 亮点条 ===================== -->
+<section class="stats">
+  <div class="wrap stats-grid">
+    <div class="stat reveal"><div class="num">读</div><div class="lbl">任意站点 · 离线畅读</div></div>
+    <div class="stat reveal"><div class="num">改</div><div class="lbl">AI 标注改写 · 版本回滚</div></div>
+    <div class="stat reveal"><div class="num">写</div><div class="lbl">Agent 陪写 · 大纲人物卡</div></div>
+    <div class="stat reveal"><div class="num">玩</div><div class="lbl">文字游戏 · AI 当 GM</div></div>
+  </div>
+</section>
+
+<!-- ===================== 场景一：读 ===================== -->
+<section class="block" id="read">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">SCENE 01 · READ</div>
+      <h2 class="sec-title">App 里就能逛任意小说站</h2>
+      <p class="sec-sub">内置浏览器打开站点 → AI 现场生成提取脚本 → 干净正文进书架，广告弹窗全留下。</p>
+    </div>
+
+    <div class="scene" data-scene="extract">
+      <div class="scene-copy reveal">
+        <div class="sc-step">浏览器 → 添加小说 → 书架</div>
+        <h3 class="sc-title">🌐 第一次访问，AI 替你写脚本</h3>
+        <p class="sc-desc">打开任何小说站的目录页，右下角的「添加小说」会亮成金色——点一下，AI 现场为这个站写一个提取脚本，预览确认后整本书进书架。<b>脚本落库，这个站一劳永逸。</b></p>
+        <ul class="sc-points">
+          <li><b>干净正文</b>：弹窗广告、"请下载 APP 继续"、推广链接统统不进正文</li>
+          <li><b>自动预加载</b>：正在读第 7 章，后台已经把第 8 章偷偷缓存好，翻页零等待</li>
+          <li><b>字体反爬也能读</b>：番茄这类把字画成乱码的站，端侧 OCR 自动还原成正常汉字</li>
+          <li><b>整站书架搬家</b>：网站上的收藏列表一键「导入我的书架」</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:36</span><span class="sb-r">📶 🔋</span></div>
+            <div class="addr-bar">
+              <div class="addr"><span class="lk">🔗</span><span class="url">m.qianggeng.cc/book/7742</span></div>
+            </div>
+            <div class="load-track"><div class="load-fill" id="exLoad"></div></div>
+            <div class="view-scroll" style="position:relative">
+              <div class="webpage">
+                <div class="site-head">青梧文学 · 剑来</div>
+                <div class="site-meta">作者：烽火戏诸侯 · 仙侠 · 共 1147 章</div>
+                <div class="ad-block ex-ad">⛔ 已拦截弹窗广告 ×2</div>
+                <div class="chap-item"><span class="cn">第 214 章 山水一并</span><span class="cm">08:40</span></div>
+                <div class="chap-item"><span class="cn">第 213 章 落魄山</span><span class="cm">08:40</span></div>
+                <div class="chap-item"><span class="cn">第 212 章 小陌</span><span class="cm">08:39</span></div>
+                <div class="ad-block floaty ex-ad2">🔥 开通会员<br>免广告畅读</div>
+              </div>
+              <div class="web-fabs">
+                <div class="wfab amber"><span class="wi">📚</span>导入我的书架</div>
+                <div class="wfab gold ex-fab"><span class="wi">➕</span>添加小说</div>
+              </div>
+
+              <!-- AI 提取抽屉 -->
+              <div class="sheet-mask ex-mask"></div>
+              <div class="sheet ex-sheet">
+                <div class="grip"></div>
+                <h4>AI 正在生成提取脚本 <span class="ex-status" style="font-size:10px;color:var(--p-amber-deep)">分析目录页…</span></h4>
+                <div class="tool-card ex-t1"><span class="spinner"></span><span class="tc-name">webview_extract</span>识别目录结构<span class="tc-ok">✓</span></div>
+                <div class="tool-card ex-t2" style="opacity:.4"><span class="spinner"></span><span class="tc-name">save_script</span>落库复用<span class="tc-ok">✓</span></div>
+                <div class="preview-head" style="margin-top:10px;opacity:0;transition:opacity .5s" id="exPreview">
+                  <div class="preview-cover">剑来</div>
+                  <div class="preview-meta">
+                    <div class="pm-t">剑来</div>
+                    <div class="pm-line">作者：<b>烽火戏诸侯</b></div>
+                    <div class="pm-line">共解析出 <b>1147</b> 章 · 正文纯净无广告</div>
+                    <div class="pm-line" style="font-size:9.5px;color:var(--p-ink-faint)">✓ 脚本已保存，下次访问直接秒加</div>
+                  </div>
+                </div>
+                <div class="sheet-btn" id="exBtn">加入书架</div>
+              </div>
+
+              <div class="toast ex-toast">✓ 《剑来》已加入书架</div>
+            </div>
+          </div>
+        </div>
+        <div class="scene-caption" id="exCap">站点没有任何适配规则？没关系。</div>
+        <button class="replay" data-replay="extract"><span class="ic">↻</span> 重播演示</button>
+      </div>
+    </div>
+
+    <!-- 阅读器 + OCR -->
+    <div class="scene flip" data-scene="reader">
+      <div class="scene-copy reveal">
+        <div class="sc-step">阅读器 · 离线缓存 · OCR 还原</div>
+        <h3 class="sc-title">📖 断网也能读，乱码也能认</h3>
+        <p class="sc-desc">看过的章节全部落在本地，飞机上、地铁里照样翻。有的站把汉字画成生僻码点防抓取——<b>端侧 OCR 直接把"假字"认回真字</b>，全程离线，你甚至不会察觉发生过。</p>
+        <ul class="sc-points">
+          <li><b>宋体正文 · 行距 2.0</b>：纸感排版，护眼不累</li>
+          <li><b>自动滚动</b>：解放双手，速度 0.1x–5.0x 可调</li>
+          <li><b>段内标注</b>：长按任何一段写想法，AI 之后就照着改（下一幕演示）</li>
+          <li><b>书内全文搜索</b>：在已缓存章节里搜关键词直达</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:37</span><span class="sb-r">✈️ 🔋</span></div>
+            <div class="reader-top on">
+              <span class="rt-back">‹</span><span class="rt-title">第七章 风起</span>
+              <span class="rt-actions"><span>✏️</span><span>⚙️</span></span>
+            </div>
+            <div class="reader-body" style="padding-top:56px">
+              <div class="rb-chap">第七章 · 风起</div>
+              <p class="para">雨下了整夜。林昼站在锈蚀的栈桥上，海风把废旧的广告牌吹得咯吱作响。</p>
+              <p class="para garbled" id="ocrPara">远处的霓虹在雨幕里洇成一团团模糊的光，像是谁在雾里<span class="fix">□□□</span>不开的眼。</p>
+              <p class="para">「你在找一个人。」身后的声音说。</p>
+              <p class="para">他转过身。说话的是个穿灰风衣的女人，帽檐压得很低，手里捏着一枚生锈的存储卡。</p>
+              <p class="para">「不，」林昼说，「我在找一段被卖掉的记忆。」</p>
+              <div class="scroll-fab on">⏸</div>
+              <div class="cache-pill" id="cachePill">⬇ 下一章已缓存</div>
+            </div>
+            <div class="reader-bottom">
+              <span class="rb-btn">‹ 上一章</span>
+              <span class="rb-pos">7 / 128</span>
+              <span class="rb-btn">下一章 ›</span>
+            </div>
+            <div class="ocr-tag" id="ocrTag" style="position:absolute;left:14px;bottom:58px;z-index:16;font-size:9px;color:var(--p-amber-deep);background:var(--p-amber-soft);padding:3px 9px;border-radius:10px;opacity:0;transition:opacity .4s">🔤 字体反爬 · 端侧 OCR 还原中</div>
+          </div>
+        </div>
+        <div class="scene-caption" id="rdCap">注意看第二段的"乱码"——那是网站故意画的假字。</div>
+        <button class="replay" data-replay="reader"><span class="ic">↻</span> 重播演示</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 场景二：改 ===================== -->
+<section class="block" id="rewrite" style="background:var(--bg-alt);border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">SCENE 02 · REWRITE</div>
+      <h2 class="sec-title">不爽的剧情，当场改成你想要的</h2>
+      <p class="sec-sub">长按那段文字写想法 → AI 照着改 → 不满意还能一键回滚。</p>
+    </div>
+
+    <div class="scene" data-scene="rewrite">
+      <div class="scene-copy reveal">
+        <div class="sc-step">标注 → AI 改写 → 版本回滚</div>
+        <h3 class="sc-title">✍️ 指哪改哪，改砸了能反悔</h3>
+        <p class="sc-desc">长按任何一个段落写下你的不满——"这里节奏太慢，加一场雨夜追逐"。AI FAB 亮起红点，点开看它干活，改完顶部滑入横幅。每次改动都存历史版本，<b>不喜欢随时还原</b>。</p>
+        <ul class="sc-points">
+          <li><b>小修小补不惊动 AI</b>：改错别字、调一句对话，精确替换，其他一字不动</li>
+          <li><b>大改也行</b>：续写烂尾、插入新章节、让反派洗白、把结局掰成开放式</li>
+          <li><b>风格标签</b>：赛博朋克 / 暗黑 / 轻松日常自由组合，每章套不同味儿</li>
+          <li><b>版本历史</b>：用户编辑 / AI 改写 / 手动快照，逐版预览与还原</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:38</span><span class="sb-r">📶 🔋</span></div>
+            <div class="reader-top on">
+              <span class="rt-back">‹</span><span class="rt-title">第七章 风起 · 编辑模式</span>
+              <span class="rt-actions"><span>✓</span></span>
+            </div>
+            <div class="reader-body" style="padding-top:56px">
+              <div class="rb-chap">第七章 · 风起</div>
+              <p class="para">雨下了整夜。林昼站在锈蚀的栈桥上，海风把废旧的广告牌吹得咯吱作响。</p>
+              <p class="para rw-target">她把存储卡推过来，说了句收好，就转身走进了雨里。</p>
+              <p class="para">林昼捏着那枚冰凉的卡片，忽然觉得这场雨下得有些久了。</p>
+              <div class="note-pop rw-note">💬 「她走得太空洞了——补一段雨夜追逐，让钩子挂在追逐里」<div class="np-hint">段落标注 · 长按段落添加</div></div>
+              <div class="rewrite-banner rw-banner">✨ 本章已按标注重写<span class="rb-undo">查看版本历史</span></div>
+              <div class="toast rw-toast">已按标注重写本章（1 处修改）</div>
+              <div class="ai-fab badged attn rw-fab" style="bottom:20px">🪄<span class="nail">1</span></div>
+            </div>
+            <div class="reader-bottom">
+              <span class="rb-btn">‹ 上一章</span><span class="rb-pos">7 / 128</span><span class="rb-btn">下一章 ›</span>
+            </div>
+
+            <!-- 版本历史抽屉 -->
+            <div class="sheet-mask rw-mask"></div>
+            <div class="sheet rw-sheet">
+              <div class="grip"></div>
+              <h4>版本历史 <span style="font-size:10px;color:var(--p-ink-faint)">3 个版本</span></h4>
+              <div class="ver-row"><span class="vi">✨</span><span class="vt"><b>AI改写 · 912 字</b><span>10/4 21:39</span></span><span class="restore">预览 · 还原</span></div>
+              <div class="ver-row"><span class="vi">✏️</span><span class="vt"><b>用户编辑 · 890 字</b><span>10/4 20:11</span></span><span class="restore">预览 · 还原</span></div>
+              <div class="ver-row" style="border-bottom:none"><span class="vi">📷</span><span class="vt"><b>手动快照 · 890 字</b><span>10/3 19:02</span></span><span class="restore">预览 · 还原</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="scene-caption" id="rwCap">长按第二段，写下你的不满。</div>
+        <button class="replay" data-replay="rewrite"><span class="ic">↻</span> 重播演示</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 场景三：写 ===================== -->
+<section class="block" id="write">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">SCENE 03 · WRITE</div>
+      <h2 class="sec-title">从一句点子，到一本你自己的书</h2>
+      <p class="sec-sub">跟 AI 说一句想写什么，建书、大纲、人物卡、逐章正文，它全程动手。</p>
+    </div>
+
+    <div class="scene" data-scene="write">
+      <div class="scene-copy reveal">
+        <div class="sc-step">Agent Chat · 建书 → 大纲 → 人物 → 正文</div>
+        <h3 class="sc-title">💬 会用工具的写作助手</h3>
+        <p class="sc-desc">你说"帮我写一本赛博朋克悬疑"，它不是回你一堆建议，而是<b>直接调工具建书、写大纲、立人物卡</b>，然后逐章产出正文。每一步都看得见。</p>
+        <ul class="sc-points">
+          <li><b>人设不漂</b>：角色卡独立建档，写章节时自动注入，前后一致</li>
+          <li><b>大纲先定骨架</b>：Markdown 双栏编辑/预览，自动保存</li>
+          <li><b>人物关系图</b>：力导向图可视化，随章节时间轴演变</li>
+          <li><b>顺手配图</b>：端侧扩散模型生成封面插图，离线可用</li>
+          <li><b>全部本地</b>：书、章节、角色、游戏存档全部存在手机本地，不依赖账号</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:40</span><span class="sb-r">📶 🔋</span></div>
+            <div class="chat-head">
+              <span class="ch-ic">🪶</span><span class="ch-t">写作助手</span>
+              <span class="ch-model">glm-4-flash</span>
+              <span class="ch-quota">AI 剩余 128 点</span>
+            </div>
+            <div class="chat-msgs">
+              <div class="bubble user" id="wrUser">帮我写一本赛博朋克悬疑，主角是个失忆黑客。</div>
+              <div class="tool-card wr-t1" style="opacity:0"><span class="spinner"></span><span class="tc-name">create_novel</span>《灰栈之雨》<span class="tc-ok">✓</span></div>
+              <div class="tool-card wr-t2" style="opacity:0"><span class="spinner"></span><span class="tc-name">write_outline</span>全书大纲<span class="tc-ok">✓</span></div>
+              <div class="tool-card wr-t3" style="opacity:0"><span class="spinner"></span><span class="tc-name">create_character</span>角色「林昼」<span class="tc-ok">✓</span></div>
+              <div class="bubble ai" id="wrAi"><span class="caret"></span></div>
+              <div class="tool-card wr-t4" style="opacity:0;border-left-color:var(--p-moss)"><span style="color:var(--p-moss)">🧠</span><span class="tc-name" style="color:var(--p-moss)">patch_memory</span>已记住：每章结尾留钩子<span class="tc-ok">✓</span></div>
+            </div>
+            <div class="composer"><span class="ci">和写作助手说点什么…</span><span class="send">➤</span></div>
+          </div>
+        </div>
+        <div class="scene-caption" id="wrCap">它不提建议——它直接干活。</div>
+        <button class="replay" data-replay="write"><span class="ic">↻</span> 重播演示</button>
+      </div>
+    </div>
+
+    <!-- 人物卡 + 关系图 -->
+    <div class="scene flip" data-scene="chars">
+      <div class="scene-copy reveal">
+        <div class="sc-step">人物卡 · 关系图 · 越攒越厚的素材库</div>
+        <h3 class="sc-title">🎭 人物立得住，故事才立得住</h3>
+        <p class="sc-desc">每个角色独立建档：外貌、性格、口癖、背景、AI 生图提示词。人物关系用力导向图铺开，<b>拖动章节时间轴，关系网会随剧情演变</b>。</p>
+        <ul class="sc-points">
+          <li><b>AI 帮你建卡</b>：读章节时自动提取角色，也可手动新建</li>
+          <li><b>版本历史</b>：角色卡每次修改都可回溯</li>
+          <li><b>角色卡可溯源</b>：每次修改都留版本，随时回滚到任意一版</li>
+          <li><b>素材全局复用</b>：标签库、经验记忆、作家设定，跨书生效</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:41</span><span class="sb-r">📶 🔋</span></div>
+            <div class="app-bar">
+              <div class="ab-row">
+                <div><div class="ab-title" style="font-size:16px">《灰栈之雨》· 人物卡</div></div>
+                <div class="ab-actions"><span>🕸️</span><span>🔍</span></div>
+              </div>
+            </div>
+            <div class="char-grid">
+              <div class="char-card"><div class="cc-ava m">🧑‍💻</div><div class="cc-info"><div class="cc-name">林昼</div><div class="cc-meta">男 · 26 · 黑客</div></div></div>
+              <div class="char-card"><div class="cc-ava f">🕵️‍♀️</div><div class="cc-info"><div class="cc-name">灰风衣女人</div><div class="cc-meta">女 · ？ · 记忆贩子</div></div></div>
+              <div class="char-card"><div class="cc-ava n">🍸</div><div class="cc-info"><div class="cc-name">老周</div><div class="cc-meta">其他 · 54 · 酒馆掌柜</div></div></div>
+              <div class="char-card"><div class="cc-ava m">💼</div><div class="cc-info"><div class="cc-name">委托人 K</div><div class="cc-meta">男 · 40 · 身份不明</div></div></div>
+            </div>
+            <div class="rel-graph" id="relGraph">
+              <svg viewBox="0 0 278 320" preserveAspectRatio="xMidYMid meet">
+                <line class="rel-edge" id="e1" x1="70" y1="142" x2="200" y2="72"/>
+                <line class="rel-edge" id="e2" x1="70" y1="142" x2="190" y2="242"/>
+                <line class="rel-edge" id="e3" x1="200" y1="72" x2="190" y2="242"/>
+                <line class="rel-edge" id="e4" x1="70" y1="142" x2="80" y2="52"/>
+              </svg>
+              <div class="rel-node" id="n1" style="left:70px;top:150px"><span class="rn-dot" style="background:#1976d2">🧑‍💻</span><span class="rn-name">林昼</span></div>
+              <div class="rel-node" id="n2" style="left:200px;top:80px"><span class="rn-dot" style="background:#e91e63">🕵️‍♀️</span><span class="rn-name">灰风衣女人</span></div>
+              <div class="rel-node" id="n3" style="left:190px;top:250px"><span class="rn-dot" style="background:#6b5d48">🍸</span><span class="rn-name">老周</span></div>
+              <div class="rel-node" id="n4" style="left:80px;top:60px"><span class="rn-dot" style="background:#4a2e6e">💼</span><span class="rn-name">委托人K</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="scene-caption">关系图是活的——节点会随力导向布局轻微漂移。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 场景四：文字游戏 ===================== -->
+<section class="block" id="game" style="background:var(--bg-alt);border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">SCENE 04 · PLAY</div>
+      <h2 class="sec-title">文字游戏：让 AI 给你当 GM</h2>
+      <p class="sec-sub">把书架上的小说变成互动文字冒险——AI 主持剧情，你做选择，骰子判命运。</p>
+    </div>
+
+    <div class="scene" data-scene="game">
+      <div class="scene-copy reveal">
+        <div class="sc-step">旁白 → 台词 → 骰子 → 你的选择</div>
+        <h3 class="sc-title">🎲 打字机里跑出来的互动小说</h3>
+        <p class="sc-desc">AI 游戏主持人逐段旁白、让 NPC 开口，每回合递上 2–4 个选项——你可以点选项，也可以<b>直接打字描述自己的行动</b>。命运骰子真掷真算，结果连 GM 都不能改。</p>
+        <ul class="sc-points">
+          <li><b>改编自带的书</b>：NPC 的性格、说话腔调都来自你书架那本书的角色卡</li>
+          <li><b>打字机流式演出</b>：旁白逐字蹦出，"幕后"按钮能看 GM 的思考过程</li>
+          <li><b>回溯时间线</b>：任何一步选择都能「回溯到这一步」重选，设定不丢</li>
+          <li><b>自动配图</b>：关键场景端侧生成插图，插进剧情流里</li>
+          <li><b>离开页面剧情照跑</b>：回来接着玩，存档永远在本地</li>
+        </ul>
+      </div>
+      <div class="scene-stage reveal">
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="statusbar"><span>21:42</span><span class="sb-r">📶 🔋</span></div>
+            <div class="app-bar" style="padding-bottom:4px">
+              <div class="ab-row">
+                <div><div class="ab-title" style="font-size:15px">雨夜酒馆 <span style="font-size:9px;color:var(--p-amber);background:var(--p-amber-soft);border-radius:8px;padding:1px 6px;vertical-align:2px">剧情推进中</span></div></div>
+                <div class="ab-actions"><span style="font-size:12px">🧠 幕后</span></div>
+              </div>
+            </div>
+            <div class="game-flow">
+              <div class="gm-para" id="gmPara"></div>
+              <div class="npc-line" id="gmNpc" style="opacity:0;transition:opacity .4s">
+                <div class="ava">🍸</div>
+                <div class="nl-bubble"><div class="nl-name">老周</div>客官，这雨一时半会儿停不了。坐吧，先喝一杯——不过你打听断剑的事，得加钱。</div>
+              </div>
+              <div class="dice-card" id="gmDice" style="opacity:0;transition:opacity .4s">
+                <div class="dc-head"><span class="di" id="diceIcon">🎲</span>命运骰子 <span style="font-weight:400;color:var(--p-ink-faint);font-size:9px" id="diceState">概率判定中</span></div>
+                <div class="dice-branch" id="db1"><span class="db-track" style="width:62%"></span><span class="db-lab">老周愿意多说</span><span class="db-pct">62%</span></div>
+                <div class="dice-branch" id="db2"><span class="db-track" style="width:38%"></span><span class="db-lab">被酒馆里的人盯上</span><span class="db-pct">38%</span></div>
+              </div>
+              <div class="choice-btn" id="gc1"><span class="cb-i">1</span>打听那把断剑的下落</div>
+              <div class="choice-btn" id="gc2"><span class="cb-i">2</span>问他昨夜来的陌生人</div>
+              <div class="choice-btn" id="gc3"><span class="cb-i">3</span>沉默，把酒喝完</div>
+              <div class="game-strip" id="gmStrip" style="opacity:0"><span class="spinner"></span>剧情推进中<span class="ellipsis"></span><span style="margin-left:auto;color:var(--p-ink-faint)">停止</span></div>
+            </div>
+            <div class="composer"><span class="ci">描述你的行动或台词…</span><span class="send">➤</span></div>
+            <div class="toast gm-toast">↩ 已回溯到第 2 步（设定保留）</div>
+          </div>
+        </div>
+        <div class="scene-caption" id="gmCap">GM 正在铺场——看完骰子怎么落。</div>
+        <button class="replay" data-replay="game"><span class="ic">↻</span> 重播演示</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 功能地图 ===================== -->
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">FEATURE MAP</div>
+      <h2 class="sec-title">功能地图 · 每一项都在代码里核实过</h2>
+      <p class="sec-sub">四大场景之外的全部能力，按 App 真实结构分组。标注了在 App 里的位置——装上就能找到。</p>
+    </div>
+    <div class="fmap-tabs reveal" id="fmapTabs" role="tablist" aria-label="功能地图分组">
+      <button class="fmap-tab active" role="tab" aria-selected="true" data-p="read">📚 书架与阅读</button>
+      <button class="fmap-tab" role="tab" aria-selected="false" data-p="grab">🌐 浏览器与抓书</button>
+      <button class="fmap-tab" role="tab" aria-selected="false" data-p="ai">✍️ 改写与创作</button>
+      <button class="fmap-tab" role="tab" aria-selected="false" data-p="game">🎲 文字游戏</button>
+      <button class="fmap-tab" role="tab" aria-selected="false" data-p="ai2">🤖 模型与对话</button>
+      <button class="fmap-tab" role="tab" aria-selected="false" data-p="sys">🧰 体验与设置</button>
+    </div>
+
+    <div class="fmap-panel active" role="tabpanel" data-panel="read">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🗂️</span><h3>书架按来源自动归类</h3></div><p>「全部 / 原创 / 各来源站点」自动分架，横滑切换（带景深效果），不用手动归档。</p><span class="fi-where"><b>书架</b> · 左右滑动</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📊</span><h3>读 / 缓双进度条</h3></div><p>每本书一眼看到「读到 34%」和「已缓存 81%」两条独立进度。</p><span class="fi-where"><b>书架</b> · 书籍卡片</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🌌</span><h3>沉浸模式</h3></div><p>点一下正文，顶栏底栏和系统状态栏全部淡出，只剩文字。再点恢复。</p><span class="fi-where"><b>阅读器</b> · 点按正文</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔗</span><h3>跨章无缝衔接</h3></div><p>往下滚自动接下一章；重开一本书直接回到上次读到的那个段落。</p><span class="fi-where"><b>阅读器</b> · 自动</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">⚙️</span><h3>阅读设置</h3></div><p>字号 12–32、文字亮度 0–100%、自动滚动 0.1x–5.0x；亮色 / 暗色 / 跟随系统三档主题。</p><span class="fi-where"><b>阅读器</b> · 顶栏菜单</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">✏️</span><h3>亲手修订正文</h3></div><p>编辑模式直接改正文错别字；每章自动保留最近 5 个版本，随时预览还原。</p><span class="fi-where"><b>阅读器</b> · 顶栏 ✏️</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🕐</span><h3>版本历史</h3></div><p>用户编辑 / AI 改写 / 手动快照逐版留档，预览后一键还原。</p><span class="fi-where"><b>阅读器</b> · 顶栏菜单</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔍</span><h3>书内全文搜索</h3></div><p>在已缓存章节里搜关键词，命中处带上下文，点击直达阅读位置。</p><span class="fi-where"><b>章节列表</b> · 🔍</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📥</span><h3>手动插入章节</h3></div><p>把自己的文字粘贴成任意一本书的新章节；章节可拖拽重排。</p><span class="fi-where"><b>章节列表</b> · 章项 ＋</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🖼️</span><h3>自定义封面</h3></div><p>相册选图自由裁剪设为封面，或用 AI 生成的图；书名可改。</p><span class="fi-where"><b>书架</b> · 长按书籍</span></div>
+      </div>
+    </div>
+
+    <div class="fmap-panel" role="tabpanel" data-panel="grab">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🌍</span><h3>内置浏览器</h3></div><p>App 里直接逛任意小说站：地址栏、前进后退、刷新、桌面模式（桌面 UA + 1200px 视口）。</p><span class="fi-where"><b>浏览器</b> · 底部第 3 个 Tab</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🤖</span><h3>AI 现场写提取脚本</h3></div><p>没适配过的站也能加书——AI 分析目录页现场生成脚本，落库复用，下次秒加。</p><span class="fi-where"><b>浏览器</b> · 「添加小说」金钮</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📜</span><h3>脚本管理 + 云端脚本库</h3></div><p>查看/验证/删除本地脚本；可安装人工审核过的云端脚本，新站免等生成。</p><span class="fi-where"><b>浏览器</b> · ⋮ → 脚本管理</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📥</span><h3>批量导入网站书架</h3></div><p>把站点「我的收藏」整页勾选导入，不用一本本点。</p><span class="fi-where"><b>浏览器</b> · 「导入我的书架」</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🧹</span><h3>干净正文</h3></div><p>只提取正文文本，弹窗广告、「请下载 APP 继续」、推广链接统统不进书架。</p><span class="fi-where"><b>自动</b></span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔤</span><h3>字体反爬还原</h3></div><p>端侧 OCR 把「假字」认回真汉字，全程离线、无感完成。</p><span class="fi-where"><b>阅读器</b> · 自动</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">⏳</span><h3>智能预加载</h3></div><p>读到第 7 章，第 8 章已在缓存；正文中抓取时自动让出网络。</p><span class="fi-where"><b>自动</b> · 诊断页可看队列</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">⭐</span><h3>浏览器收藏夹</h3></div><p>常去的站分组收藏，长按重命名 / 移动分组 / 删除。</p><span class="fi-where"><b>浏览器</b> · ⋮ → 收藏夹</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔄</span><h3>刷新网站书架</h3></div><p>用站点脚本拉取该站最新书架状态并合并到本地。</p><span class="fi-where"><b>书架</b> · 顶栏云图标</span></div>
+      </div>
+    </div>
+
+    <div class="fmap-panel" role="tabpanel" data-panel="ai">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📝</span><h3>段落标注改写</h3></div><p>长按任何段落写想法，AI 照着改整章；改完可一键还原。</p><span class="fi-where"><b>阅读器</b> · 长按段落</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🏗️</span><h3>大纲与背景设定</h3></div><p>Markdown 编辑 / 预览双 Tab，2 秒防抖自动保存，一书一份。</p><span class="fi-where"><b>章节列表</b> · ⋮ → 大纲 / 背景设定</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">👥</span><h3>人物卡</h3></div><p>每本书的角色库：性别筛选 + 姓名搜索，头像、说话腔调、背景俱全。</p><span class="fi-where"><b>章节列表</b> · ⋮ → 人物卡</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🧬</span><h3>角色卡版本历史</h3></div><p>每次修改记录时间 / 来源 / 原因，看整卡快照、一键回滚——文字游戏里的人设变更也走这条版本链。</p><span class="fi-where"><b>角色卡详情</b> · 版本历史</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🕸️</span><h3>人物关系图</h3></div><p>力导向图铺开全部关系，拖章节时间轴看「谁认识谁」随剧情演变。</p><span class="fi-where"><b>人物卡</b> · 关系图</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🏷️</span><h3>写作技巧库</h3></div><p>自建分类 + 同名多变体，AI 写章节时随机抽取一条注入——全局共享，跨书复用。</p><span class="fi-where"><b>设置 → AI</b> · 写作技巧管理</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🧠</span><h3>经验记忆</h3></div><p>你交代的偏好 AI 主动记下，跨会话生效；逐条可查、可改、可删。</p><span class="fi-where"><b>设置 → AI</b> · Agent 记忆管理</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">✒️</span><h3>AI 作家设定</h3></div><p>给 AI 定个文风（"参考烽火戏诸侯"），每次写章节都作为 system prompt 头部生效。</p><span class="fi-where"><b>聊天</b> · 场景与设置</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🖼️</span><h3>端侧生图工作台</h3></div><p>按 SoC 装模型包（SD1.5 / SDXL），测试台可调步数 / CFG / 种子 / 负向提示词，断点续传下载。</p><span class="fi-where"><b>设置 → AI</b> · 生图模型管理</span></div>
+      </div>
+    </div>
+
+    <div class="fmap-panel" role="tabpanel" data-panel="game">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🎭</span><h3>AI 游戏主持人</h3></div><p>旁白、NPC 台词、剧情推进全由 AI 演出，台词与描写严格分开渲染。</p><span class="fi-where"><b>文字游戏</b> · 游玩页</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📖</span><h3>改编自书架的书</h3></div><p>绑定小说共享角色卡——NPC 性格、说话腔调、头像来自角色卡，改卡下一轮生效。</p><span class="fi-where"><b>聊天</b> · 「新建游戏」</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🎲</span><h3>命运骰子</h3></div><p>带权重的真随机判定，概率明示、结果公开，GM 也不能改写。</p><span class="fi-where"><b>游玩页</b> · 剧情分岔时</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🧭</span><h3>回合选项 + 自由输入</h3></div><p>每回合 2/3/4 个选项内联在剧情里；也可以直接打字描述行动——两条路都算数。</p><span class="fi-where"><b>游玩页</b> · 每回合</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">⏪</span><h3>回溯时间线</h3></div><p>对任何一步选择反悔，「回溯到这一步」重开决策，设定与记忆原样保留。</p><span class="fi-where"><b>游玩页</b> · 历史选项组</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🧠</span><h3>GM 幕后直播</h3></div><p>实时围观 GM 的思考过程和当前动作（描写旁白中 / 概率判定中…），不落库、看完即焚。</p><span class="fi-where"><b>游玩页</b> · 顶栏 🧠</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🎛️</span><h3>游戏设定随时改</h3></div><p>叙事风格、选项数、场景插图策略、参战名单、玩家角色——改完下一轮生效。</p><span class="fi-where"><b>游玩页</b> · 查看设定</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🖼️</span><h3>自动场景插图</h3></div><p>关键场景端侧生成插图直接插进剧情流，不耗云端额度。</p><span class="fi-where"><b>游玩页</b> · 设定里开关</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">💾</span><h3>离开照跑</h3></div><p>退出页面剧情在后台继续推进，回来接着玩；存档永远在本地。</p><span class="fi-where"><b>文字游戏</b> · 列表实时徽标</span></div>
+      </div>
+    </div>
+
+    <div class="fmap-panel" role="tabpanel" data-panel="ai2">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🤖</span><h3>AI 模型选择</h3></div><p>按消耗倍率升序列出可用模型，标注「消耗速度约是基准的 N 倍」，全场景统一生效。</p><span class="fi-where"><b>设置 → AI</b> · AI 模型选择</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🪙</span><h3>额度实时可见</h3></div><p>聊天窗顶常驻「AI 剩余 N 点」，约 1000 token = 1 点，用完可点 Star 免费补一次。</p><span class="fi-where"><b>聊天窗</b> · 顶部徽标</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🗂️</span><h3>会话历史</h3></div><p>按场景列出历史会话，新建 / 切换 / 重命名 / 删除；运行中禁止切换防丢上下文。</p><span class="fi-where"><b>聊天窗</b> · ⋮ → 会话历史</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">⏪</span><h3>消息级回滚</h3></div><p>任何一条消息都能「回滚至此」，从那里重聊；不用删整个会话。</p><span class="fi-where"><b>聊天窗</b> · 消息下方 ↩</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔍</span><h3>子 Agent 详情</h3></div><p>写作助手派出的子任务有只读过程页，可随时显式停止。</p><span class="fi-where"><b>聊天窗</b> · 子任务工具卡</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🖼️</span><h3>对话生图与画廊</h3></div><p>聊天里直接要图，多图结果以画廊呈现；消息也能附图。</p><span class="fi-where"><b>聊天窗</b> · 媒体画廊</span></div>
+      </div>
+    </div>
+
+    <div class="fmap-panel" role="tabpanel" data-panel="sys">
+      <div class="fmap-grid">
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🌗</span><h3>晨读 / 暗夜双主题</h3></div><p>纸张米色「晨读书馆」与暗夜墨金「暗夜书馆」，衬线正文，亮 / 暗 / 跟随系统。</p><span class="fi-where"><b>设置</b> · 主题模式</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🩺</span><h3>数据库修复</h3></div><p>异常后一键重跑全部迁移补全表结构，不删任何现有数据。</p><span class="fi-where"><b>设置 → 数据</b></span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📜</span><h3>应用日志</h3></div><p>按级别 / 分类筛选查看、复制、清空，配合反馈一起提交。</p><span class="fi-where"><b>设置 → 数据</b> · 应用日志</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🖼️</span><h3>媒体缓存管理</h3></div><p>AI 生成的图片全在这：看占用、全屏预览、单项删或清空。</p><span class="fi-where"><b>设置 → 诊断</b> · 媒体缓存</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">📮</span><h3>问题反馈</h3></div><p>Bug / 建议 / 使用问题三类，可选附带近期日志与 AI 调用记录；崩溃自动弹报告一键上传。</p><span class="fi-where"><b>设置 → 关于</b> · 问题反馈</span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🔄</span><h3>双通道更新</h3></div><p>检查更新带更新日志与下载进度；敢尝鲜可开预览版通道（有风险确认）。</p><span class="fi-where"><b>设置 → 关于</b></span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🎓</span><h3>新手引导</h3></div><p>5 页引导随时重看；首次按需下载阅读字体 / OCR 模型 / NPU 运行库，跳过后台静默补齐。</p><span class="fi-where"><b>设置 → 新手</b></span></div>
+        <div class="fitem"><div class="fi-top"><span class="fi-ico">🫥</span><h3>无打扰设计</h3></div><p>AI 悬浮球可拖动、贴边吸附、沉浸时自动隐藏；预加载、OCR 全程无感。</p><span class="fi-where"><b>全局</b></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 弹药库 ===================== -->
+<!-- ===================== 越用越懂你（弹药库） ===================== -->
+<section class="block smart" id="smart">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">YOUR AI TOOLKIT</div>
+      <h2 class="sec-title">越用越懂你 · AI 的弹药库随你越攒越满</h2>
+      <p class="sec-sub">不是玄学推荐算法。AI 写章节时看到的上下文，会随你的使用真实增长。</p>
+    </div>
+    <div class="smart-grid">
+      <div class="smart-card reveal">
+        <div class="ico">🏷️</div>
+        <h3>写作标签库</h3>
+        <div class="sub">全局共享 · 不绑书</div>
+        <p>每个标签就是一段 prompt 文本，同名可存多条变体，<b>AI 写章节时随机抽一条</b>。你在 A 书建的"悬疑感开场"，B 书直接复用。</p>
+      </div>
+      <div class="smart-card reveal">
+        <div class="ico">🧠</div>
+        <h3>经验记忆</h3>
+        <div class="sub">跨会话跨书 · 可手改</div>
+        <p>你交代的偏好（"每章结尾留钩子""反派要立体"），AI 会<b>主动记下来</b>，下次开聊不用重新交代。「设置 → Agent 记忆管理」逐条可查、可改、可删。</p>
+      </div>
+      <div class="smart-card reveal">
+        <div class="ico">✍️</div>
+        <h3>AI 作家设定</h3>
+        <div class="sub">每章都套用 · 风格可控</div>
+        <p>给 AI 定个调（"参考烽火戏诸侯的文风"），这段话作为 system prompt 头部<b>每次写章节都生效</b>。配合标签组合，每章套不同风格。</p>
+      </div>
+    </div>
+    <div class="smart-quote reveal">
+      一句话：<span class="em">角色卡、大纲、标签、风格、记忆攒得越扎实，AI 每次写章节的"弹药库"就越满</span>——输出更稳、更连贯、更对你胃口。
+    </div>
+  </div>
+</section>
+
+<!-- ===================== AI 已内置 ===================== -->
+<section class="block" id="hosted">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">AI READY OUT OF THE BOX</div>
+      <h2 class="sec-title">装上就能用，AI 已内置就绪</h2>
+      <p class="sec-sub">不用申请 API Key，不用配任何供应商——注册设备即领免费额度。</p>
+    </div>
+    <div class="hosted-grid">
+      <div class="hosted-card reveal">
+        <div class="hi">🔓</div>
+        <h3>零配置开箱即用</h3>
+        <p>首次使用自动完成<b>匿名设备注册</b>（硬件级密钥认证），即可使用改写、创作、文字游戏等全部 AI 能力，<b>并自动发放免费额度</b>。</p>
+      </div>
+      <div class="hosted-card reveal">
+        <div class="hi">🪙</div>
+        <h3>额度透明，模型自选</h3>
+        <p>约 <b>1000 token = 1 点</b>，聊天头顶实时显示「AI 剩余 N 点」。模型目录里每个模型标注消耗速率，<b>基准模型消耗最慢</b>，按需切换。</p>
+      </div>
+      <div class="hosted-card reveal">
+        <div class="hi">⭐</div>
+        <h3>点 Star 免费补额度</h3>
+        <p>额度用完，去 GitHub 给项目点一个 Star 并填入用户名即可<b>免费补充一次</b>——这是对独立开发者最实在的支持。</p>
+      </div>
+    </div>
+    <p class="reveal" style="text-align:center;margin-top:26px;font-size:13.5px;color:var(--ink-faint)">
+      生图不耗云端额度——扩散模型跑在<b style="color:var(--ink-soft)">你的手机 NPU 上</b>（Local Dream 引擎，SD1.5 / SDXL，QNN 加速），离线也能出图。
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 技术栈 ===================== -->
+<section class="block" id="stack" style="padding-top:0">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">TECH STACK</div>
+      <h2 class="sec-title">本地优先的技术底座</h2>
+      <p class="sec-sub">书、章节、角色、存档全在本地 SQLite；AI 按需上云，生图与 OCR 全在端侧。</p>
+    </div>
+    <div class="stack-wrap">
+      <div class="stack-col reveal">
+        <h3><span>📱</span> 客户端</h3>
+        <div class="chips">
+          <span class="chip">Flutter 3.35</span><span class="chip">Dart 3</span><span class="chip">Riverpod（代码生成）</span>
+          <span class="chip">Material 3</span><span class="chip">SQLite</span><span class="chip">Headless WebView</span>
+        </div>
+      </div>
+      <div class="stack-col reveal">
+        <h3><span>🤖</span> AI 层</h3>
+        <div class="chips">
+          <span class="chip">OpenAI 兼容 LLM</span><span class="chip">Agent 多场景 + Subagent</span>
+          <span class="chip">端侧 PP-OCRv6（onnxruntime）</span><span class="chip">Local Dream 端侧生图（NPU/QNN）</span>
+        </div>
+      </div>
+      <div class="stack-col reveal">
+        <h3><span>☁️</span> 托管服务（可选）</h3>
+        <div class="chips">
+          <span class="chip">设备注册 + LLM 代理</span><span class="chip">免费额度 + Star 补贴</span>
+          <span class="chip">应用更新通道</span><span class="chip">远程站点脚本库</span>
+        </div>
+      </div>
+    </div>
+    <p class="reveal" style="text-align:center;margin-top:24px;font-size:13px;color:var(--ink-faint)">
+      平台：Android 为发布主平台；iOS / Windows / macOS / Linux / Web 源码齐备可自行编译。
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 快速开始 ===================== -->
+<section class="block quick" id="quick">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div class="sec-kicker">GET STARTED</div>
+      <h2 class="sec-title">两种方式，开始体验</h2>
+      <p class="sec-sub">下载 APK 即装即用，或从源码运行参与开发。</p>
+    </div>
+    <div class="quick-dual reveal">
+      <div class="quick-track quick-apk">
+        <div class="track-head">
+          <span class="track-ico">📱</span>
+          <div>
+            <h3>下载体验</h3>
+            <p class="track-sub">v3.2.0 · Android · 装上即有 AI 额度</p>
+          </div>
+        </div>
+        <a class="btn-apk" href="https://github.com/yunkst/Whimread/releases/latest/download/app-arm64-v8a-release.apk" target="_blank" rel="noopener">
+          <span class="apk-main">⬇ 下载 APK（arm64-v8a）</span>
+          <span class="apk-meta">主流手机推荐 · 直链自动跟随最新版本</span>
+        </a>
+        <div class="apk-alts">
+          <span>其他架构：</span>
+          <a href="https://github.com/yunkst/Whimread/releases/latest/download/app-armeabi-v7a-release.apk" target="_blank" rel="noopener">armv7a（老设备）</a>
+          <a href="https://github.com/yunkst/Whimread/releases/latest/download/app-x86_64-release.apk" target="_blank" rel="noopener">x86_64（模拟器）</a>
+        </div>
+        <a class="apk-sha" href="https://github.com/yunkst/Whimread/releases/latest" target="_blank" rel="noopener">🔏 SHA256SUMS 校验</a>
+        <p class="track-note">首次安装请允许「未知来源」。iOS / 桌面端暂需自行编译。</p>
+      </div>
+
+      <div class="quick-track quick-src">
+        <div class="track-head">
+          <span class="track-ico">💻</span>
+          <div>
+            <h3>源码运行</h3>
+            <p class="track-sub">面向开发者 · Flutter 3.35.x</p>
+          </div>
+        </div>
+        <div class="quick-card">
+          <div class="quick-bar">
+            <span class="d d1"></span><span class="d d2"></span><span class="d d3"></span>
+            <span class="fn">bash</span>
+          </div>
+<pre class="code"><span class="c"># 克隆仓库（本仓即 Flutter 客户端）</span>
 <span class="k">git</span> clone https://github.com/yunkst/Whimread.git
-<span class="k">cd</span> novel_builder
-<span class="k">cp</span> .env.example .env
-<span class="k">docker</span> compose up -d
+<span class="k">cd</span> Whimread
 
-<span class="c"># 前端：Flutter 跑起来</span>
-<span class="k">cd</span> novel_app
 <span class="k">flutter</span> pub get
-<span class="k">flutter</span> run</pre>
-          </div>
-          <p class="track-note">详细步骤见 <a href="https://github.com/yunkst/Whimread#-快速开始" target="_blank" rel="noopener">README →</a></p>
+<span class="k">dart</span> run build_runner build <span class="c">\</span>
+    --delete-conflicting-outputs
+<span class="k">flutter</span> run
+
+<span class="c"># 可选：接入自建托管后端</span>
+<span class="k">flutter</span> build apk --release <span class="c">\</span>
+  --dart-define=BACKEND_BASE_URL=<span class="c">\</span>
+https://your-backend.example.com</pre>
         </div>
+        <p class="track-note">详细步骤见 <a href="https://github.com/yunkst/Whimread#readme" target="_blank" rel="noopener">README →</a> · 开发者文档见 <a href="https://github.com/yunkst/Whimread/blob/master/docs/developer-guide.md" target="_blank" rel="noopener">docs/ →</a></p>
       </div>
     </div>
-  </section>
+  </div>
+</section>
+
 </main>
 
 <!-- ===================== 页脚 ===================== -->
@@ -608,7 +1522,7 @@
   <div class="wrap">
     <div class="foot-grid">
       <div>
-        <div class="foot-brand">📖 Novel Builder</div>
+        <div class="foot-brand">📖 随心阅读 · Whimread</div>
         <p>AI 原生小说阅读平台 —— 读喜欢的，改不爽的，写自己的。</p>
       </div>
       <div>
@@ -622,8 +1536,9 @@
       <div>
         <h4>文档</h4>
         <ul>
-          <li><a href="https://github.com/yunkst/Whimread/blob/master/README.md" target="_blank" rel="noopener">使用指南</a></li>
+          <li><a href="https://github.com/yunkst/Whimread#readme" target="_blank" rel="noopener">使用指南</a></li>
           <li><a href="https://github.com/yunkst/Whimread/blob/master/docs/developer-guide.md" target="_blank" rel="noopener">开发者指南</a></li>
+          <li><a href="https://github.com/yunkst/Whimread/blob/master/docs/text_game.md" target="_blank" rel="noopener">文字游戏</a></li>
         </ul>
       </div>
       <div>
@@ -631,35 +1546,353 @@
         <ul>
           <li><a href="https://github.com/yunkst/Whimread/discussions" target="_blank" rel="noopener">讨论区</a></li>
           <li><a href="https://github.com/yunkst/Whimread/blob/master/CONTRIBUTING.md" target="_blank" rel="noopener">贡献指南</a></li>
-          <li><a href="https://github.com/yunkst/Whimread/blob/master/LICENSE" target="_blank" rel="noopener">MIT 许可证</a></li>
+          <li><a href="https://github.com/yunkst/Whimread/blob/master/LICENSE" target="_blank" rel="noopener">许可证</a></li>
         </ul>
       </div>
     </div>
     <div class="foot-bottom">
-      <span>© Novel Builder · MIT License</span>
+      <span>© 随心阅读 Whimread · 个人非商业使用免费，商用需授权（见 LICENSE）</span>
       <span>Made with ❤️ by <a style="color:#c9bfae" href="https://github.com/yunkst" target="_blank" rel="noopener">yunkst</a></span>
     </div>
   </div>
 </footer>
 
 <script>
-  // 导航滚动样式
-  const nav = document.getElementById('nav');
-  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 8);
-  document.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
+/* ============ 通用 ============ */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // 移动端菜单
-  const toggle = document.getElementById('menuToggle');
-  const links = document.getElementById('navLinks');
-  toggle.addEventListener('click', () => links.classList.toggle('open'));
-  links.querySelectorAll('a').forEach(a => a.addEventListener('click', () => links.classList.remove('open')));
+// 导航滚动样式
+const nav = document.getElementById('nav');
+addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 8), { passive: true });
 
-  // 滚动渐入
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
-  }, { threshold: 0.12 });
-  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+// 移动端菜单
+const toggle = document.getElementById('menuToggle');
+const links = document.getElementById('navLinks');
+toggle.addEventListener('click', () => links.classList.toggle('open'));
+links.querySelectorAll('a').forEach(a => a.addEventListener('click', () => links.classList.remove('open')));
+
+// 滚动渐入
+const io = new IntersectionObserver(es => {
+  es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+}, { threshold: 0.12 });
+$$('.reveal').forEach(el => io.observe(el));
+
+/* ============ 动画序列器 ============
+   每个场景注册一组 [延时ms, 回调] 与一个 reset()；
+   重播时先 reset 回初始态，再自增 runId 使旧序列失效 */
+const runners = {};
+function makeRunner(root, steps, reset) {
+  let runId = 0;
+  const run = () => {
+    const id = ++runId;
+    // reset 失败只降级、不中断：否则一个选择器写错会让整个场景永远不动
+    try { reset && reset(root); }
+    catch (e) { console.warn('[scene] reset failed:', e); }
+    steps.forEach(([t, fn]) => setTimeout(() => {
+      if (id !== runId) return;
+      try { fn(root); } catch (e) { console.warn('[scene] step failed:', e); }
+    }, reduced ? 0 : t));
+  };
+  return run;
+}
+function typeText(el, text, speed = 42, done) {
+  el.textContent = '';
+  if (reduced) { el.textContent = text; done && done(); return; }
+  let i = 0;
+  const timer = setInterval(() => {
+    el.textContent = text.slice(0, ++i);
+    if (i >= text.length) { clearInterval(timer); done && done(); }
+  }, speed);
+}
+
+/* ============ Hero：四 Tab 真机模拟 ============ */
+(() => {
+  const tabs = $$('#heroTabs .tab');
+  const views = $$('#heroScreen .view');
+  const order = ['shelf', 'game', 'web', 'set'];
+  let cur = 0, auto = true, timer = null;
+
+  function show(name) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.t === name));
+    views.forEach(v => v.classList.toggle('active', v.dataset.v === name));
+    if (name === 'web') {
+      const f = $('#heroLoad');
+      f.style.transition = 'none'; f.style.width = '0';
+      requestAnimationFrame(() => { f.style.transition = 'width 1.6s ease'; f.style.width = '100%'; });
+    }
+    if (name === 'shelf') fillBars($('#heroScreen'));
+  }
+  function next() {
+    if (!auto) return;
+    cur = (cur + 1) % order.length;
+    show(order[cur]);
+    $('#heroAddFab').classList.remove('attn');
+    if (order[cur] === 'web') setTimeout(() => auto && $('#heroAddFab').classList.add('attn'), 1700);
+  }
+  function restart() { if (reduced) return; clearInterval(timer); timer = setInterval(next, 3400); }
+  tabs.forEach(t => t.addEventListener('click', () => {
+    auto = false; clearInterval(timer);
+    cur = order.indexOf(t.dataset.t); show(t.dataset.t);
+  }));
+  $('#heroAddFab').addEventListener('click', () => {
+    auto = false; clearInterval(timer);
+    show('web'); $('#heroAddFab').classList.add('attn');
+  });
+  show('shelf'); restart();
+})();
+
+/* 主题切换：晨读书馆 ⇄ 暗夜书馆（色板取自 lib/core/theme/app_colors.dart） */
+$('#themeToggle').addEventListener('click', () => {
+  const s = $('#heroScreen');
+  const toDark = s.dataset.theme !== 'dark';
+  s.dataset.theme = toDark ? 'dark' : 'light';
+  $('#themeToggle').innerHTML = toDark
+    ? '<span class="ic">☀️</span> 切回「晨读书馆」主题'
+    : '<span class="ic">🌗</span> 切到「暗夜书馆」主题';
+});
+
+/* 进度条填充 */
+function fillBars(root) {
+  $$('.dprog .fill', root).forEach(f => {
+    f.style.width = '0';
+    requestAnimationFrame(() => requestAnimationFrame(() => { f.style.width = f.dataset.w; }));
+  });
+}
+fillBars($('#heroScreen'));
+
+/* 重播要还原被动画改写的文案，先存一份原始态 */
+const RW_ORIG = $('.rw-target').innerHTML;
+const OCR_ORIG = $('#ocrPara').innerHTML;
+
+/* ============ 场景一：站点提取 ============ */
+runners.extract = makeRunner(document, [
+  [600, () => {
+    const f = $('#exLoad');
+    f.style.transition = 'none'; f.style.width = '0';
+    requestAnimationFrame(() => { f.style.transition = 'width 1.4s ease'; f.style.width = '100%'; });
+    setCap('exCap', '广告弹窗？照常拦下。看到右下角金色的「添加小说」了吗。');
+  }],
+  [2300, () => { $('.ex-fab').classList.add('attn'); setCap('exCap', '这个站从没适配过——<b>点金钮，AI 现场写脚本</b>'); }],
+  [3600, () => { $('.ex-fab').classList.remove('attn'); $('.ex-mask').classList.add('on'); $('.ex-sheet').classList.add('on'); }],
+  [4300, () => setCap('exCap', '<b>webview_extract</b> 场景 Agent 正在读目录页结构…')],
+  [5600, () => { $('.ex-t1').classList.add('done'); $('.ex-status').textContent = '生成提取脚本…'; }],
+  [7400, () => { $('.ex-t2').classList.add('done'); $('.ex-status').textContent = '脚本已落库'; }],
+  [7900, () => { $('#exPreview').style.opacity = '1'; setCap('exCap', '预览确认——标题、作者、1147 章，正文纯净。'); }],
+  [9600, () => { $('#exBtn').style.background = 'var(--moss)'; $('#exBtn').textContent = '✓ 已加入书架'; }],
+  [10200, () => { $('.ex-mask').classList.remove('on'); $('.ex-sheet').classList.remove('on'); $('.ex-toast').classList.add('on'); }],
+  [11800, () => { $('.ex-toast').classList.remove('on'); $('#exBtn').style.background = 'var(--amber)'; $('#exBtn').textContent = '加入书架'; setCap('exCap', '脚本已保存——下次访问这个站，秒加。'); }],
+], () => {
+  $('.ex-fab').classList.remove('attn');
+  $('.ex-mask').classList.remove('on');
+  $('.ex-sheet').classList.remove('on');
+  $('.ex-toast').classList.remove('on');
+  $('.ex-t1').classList.remove('done');
+  $('.ex-t2').classList.remove('done');
+  $('.ex-status').textContent = '分析目录页…';
+  $('#exPreview').style.opacity = '0';
+  $('#exBtn').style.background = 'var(--amber)';
+  $('#exBtn').textContent = '加入书架';
+  setCap('exCap', '站点没有任何适配规则？没关系。');
+});
+
+/* ============ 场景一 B：阅读器 OCR ============ */
+runners.reader = makeRunner(document, [
+  [800, () => { $('#ocrTag').style.opacity = '1'; setCap('rdCap', '这段文字是网站画的"假字"——正常字体根本显示不出来。'); }],
+  [2600, () => setCap('rdCap', '<b>端侧 OCR</b> 把假字渲染成图再认回来，全程离线。')],
+  [3400, () => {
+    const p = $('#ocrPara');
+    p.classList.remove('garbled');
+    const fx = $('.fix', p); if (fx) { fx.textContent = '睁'; }
+  }],
+  [5200, () => { $$('.fix').forEach(f => f.classList.add('calm')); $('#ocrTag').style.opacity = '0'; }],
+  [6000, () => { $('#cachePill').classList.add('on'); setCap('rdCap', '翻页不卡的秘密：<b>当前章渲染完，下一章已在缓存里</b>。'); }],
+  [9000, () => setCap('rdCap', '右下角 ▶ 是自动滚动；长按任何段落可以写标注。')],
+], () => {
+  $('#ocrPara').innerHTML = OCR_ORIG;
+  $('#ocrPara').classList.add('garbled');
+  $$('.fix').forEach(f => f.classList.remove('calm'));
+  $('#ocrTag').style.opacity = '0';
+  $('#cachePill').classList.remove('on');
+  setCap('rdCap', '注意看第二段的"乱码"——那是网站故意画的假字。');
+});
+
+/* ============ 场景二：标注改写 ============ */
+runners.rewrite = makeRunner(document, [
+  [700, () => { $('.rw-target').classList.add('annotated'); setCap('rwCap', '长按这段——写下你的不满。'); }],
+  [1800, () => { $('.rw-note').classList.add('on'); setCap('rwCap', '「她走得太空洞了，补一段雨夜追逐」。'); }],
+  [3400, () => setCap('rwCap', 'AI FAB 亮起红点，点它开改。')],
+  [4400, () => {
+    $('.rw-note').classList.remove('on');
+    $('.rw-fab').innerHTML = '<span class="spinner" style="border-color:rgba(255,255,255,.4);border-top-color:#fff"></span>';
+  }],
+  [5600, () => setCap('rwCap', '<b>正在按标注重写本章…</b>（可以点「停止」）')],
+  [7600, () => {
+    $('.rw-fab').classList.remove('attn');
+    $('.rw-fab').classList.remove('badged');
+    $('.rw-fab').innerHTML = '🪄';
+    const t = $('.rw-target');
+    t.innerHTML = '她把存储卡塞进林昼掌心，低声道「往码头跑，别回头」。话音未落，巷口一辆黑车的车灯<span class="diff-new">猛地扫了过来——三个人影踏进雨幕，直追而至。她拽住林昼翻过锈栏，两人跌进齐腰的积水里。</span>';
+  }],
+  [8200, () => { $('.rw-banner').classList.add('on'); setCap('rwCap', '<b>本章已按标注重写</b>——绿色是新增的追逐戏。'); }],
+  [9800, () => { $('.rw-toast').classList.add('on'); }],
+  [11000, () => { $('.rw-toast').classList.remove('on'); $('.rw-mask').classList.add('on'); $('.rw-sheet').classList.add('on'); }],
+  [12200, () => setCap('rwCap', '每次改动都留版本——<b>不喜欢？还原。</b>')],
+  [14400, () => { $('.rw-mask').classList.remove('on'); $('.rw-sheet').classList.remove('on'); }],
+], () => {
+  $('.rw-target').innerHTML = RW_ORIG;
+  $('.rw-target').classList.remove('annotated');
+  $('.rw-note').classList.remove('on');
+  $('.rw-banner').classList.remove('on');
+  $('.rw-toast').classList.remove('on');
+  $('.rw-mask').classList.remove('on');
+  $('.rw-sheet').classList.remove('on');
+  $('.rw-fab').classList.remove('attn');
+  $('.rw-fab').classList.remove('badged');
+  $('.rw-fab').innerHTML = '🪄<span class="nail">1</span>';
+  setCap('rwCap', '长按第二段，写下你的不满。');
+});
+
+/* ============ 场景三：Agent 写书 ============ */
+runners.write = makeRunner(document, [
+  [500, () => setCap('wrCap', '你说一句想法。')],
+  [900, () => {
+    $('.wr-t1').style.opacity = '1';
+    $('.wr-t1 .tc-name').textContent = 'create_novel';
+    setCap('wrCap', '它开始<b>调工具</b>，不是给建议。');
+  }],
+  [2300, () => { $('.wr-t1').classList.add('done'); }],
+  [2900, () => { $('.wr-t2').style.opacity = '1'; }],
+  [4400, () => { $('.wr-t2').classList.add('done'); }],
+  [5000, () => { $('.wr-t3').style.opacity = '1'; setCap('wrCap', '建书 → 大纲 → 人物卡，逐个落库。'); }],
+  [6500, () => { $('.wr-t3').classList.add('done'); }],
+  [7100, () => {
+    const ai = $('#wrAi');
+    ai.innerHTML = '';
+    const span = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.className = 'caret';
+    ai.append(span, caret);
+    typeText(span, '书建好了。大纲 12 卷 128 章，主角「林昼」——失忆的黑客，唯一的线索是一段被人买走的记忆。要我直接开写第一章吗？', 26);
+    setCap('wrCap', '流式吐字——不是加载圈，是真在写。');
+  }],
+  [11600, () => { $('#wrAi .caret')?.remove(); }],
+  [12200, () => { $('.wr-t4').style.opacity = '1'; $('.wr-t4').classList.add('done'); setCap('wrCap', '顺手把你的偏好写进<b>经验记忆</b>，跨书生效。'); }],
+  [15000, () => setCap('wrCap', '接下来它逐章产出正文——人设、风格、大纲全部注入。')],
+], () => {
+  ['.wr-t1', '.wr-t2', '.wr-t3', '.wr-t4'].forEach(sel => {
+    const el = $(sel);
+    el.style.opacity = '0'; el.classList.remove('done');
+  });
+  $('#wrAi').innerHTML = '<span class="caret"></span>';
+  setCap('wrCap', '它不提建议——它直接干活。');
+});
+
+/* ============ 场景三 B：关系图（轻量力导向漂移） ============ */
+(() => {
+  const home = { n1: [70, 150], n2: [200, 80], n3: [190, 250], n4: [80, 60] };
+  const edges = [['e1', 'n1', 'n2'], ['e2', 'n1', 'n3'], ['e3', 'n2', 'n4'], ['e4', 'n1', 'n4']];
+  const nodes = {};
+  const g = $('#relGraph'), svg = $('#relGraph svg');
+  Object.keys(home).forEach(id => {
+    const el = document.getElementById(id);
+    nodes[id] = { el, x: home[id][0], y: home[id][1], ph: Math.random() * Math.PI * 2, sp: .35 + Math.random() * .3, r: 6 + Math.random() * 7 };
+  });
+  function tick(t) {
+    Object.values(nodes).forEach(n => {
+      n.x = home[n.el.id][0] + Math.sin(t / 1600 * n.sp + n.ph) * n.r;
+      n.y = home[n.el.id][1] + Math.cos(t / 1900 * n.sp + n.ph) * n.r * .7;
+      n.el.style.left = n.x + 'px'; n.el.style.top = n.y + 'px';
+    });
+    // y 偏移 -8：连线对齐节点圆点圆心（节点整体居中，圆点在上半部）
+    edges.forEach(([eid, a, b]) => {
+      const ln = document.getElementById(eid);
+      ln.setAttribute('x1', nodes[a].x); ln.setAttribute('y1', nodes[a].y - 8);
+      ln.setAttribute('x2', nodes[b].x); ln.setAttribute('y2', nodes[b].y - 8);
+    });
+    requestAnimationFrame(tick);
+  }
+  // viewBox 对齐容器实际像素，SVG 线条与绝对定位的节点才在同一坐标系。
+  // 容器高度会随网页字体加载而变，所以必须持续观察而不是只测一次。
+  const fit = () => svg.setAttribute('viewBox', `0 0 ${g.clientWidth} ${g.clientHeight}`);
+  fit();
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(g);
+  else { addEventListener('resize', fit); setTimeout(fit, 800); }
+  requestAnimationFrame(tick);
+})();
+
+/* ============ 场景四：文字游戏 ============ */
+runners.game = makeRunner(document, [
+  [600, () => {
+    setCap('gmCap', 'GM 的旁白逐字铺开——');
+    typeText($('#gmPara'), '酒馆的灯是暖黄色的，雨水顺着窗棂淌下来，把街上的霓虹揉成一条条细长的光带。你推门进去，带进一身冷雨。', 34);
+  }],
+  [5600, () => { $('#gmNpc').style.opacity = '1'; setCap('gmCap', 'NPC 台词与旁白严格分开，头像是角色卡里的。'); }],
+  [7200, () => { $('#gmDice').style.opacity = '1'; $('#diceIcon').classList.add('rolling'); }],
+  [8200, () => setCap('gmCap', '<b>命运骰子</b>：真随机、真概率，落在客户端。')],
+  [9200, () => {
+    $('#diceIcon').classList.remove('rolling');
+    $('#diceState').textContent = '命运落定';
+    $('#db1 .db-track').style.transform = 'scaleX(1)';
+    $('#db2 .db-track').style.transform = 'scaleX(1)';
+  }],
+  [10600, () => { $('#db1').classList.add('win'); setCap('gmCap', '62% —— 老周愿意多说。骰出的结果 <b>GM 也不能改</b>。'); }],
+  [12000, () => { ['gc1', 'gc2', 'gc3'].forEach((id, i) => setTimeout(() => $(`#${id}`).classList.add('on'), i * 220)); }],
+  [13200, () => setCap('gmCap', '点选项，或者<b>直接打字</b>描述你的行动——都行。')],
+  [14400, () => { $('#gc1').classList.add('picked'); $('#gc2').classList.add('dim'); $('#gc3').classList.add('dim'); }],
+  [15400, () => { $('#gmStrip').style.opacity = '1'; }],
+  [16600, () => { $('#gmToast').classList.add('on'); setCap('gmCap', '任何一步都能<b>回溯重选</b>，设定与记忆保留。'); }],
+  [18600, () => { $('#gmToast').classList.remove('on'); $('#gmStrip').style.opacity = '0'; }],
+], () => {
+  $('#gmPara').textContent = '';
+  $('#gmNpc').style.opacity = '0';
+  $('#gmDice').style.opacity = '0';
+  $('#db1 .db-track').style.transform = 'scaleX(0)';
+  $('#db2 .db-track').style.transform = 'scaleX(0)';
+  $('#db1').classList.remove('win');
+  $('#diceIcon').classList.remove('rolling');
+  $('#diceState').textContent = '概率判定中';
+  ['gc1', 'gc2', 'gc3'].forEach(id => $('#' + id).className = 'choice-btn');
+  $('#gmStrip').style.opacity = '0';
+  $('#gmToast').classList.remove('on');
+  setCap('gmCap', 'GM 正在铺场——看完骰子怎么落。');
+});
+
+// 功能地图：分组切换
+const fmapTabs = document.getElementById('fmapTabs');
+if (fmapTabs) {
+  fmapTabs.addEventListener('click', e => {
+    const btn = e.target.closest('.fmap-tab');
+    if (!btn || btn.classList.contains('active')) return;
+    $$('.fmap-tab', fmapTabs).forEach(t => { const on = t === btn; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
+    $$('.fmap-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === btn.dataset.p));
+  });
+}
+
+/* caption 安全插入 HTML */
+function setCap(id, html) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.opacity = '0';
+  setTimeout(() => { el.innerHTML = html; el.style.opacity = '1'; }, 180);
+}
+
+/* ============ 场景调度：进视口播放 + 重播 ============ */
+const sceneIO = new IntersectionObserver(es => {
+  es.forEach(e => {
+    if (e.isIntersecting) {
+      const name = e.target.dataset.scene;
+      if (name && runners[name]) { runners[name](); sceneIO.unobserve(e.target); }
+    }
+  });
+}, { threshold: 0.35 });
+$$('[data-scene]').forEach(el => sceneIO.observe(el));
+
+$$('[data-replay]').forEach(btn => btn.addEventListener('click', () => {
+  const name = btn.dataset.replay;
+  runners[name] && runners[name]();
+}));
 </script>
 </body>
 </html>
