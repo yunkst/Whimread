@@ -102,6 +102,13 @@
 - `AgentLoop` 在 tool_call delta 流式累积过程中，对白名单工具按宽容提取器
   （`tool_arg_text_extractor.dart`：从半截 JSON 解 text/character 增量文本，
   容错未闭合引号/转义）节流 emit `ToolArgDeltaEvent`（累计文本，≥12 字符增量）。
+- **流结束收尾补发**（`flushStreamableToolArgs`）：节流只在 delta chunk 里发，
+  流结束后原本没有补发，最后一块（不足 12 字符的一截）永远发不出去；而
+  工具执行后到回合结束之间没有任何机制用完整参数回填直播画面（pending 段
+  按设计跳过 narrate/speak），尾字只能等 AgentDone 的定稿投影才补上——用户
+  可见的「吞字，要等本轮 loop 结束」。因此在**工具执行前**按完整参数补发
+  一次（仅在确有缺口时），并记 `流式参数收尾: <工具>, 流式期间已发 X 字,
+  完整 Y 字` 日志（`tag: arg_stream_flush`）供现场反馈佐证。
 - 游玩页控制器直接订阅事件流（过滤本局 runId 打标），维护 `GameStreamingPart`；
   定稿后以 ToolCallStart/End 的完整参数为准重新投影。
 - **text_game 的所有运行统一 runId=sessionId 打标**（`ScenarioSession._launchAgentRun`
@@ -207,8 +214,8 @@ Chat 内切换同款）。
   缓存，抽屉打开时强刷）；每行展示模型名、基准徽标、相对基准的消耗倍数。
   选中写 `managed_model_selection`（**全局单值，所有 Agent 场景生效**，
   作用于后续请求），抽屉内即时生效。
-- 抽屉对非托管包静默忽略（`kHasBundledBackend` 早退），真机 define run 才能
-  看到；`model_picker_sheet_test` 直接 pump 抽屉本体覆盖三条行为。
+- 模型目录不可达时抽屉内展示空态与重试入口；`model_picker_sheet_test`
+  直接 pump 抽屉本体覆盖三条行为。
 
 ## 重新开始（保留设定，重开一局）
 

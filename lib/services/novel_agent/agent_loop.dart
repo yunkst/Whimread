@@ -243,6 +243,44 @@ class AgentLoop {
         }
       }
 
+      // 流结束收尾：把节流期间被扣住的尾字一次补齐。
+      //
+      // 必要性：上面的节流按「≥12 字符增量」发事件，且只在 toolCallDeltas
+      // chunk 里被调用——流结束后没有补发，于是最后一块参数（不足 12 字符
+      // 的那一截）永远发不出去。而工具执行完成后到回合结束之间没有任何
+      // 机制用完整参数回填直播画面（pending 段按设计跳过 narrate/speak），
+      // 缺失的尾字只能等 AgentDone 的定稿投影才补上——用户可见的「吞字，
+      // 要等本轮 loop 结束才正常」。这里在工具执行前补发最后一次，打字机
+      // 即时完整。仅在确有缺口时 emit（prev.textLen >= 全长则跳过），并留
+      // 一条日志供现场反馈佐证这类问题。
+      void flushStreamableToolArgs() {
+        final streamable = _scenario.streamableToolNames;
+        if (streamable.isEmpty) return;
+        for (final call in streamingResult.toolCallStates()) {
+          final name = call.name;
+          if (name == null || !streamable.contains(name)) continue;
+          final extracted =
+              ToolArgTextExtractor.extract(call.argumentsSoFar);
+          final text = extracted.text;
+          final prev = streamedArgState[call.index];
+          if (prev != null && prev.textLen >= text.length) continue;
+          streamedArgState[call.index] =
+              (textLen: text.length, character: extracted.character);
+          LoggerService.instance.i(
+            '流式参数收尾: $name, 流式期间已发 ${prev?.textLen ?? 0} 字, '
+            '完整 ${text.length} 字 (scenario=${_scenario.id})',
+            category: LogCategory.ai,
+            tags: ['agent', 'loop', 'arg_stream_flush', name, _scenario.id],
+          );
+          emit(ToolArgDeltaEvent(
+            call.callId,
+            name,
+            text: text,
+            character: extracted.character,
+          ));
+        }
+      }
+
       try {
         LoggerService.instance.d('Agent 循环第 $round 轮 (${_scenario.id})',
             category: LogCategory.ai, tags: ['agent', 'loop', _scenario.id]);
@@ -531,6 +569,10 @@ class AgentLoop {
           content: fullContent.isNotEmpty ? fullContent : null,
           toolCalls: toolCalls,
         ));
+
+        // 4b. 打字机尾字收尾（必须在工具执行前：pending 段按设计不渲染
+        // narrate/speak，工具执行后到回合结束之间没有回填时机）
+        if (toolCalls.isNotEmpty) flushStreamableToolArgs();
 
         // 5. 执行工具调用
         //
