@@ -9,7 +9,6 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// 可编程 fake adapter：记录每次请求的 Authorization 头，按脚本回包
 class _ScriptedAdapter implements HttpClientAdapter {
@@ -40,11 +39,9 @@ void main() {
 
   /// init() 会重置 adapter（IOHttpClientAdapter），因此 fake 在 init 之后再装
   Future<ApiServiceWrapper> makeWrapper(_ScriptedAdapter adapter) async {
-    SharedPreferences.setMockInitialValues({
-      'backend_host': 'https://backend.example.com',
-    });
     final wrapper = ApiServiceWrapper();
-    await wrapper.init();
+    // Host 唯一来源是打包注入的 dart-define，测试直接显式注入假 Host
+    await wrapper.init(baseUrl: 'https://backend.example.com');
     wrapper.dio.httpClientAdapter = adapter;
     return wrapper;
   }

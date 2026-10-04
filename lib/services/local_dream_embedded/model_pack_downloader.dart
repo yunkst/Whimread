@@ -29,7 +29,48 @@ import '../../models/image_model.dart';
 import '../../services/logger_service.dart';
 import 'model_pack.dart';
 
+/// 一次细粒度下载进度采样（仅内存广播，不落库）
+@immutable
+class PackDownloadSample {
+  final int modelId;
+
+  /// 已落盘字节数（含续传前 .part 的既有长度）
+  final int receivedBytes;
+
+  /// 全量字节数；服务端未给 Content-Length 时为 null
+  final int? totalBytes;
+
+  /// 采样窗口内的瞬时速度（B/s）
+  final double bytesPerSecond;
+
+  /// 0-100 真实百分比（总量未知时为 0）
+  final int percent;
+
+  final DateTime at;
+
+  const PackDownloadSample({
+    required this.modelId,
+    required this.receivedBytes,
+    required this.totalBytes,
+    required this.bytesPerSecond,
+    required this.percent,
+    required this.at,
+  });
+
+  /// 剩余秒数（总量已知且在移动时）
+  double? get etaSeconds {
+    final total = totalBytes;
+    if (total == null || bytesPerSecond <= 0) return null;
+    final remain = total - receivedBytes;
+    if (remain <= 0) return 0;
+    return remain / bytesPerSecond;
+  }
+}
+
 class LocalDreamModelPackDownloader {
+  /// zip 压缩方法号（archive 未导出 ZipCompressionType）：8=DEFLATE，0=STORE
+  static const int _zipMethodDeflate = 8;
+
   final Ref _ref;
   final Dio _dio;
 
@@ -39,6 +80,11 @@ class LocalDreamModelPackDownloader {
   /// 事件流：管理页 lifecycle provider 监听刷新
   final _onChanged = StreamController<void>.broadcast();
   Stream<void> get onChanged => _onChanged.stream;
+
+  /// 细粒度进度采样流（≈2Hz，仅内存态不落库）：UI 展示真实字节/速度/剩余。
+  /// progress 列是 1% 粒度的整数，GB 级包看着像卡死，用它兜细看。
+  final _progressSamples = StreamController<PackDownloadSample>.broadcast();
+  Stream<PackDownloadSample> get progressSamples => _progressSamples.stream;
 
   LocalDreamModelPackDownloader({required Ref ref, Dio? dio})
       : _ref = ref,
@@ -58,6 +104,7 @@ class LocalDreamModelPackDownloader {
 
   void dispose() {
     _onChanged.close();
+    _progressSamples.close();
   }
 
   /// 启动对账：进程被杀遗留的 downloading 行归位为 paused
@@ -208,9 +255,11 @@ class LocalDreamModelPackDownloader {
     final cancelToken = CancelToken();
     _cancelTokens[model.id!] = cancelToken;
 
+    // zip 落盘路径；解压失败时要删掉坏 .part（catch 块可见，故提声明）
+    String? zipPath;
     try {
       await repo.updateStatus(model.id!, ImageModelStatus.downloading);
-      final zipPath = await _downloadZip(
+      zipPath = await _downloadZip(
         model: model,
         cancelToken: cancelToken,
       );
@@ -240,6 +289,12 @@ class LocalDreamModelPackDownloader {
       if (e.type == DioExceptionType.cancel) return; // 暂停/取消属预期
       await _fail(model.id!, '下载失败：${e.message ?? e.type.name}');
     } on ArchiveException catch (e) {
+      // 坏包不留给下次：完整大小的损坏 .part 会在续传时命中 416（大小吻合
+      // → 跳过下载直接解压）再解压失败，形成死循环。删掉强制全量重下。
+      if (zipPath != null) {
+        final partFile = File(zipPath);
+        if (partFile.existsSync()) partFile.deleteSync();
+      }
       await _fail(model.id!, '压缩包损坏或无法解压：$e');
     } catch (e) {
       await _fail(model.id!, '下载失败：$e');
@@ -365,15 +420,46 @@ class LocalDreamModelPackDownloader {
     var startFrom = 0;
     if (part.existsSync()) startFrom = part.lengthSync();
 
-    final response = await _dio.get<ResponseBody>(
-      model.sourceUrl,
-      options: Options(
-        responseType: ResponseType.stream,
-        headers: startFrom > 0 ? {'range': 'bytes=$startFrom-'} : null,
-        validateStatus: (s) => s != null && s < 500,
-      ),
-      cancelToken: cancelToken,
-    );
+    // 416 降级：请求 bytes=N- 且 N ≥ 远端全量时服务器回 416。两种来源——
+    // ① .part 已是完整文件（上次下完、解压前被杀）：跳过下载直接解压；
+    // ② 远端文件变小/换包了：截断 .part 全量重下（大小未知时保守同此）。
+    Response<ResponseBody> response;
+    while (true) {
+      response = await _dio.get<ResponseBody>(
+        model.sourceUrl,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: startFrom > 0 ? {'range': 'bytes=$startFrom-'} : null,
+          validateStatus: (s) => s != null && s < 500,
+        ),
+        cancelToken: cancelToken,
+      );
+      if (response.statusCode != 416) break;
+
+      // 416 响应体必须排干，否则连接挂着不回收
+      await response.data?.stream.drain<void>().catchError((Object _) {});
+
+      final remoteTotal = int.tryParse(RegExp(r'bytes \*/(\d+)')
+              .firstMatch(response.headers.value('content-range') ?? '')
+              ?.group(1) ??
+          '');
+      if (remoteTotal != null && startFrom == remoteTotal) {
+        LoggerService.instance.i(
+          '断点已是完整 zip（416 + 大小吻合），跳过下载直接解压: ${model.name}',
+          category: LogCategory.ai,
+          tags: ['local_dream_pack', 'download', 'resume_complete'],
+        );
+        return partPath;
+      }
+      LoggerService.instance.w(
+        '断点越界（HTTP 416），截断 .part 全量重下: '
+        'part=$startFrom, remote=$remoteTotal, ${model.name}',
+        category: LogCategory.ai,
+        tags: ['local_dream_pack', 'download', 'resume_invalid'],
+      );
+      startFrom = 0;
+    }
+
     if (response.statusCode == 404) {
       throw Exception('下载地址 404：${model.sourceUrl}');
     }
@@ -410,15 +496,27 @@ class LocalDreamModelPackDownloader {
         mode: startFrom > 0 ? FileMode.append : FileMode.write);
     var received = startFrom;
     var lastUpdate = DateTime.now();
+    var lastSampleAt = lastUpdate;
+    var lastSampleBytes = received;
     try {
       await for (final chunk in response.data!.stream) {
         sink.add(chunk);
         received += chunk.length;
-        // 节流写库（≥1s 或 ≥5MB）
+        final now = DateTime.now();
+        // 细粒度采样（≈2Hz，仅内存广播）：UI 展示真实字节/速度/剩余时间。
+        // 4GB 包的 1% = 40MB，DB 里 1 秒/5MB 节流的整数百分比看着像卡死
+        final sampleMs = now.difference(lastSampleAt).inMilliseconds;
+        if (sampleMs >= 500) {
+          final speed = (received - lastSampleBytes) / (sampleMs / 1000);
+          lastSampleAt = now;
+          lastSampleBytes = received;
+          _emitSample(model.id!, received, totalBytes, speed);
+        }
+        // 节流写库（≥1s 或 ≥5MB）：progress 列只服务冷启动恢复/对账展示
         if (totalBytes > 0 &&
-            (DateTime.now().difference(lastUpdate).inMilliseconds >= 1000 ||
+            (now.difference(lastUpdate).inMilliseconds >= 1000 ||
                 received - startFrom >= 5 * 1024 * 1024)) {
-          lastUpdate = DateTime.now();
+          lastUpdate = now;
           final pct = (received * 95 ~/ totalBytes).clamp(0, 95);
           await _ref
               .read(imageModelRepositoryProvider)
@@ -430,29 +528,77 @@ class LocalDreamModelPackDownloader {
     } finally {
       await sink.close();
     }
+    // 收尾必发一帧：不足 500ms 采样窗的尾包也要让 UI 走到 100%
+    final tailMs =
+        DateTime.now().difference(lastSampleAt).inMilliseconds.clamp(1, 1000);
+    _emitSample(model.id!, received, totalBytes,
+        (received - lastSampleBytes) / (tailMs / 1000));
     _onChanged.add(null);
     return partPath;
   }
 
+  void _emitSample(int modelId, int received, int totalBytes, double speed) {
+    if (_progressSamples.isClosed) return;
+    _progressSamples.add(PackDownloadSample(
+      modelId: modelId,
+      receivedBytes: received,
+      totalBytes: totalBytes > 0 ? totalBytes : null,
+      bytesPerSecond: speed > 0 ? speed : 0,
+      percent:
+          totalBytes > 0 ? (received * 100 ~/ totalBytes).clamp(0, 100) : 0,
+      at: DateTime.now(),
+    ));
+  }
+
   /// 流式解压 zip 到包目录。GB 级 zip 的目录解析与逐条目拷贝放后台
-  /// isolate，避免冻结 UI；archive 经 InputFileStream 按需读取，不把
-  /// 整包载入内存。只取各条目的文件名，防 zip-slip。
+  /// isolate，避免冻结 UI；只取各条目的文件名，防 zip-slip。
+  ///
+  /// 不能用 `file.writeContent(output)`：zip 条目的 content 是 FileContent
+  /// （ZipFile），它会先 `ZipFile.content` → `inflateBuffer(raw.toUint8List())`
+  /// 整块解压进内存（raw 拷贝 + 解压结果两份 GB 级驻留）再写出——SDXL NPU
+  /// 包的 unet 权重是 GB 级，手机直接 Out of Memory（用户实测：进度 95% 后
+  /// failed(Out of Memory)，重试即 416）。
+  /// 也不能用 `file.decompress(output)`：zip 条目的 `_content` 非空（存着
+  /// ZipFile 本身），其 `if (_content == null)` 守卫直接短路产出空文件。
+  /// 正确路径：拿 `rawContent`（压缩数据切片流）按 compressionMethod 自己
+  /// 流式处理。
   Future<void> _extractZip(String zipPath, String packDir) async {
     await Isolate.run(() {
       final input = InputFileStream(zipPath);
       try {
-        final archive = ZipDecoder().decodeBuffer(input);
-        for (final file in archive.files) {
-          if (!file.isFile) continue;
-          final name = p.basename(file.name.replaceAll('\\', '/'));
-          if (name.isEmpty || name == '.' || name == '..') continue;
-          final output = OutputFileStream(p.join(packDir, name));
-          try {
-            file.writeContent(output);
-          } finally {
-            output.closeSync();
-          }
+      final archive = ZipDecoder().decodeBuffer(input);
+      for (final file in archive.files) {
+        if (!file.isFile) continue;
+        final name = p.basename(file.name.replaceAll('\\', '/'));
+        if (name.isEmpty || name == '.' || name == '..') continue;
+        // 跳过隐藏文件与 macOS 资源叉（对齐 Local Dream unzipFile）：
+        // 包若由 macOS 打包会带 __MACOSX/xxx/._foo.mnn，扁平化后 basename
+        // 是 '._foo.mnn'——不跳过会覆盖真正的 foo.mnn（几 KB 的空壳）
+        if (name.startsWith('.') || file.name.startsWith('__MACOSX/')) {
+          continue;
         }
+        final raw = file.rawContent;
+        if (raw == null) continue;
+        final target = p.join(packDir, name);
+        final output = OutputFileStream(target);
+        try {
+          if (file.compressionType == _zipMethodDeflate) {
+            Inflate.stream(raw, output);
+          } else {
+            // STORE 及其它未压缩方法：原样拷贝
+            output.writeInputStream(raw);
+          }
+        } finally {
+          output.closeSync();
+        }
+        // 落盘长度校验：zip 条目被截断时 central directory 仍给得出文件名，
+        // 缺文件检查查不出来，会把坏包置 ready（Local Dream 靠 JDK
+        // ZipInputStream 的 CRC 校验兜底，这里用大小校验覆盖截断场景）。
+        final written = File(target).lengthSync();
+        if (written != file.size) {
+          throw ArchiveException('解压长度不符：$name（$written != ${file.size}）');
+        }
+      }
       } finally {
         input.closeSync();
       }

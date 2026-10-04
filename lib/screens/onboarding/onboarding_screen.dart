@@ -130,7 +130,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     iconColor: colorScheme.primary,
                     title: '一切就绪',
                     description: 'AI 能力已内置，开箱即用。'
-                        '如需自部署后端，可在「设置」中调整，'
+                        '模型与额度可在「设置」中管理，'
                         '或重新查看本引导。',
                   ),
                 ],

@@ -340,6 +340,24 @@ void main() {
       // 最早的 llm_1 被丢弃
       expect(ids.contains('llm_1'), false);
     });
+
+    test('默认条数上限 maxAttachedLlmLogs=30 → 只保留最近 30 条', () async {
+      expect(FeedbackService.maxAttachedLlmLogs, 30);
+      for (var i = 1; i <= 35; i++) {
+        LlmLogger.instance.logResponse(
+          id: 'llm_$i',
+          responseBody: '{"content":"回复 $i"}',
+          durationMs: 100,
+        );
+      }
+      final got = await FeedbackService.collectRecentLlmLogs();
+      expect(got.length, FeedbackService.maxAttachedLlmLogs);
+      final ids = got.map((m) => m['id']).toList();
+      // 后写的在前(insert(0))→ 保留 llm_35 … llm_6
+      expect(ids.first, 'llm_35');
+      expect(ids.last, 'llm_6');
+      expect(ids.contains('llm_5'), false);
+    });
   });
 
   group('buildPayload - LLM 日志附带字段', () {

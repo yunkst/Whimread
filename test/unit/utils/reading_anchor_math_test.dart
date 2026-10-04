@@ -250,4 +250,73 @@ void main() {
       );
     });
   });
+
+  group('anchorForCharOffset（搜索命中：字符偏移 → 段落锚点）', () {
+    // 正文：段落 0 = '第一段落'（前有 2 个空行），段落 1 = '第二段落'，
+    // 段落 2 = '第三段落'。各非空行起始偏移：p0=2、p1=8、p2=13。
+    const content = '\n\n第一段落\n\n第二段落\n第三段落';
+    const p0Start = 2, p1Start = 8, p2Start = 13;
+
+    test('命中段落 0 首字符 → 段落 0、比例 0', () {
+      final anchor = ReadingAnchorMath.anchorForCharOffset(
+        chapterUrl: 'u',
+        content: content,
+        charOffset: p0Start,
+      );
+      expect(anchor, isNotNull);
+      expect(anchor!.paragraphIndex, 0);
+      expect(anchor.paragraphRatio, 0);
+    });
+
+    test('命中段落中段 → 段内比例按字符占比', () {
+      final anchor = ReadingAnchorMath.anchorForCharOffset(
+        chapterUrl: 'u',
+        content: content,
+        charOffset: p1Start + 2,
+      );
+      expect(anchor!.paragraphIndex, 1);
+      expect(anchor.paragraphRatio, closeTo(0.5, 1e-9));
+    });
+
+    test('偏移落在空行 → 归入其后首个非空段落', () {
+      // p0 结束于偏移 6（含行尾换行符）；偏移 7 是空行区域，归入段落 1
+      final anchor = ReadingAnchorMath.anchorForCharOffset(
+        chapterUrl: 'u',
+        content: content,
+        charOffset: 7,
+      );
+      expect(anchor!.paragraphIndex, 1);
+    });
+
+    test('偏移超出正文末尾 → clamp 到末段、比例 0', () {
+      final anchor = ReadingAnchorMath.anchorForCharOffset(
+        chapterUrl: 'u',
+        content: content,
+        charOffset: 999,
+      );
+      expect(anchor!.paragraphIndex, 2);
+      expect(anchor.paragraphRatio, 0);
+    });
+
+    test('空行分段规则与显示层一致（按 \\n 拆 + 过滤空白行）', () {
+      // 全空白行也无 \n 之外内容 → 无可定位段落
+      expect(
+        ReadingAnchorMath.anchorForCharOffset(
+          chapterUrl: 'u',
+          content: '\n  \n\n',
+          charOffset: 0,
+        ),
+        isNull,
+      );
+      // 行首尾空格保留：段落文本取原始行（与 splitParagraphs 一致，
+      // 过滤判定用 trim，但段落内容不 trim）
+      final anchor = ReadingAnchorMath.anchorForCharOffset(
+        chapterUrl: 'u',
+        content: ' 第一段 ',
+        charOffset: 0,
+      );
+      expect(anchor!.paragraphIndex, 0);
+      expect(anchor.paragraphRatio, 0);
+    });
+  });
 }

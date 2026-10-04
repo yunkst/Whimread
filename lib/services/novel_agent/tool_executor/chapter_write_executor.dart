@@ -520,12 +520,12 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     final llm =
         await ref.read(llmConfigServiceProvider).buildActiveProvider(scenarioId);
     if (llm == null) {
-      LoggerService.instance.w('LLM 未配置: $failTag',
+      LoggerService.instance.w('AI 服务不可用: $failTag',
           category: LogCategory.ai,
-          tags: ['agent', 'tool', failTag, 'llm_not_configured']);
+          tags: ['agent', 'tool', failTag, 'llm_unavailable']);
       return _RewriteResult.failure({
-        'error': 'llm_not_configured',
-        'message': LlmConfigService.notConfiguredMessage,
+        'error': 'llm_unavailable',
+        'message': LlmConfigService.unavailableMessage,
       });
     }
 

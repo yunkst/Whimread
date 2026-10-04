@@ -122,10 +122,11 @@ class ChapterReadExecutor with ToolExecutorHelpers {
     final novelUrl = novelResolve.url!;
 
     final repo = ref.read(chapterRepositoryProvider);
-    final allResults = await repo.searchInCachedContent(
+    final searchPage = await repo.searchInCachedContent(
       keyword,
       novelUrl: novelUrl,
     );
+    final allResults = searchPage.results;
     final chapters = await repo.getCachedNovelChapters(novelUrl);
     final urlToPosition = <String, int>{
       for (var i = 0; i < chapters.length; i++) chapters[i].url: i + 1,
@@ -184,12 +185,13 @@ class ChapterReadExecutor with ToolExecutorHelpers {
         'position': pos,
         'chapterTitle': r.chapterTitle,
         'matchCount': r.matchCount,
+        'titleMatched': r.titleMatched,
         'matchedText': r.matchPositions.isNotEmpty
             ? r.content.substring(
                 r.matchPositions.first.start,
                 r.matchPositions.first.end,
               )
-            : '',
+            : (r.titleMatched ? r.chapterTitle : ''),
         'snippets': snippets,
       });
     }

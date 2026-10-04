@@ -26,16 +26,16 @@ final chaptersListProvider = AutoDisposeFutureProvider<List<Chapter>>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ChaptersListRef = AutoDisposeFutureProviderRef<List<Chapter>>;
-String _$searchResultsHash() => r'00dcc21f4e08805756bdd135648ad24cea111908';
+String _$searchResultsHash() => r'3c442d1ec098aed1caeb0ddd54353c4bfd1b9659';
 
 /// Search Results Provider
 ///
-/// 提供章节搜索结果
+/// 提供章节搜索结果（含是否被上限截断的标记）
 ///
 /// Copied from [searchResults].
 @ProviderFor(searchResults)
 final searchResultsProvider =
-    AutoDisposeFutureProvider<List<ChapterSearchResult>>.internal(
+    AutoDisposeFutureProvider<ChapterSearchResultSet>.internal(
   searchResults,
   name: r'searchResultsProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
@@ -47,8 +47,7 @@ final searchResultsProvider =
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef SearchResultsRef
-    = AutoDisposeFutureProviderRef<List<ChapterSearchResult>>;
+typedef SearchResultsRef = AutoDisposeFutureProviderRef<ChapterSearchResultSet>;
 String _$novelParamHash() => r'91e6ac33d7c09bfdfe8bd2df0ddba78552a327fd';
 
 /// Novel Parameter Provider

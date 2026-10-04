@@ -3,36 +3,22 @@
 /// 此文件定义所有AI相关服务的 Provider。
 ///
 /// **功能**:
-/// - LLM 配置管理
-///
-/// **依赖**:
-/// - database_providers.dart - 数据库服务
-/// - network_service_providers.dart - 网络服务
-///
-/// **相关 Providers**:
-/// - [database_service_providers.dart] - 数据库相关 Providers
-/// - [network_service_providers.dart] - 网络相关 Providers
+/// - LLM 通道（托管后端）构建
 library;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:riverpod/riverpod.dart';
 import '../../../services/llm_config_service.dart';
-import '../database_providers.dart';
 
 part 'ai_service_providers.g.dart';
 
 /// LlmConfigService Provider
 ///
-/// 提供全局 LLM 配置服务实例，用于统一管理 LLM 配置序列。
+/// 提供全局 LLM Provider 构建服务实例（所有 AI 调用路径的统一入口）。
 ///
 /// **功能**:
-/// - 获取/设置激活配置（全局 + 场景级）
-/// - CRUD 配置
-/// - 旧配置迁移
-/// - 构建 LlmProvider 配置
-///
-/// **依赖**:
-/// - [llmConfigRepositoryProvider] - LLM 配置数据访问
+/// - 构建托管后端 LlmProvider（设备 JWT 鉴权 + 用户选择的模型）
+/// - 一次性擦除自配 LLM 模式的遗留数据
 @Riverpod(keepAlive: true)
 LlmConfigService llmConfigService(Ref ref) {
   return LlmConfigService(ref);

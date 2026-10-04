@@ -13,8 +13,8 @@ library;
 
 /// 后端服务基地址（打包时注入，不含末尾斜杠）。
 ///
-/// 为空时回退到用户在「后端服务配置」里手填的地址（保留自部署能力）。
+/// 唯一的后端 Host 来源——为空表示未注入（开发构建），客户端不做回退。
 const String kBackendBaseUrl = String.fromEnvironment('BACKEND_BASE_URL');
 
-/// 是否使用内置托管后端（打包注入了地址即为 true）。
+/// 是否注入了托管后端（发布包恒为 true）。
 const bool kHasBundledBackend = kBackendBaseUrl != '';

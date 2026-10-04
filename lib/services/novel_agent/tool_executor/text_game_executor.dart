@@ -41,6 +41,7 @@ class TextGameExecutor {
   /// character_names 仅用于显式圈定子集；玩家角色按名字引用且必填。
   Future<String> createTextGame(Map<String, dynamic> args) async {
     final title = (args['title'] as String?)?.trim() ?? '';
+    final coreExperience = (args['coreExperience'] as String?)?.trim() ?? '';
     final worldview = (args['worldview'] as String?)?.trim() ?? '';
     final opening = (args['opening'] as String?)?.trim() ?? '';
     final narrativeStyle = (args['narrativeStyle'] as String?)?.trim() ?? '';
@@ -62,6 +63,11 @@ class TextGameExecutor {
     }
     if (opening.isEmpty) {
       return _error('missing_opening', 'opening 不能为空（玩家的开场情境）');
+    }
+    if (coreExperience.isEmpty) {
+      return _error('missing_core_experience',
+          'coreExperience 不能为空：先用 ask_user 问清用户想获得什么样的游玩'
+          '体验（节奏/爽感来源/描写密度/叙事人称/挫败感），再创建游戏。');
     }
 
     // 校验小说存在（角色卡解析也限定在这本小说内）
@@ -141,6 +147,7 @@ class TextGameExecutor {
       opening: opening,
       characterIds: characterIds,
       playerCharacterId: playerCharacterId,
+      coreExperience: coreExperience,
       rules: GameRules(
         narrativeStyle: narrativeStyle,
         contentBoundary: contentBoundary,
@@ -300,6 +307,8 @@ class TextGameExecutor {
     final s = fresh.settings;
     var settings = s.copyWith(
       worldview: (args['worldview'] as String?)?.trim() ?? s.worldview,
+      coreExperience:
+          (args['coreExperience'] as String?)?.trim() ?? s.coreExperience,
       opening: (args['opening'] as String?)?.trim() ?? s.opening,
       rules: GameRules(
         narrativeStyle:

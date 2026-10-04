@@ -79,9 +79,9 @@ class SearchQuery extends _$SearchQuery {
 
 /// Search Results Provider
 ///
-/// 提供章节搜索结果
+/// 提供章节搜索结果（含是否被上限截断的标记）
 @riverpod
-Future<List<ChapterSearchResult>> searchResults(Ref ref) async {
+Future<ChapterSearchResultSet> searchResults(Ref ref) async {
   final novelParam = ref.watch(novelParamProvider);
   final query = ref.watch(searchQueryProvider);
 
@@ -91,7 +91,7 @@ Future<List<ChapterSearchResult>> searchResults(Ref ref) async {
       category: LogCategory.database,
       tags: ['search', 'provider', 'empty'],
     );
-    return [];
+    return (results: const <ChapterSearchResult>[], truncated: false);
   }
 
   LoggerService.instance.i(
@@ -103,18 +103,19 @@ Future<List<ChapterSearchResult>> searchResults(Ref ref) async {
   final searchService = ref.watch(chapterSearchServiceProvider);
 
   try {
-    final results = await searchService.searchInNovel(
+    final page = await searchService.searchInNovel(
       novelParam.url,
       query.trim(),
     );
 
     LoggerService.instance.i(
-      '搜索完成: 找到 ${results.length} 个结果',
+      '搜索完成: 找到 ${page.results.length} 个结果'
+      '${page.truncated ? ' (结果被截断)' : ''}',
       category: LogCategory.database,
       tags: ['search', 'provider', 'success'],
     );
 
-    return results;
+    return page;
   } catch (e, stackTrace) {
     LoggerService.instance.e(
       '搜索章节失败: $e',

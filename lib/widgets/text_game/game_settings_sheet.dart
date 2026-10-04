@@ -151,6 +151,7 @@ Future<void> showGameSettingsSheet(
                         ?.copyWith(color: theme.colorScheme.outline)),
               ),
             const SizedBox(height: 14),
+            section('核心体验', s.coreExperience.isEmpty ? '（未设定）' : s.coreExperience),
             section(
                 '世界观背景',
                 s.worldview.isNotEmpty

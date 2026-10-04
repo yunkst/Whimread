@@ -19,7 +19,6 @@ import '../utils/toast_utils.dart';
 import '../core/providers/theme_provider.dart';
 import '../core/providers/device_quota_provider.dart';
 import '../core/providers/managed_model_provider.dart';
-import '../core/constants/build_config.dart';
 import '../core/database/database_connection.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
@@ -235,7 +234,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _buildPromptTagTile(appColors),
         _buildImageModelTile(appColors),
         _buildAgentMemoryTile(appColors),
-        if (kHasBundledBackend) _buildManagedModelTile(appColors),
+        _buildManagedModelTile(appColors),
         _buildStarQuotaTile(appColors),
         _buildThemeModeTile(appColors, themeAsync),
       ],

@@ -153,6 +153,54 @@ class ReadingAnchorMath {
     return best;
   }
 
+  /// 将整章正文的字符偏移换算为章内锚点（搜索命中跳转用）。
+  ///
+  /// 段落拆分与显示层一致（ReaderChapterSegment.splitParagraphs：
+  /// 按 '\n' 拆 + 过滤空行，段落文本取原始行）。[charOffset] 归入包含它的
+  /// 首个非空行（行尾换行符位置归入该行）；落在空行区域时归入其后首个
+  /// 非空段落；超出正文长度时 clamp 到末段。
+  /// 全文无非空段落（无可定位目标）返回 null。
+  static ReadingAnchor? anchorForCharOffset({
+    required String chapterUrl,
+    required String content,
+    required int charOffset,
+  }) {
+    final lines = content.split('\n');
+    var cursor = 0;
+    var paragraphIndex = -1;
+    String? lastLine;
+    var lastParagraphIndex = -1;
+
+    for (final line in lines) {
+      final lineStart = cursor;
+      cursor += line.length + 1; // +1 为换行符
+      if (line.trim().isEmpty) continue;
+      paragraphIndex++;
+      lastLine = line;
+      lastParagraphIndex = paragraphIndex;
+
+      if (charOffset <= lineStart + line.length) {
+        final ratio = line.isEmpty
+            ? 0.0
+            : ((charOffset - lineStart) / line.length)
+                .clamp(0.0, 1.0)
+                .toDouble();
+        return ReadingAnchor(
+          chapterUrl: chapterUrl,
+          paragraphIndex: paragraphIndex,
+          paragraphRatio: ratio,
+        );
+      }
+    }
+
+    if (lastLine == null) return null;
+    return ReadingAnchor(
+      chapterUrl: chapterUrl,
+      paragraphIndex: lastParagraphIndex,
+      paragraphRatio: 0,
+    );
+  }
+
   /// 锚点写入的变更门控：段落序号/章节变化必写；同段内比例漂移超过
   /// [ratioThreshold] 才写（降低高频滚动下的无效落库）。
   static bool anchorChangedSignificantly(

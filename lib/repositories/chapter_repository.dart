@@ -616,22 +616,27 @@ class ChapterRepository extends BaseRepository
     );
   }
 
-  /// 搜索缓存章节内容
+  /// 搜索缓存章节内容（章节正文 + 章节标题）
   ///
   /// [keyword] 搜索关键词
   /// [novelUrl] 可选的小说URL，用于限制搜索范围
   ///
-  /// 返回匹配的章节搜索结果列表。
+  /// 返回命中的章节列表及是否被行数上限截断。
+  ///
+  /// 命中判定：关键词出现在**正文或章节标题**任一即算命中（此前只搜正文，
+  /// 与搜索页「支持搜索章节标题和内容」文案不符——标题里的词搜不到）。
+  /// 仅标题命中的章照样返回，此时 matchPositions 为空、titleMatched=true。
   ///
   /// 内存护栏（防止搜常见字命中全书导致 OOM）：
-  /// - 命中行数上限 [_kSearchMaxRows]（SQL LIMIT）
+  /// - 命中行数上限 [_kSearchMaxRows]（SQL LIMIT），超量时 truncated=true
   /// - 每章最多记录 [_kSearchMaxPositionsPerRow] 个匹配位置
   /// - content 只携带覆盖已记录匹配的窗口文本（前后各留
   ///   [_kSearchSnippetPadding] 字符），匹配位置重基到窗口坐标系——
   ///   消费方（搜索页 context 渲染、agent search_in_chapters 片段切片）
-  ///   均以 content + matchPositions 的相对坐标为准，行为不变
+  ///   均以 content + matchPositions 的相对坐标为准；需要整章坐标时用
+  ///   [ChapterSearchResult.contentOffsetBase] 还原
   @override
-  Future<List<ChapterSearchResult>> searchInCachedContent(
+  Future<ChapterSearchResultSet> searchInCachedContent(
     String keyword, {
     String? novelUrl,
   }) {
@@ -640,7 +645,7 @@ class ChapterRepository extends BaseRepository
       () async {
         final db = await database;
 
-        // 构建 SQL 查询
+        // 构建 SQL 查询（标题与正文任一命中即入结果集）
         String sql = '''
         SELECT
           cc.novelUrl,
@@ -653,10 +658,10 @@ class ChapterRepository extends BaseRepository
           cc.cachedAt
         FROM chapter_cache cc
         LEFT JOIN bookshelf b ON cc.novelUrl = b.url
-        WHERE cc.content LIKE ?
+        WHERE (cc.content LIKE ? OR cc.title LIKE ?)
       ''';
 
-        List<dynamic> args = ['%$keyword%'];
+        List<dynamic> args = ['%$keyword%', '%$keyword%'];
 
         // 如果提供了小说URL，添加过滤条件
         if (novelUrl != null && novelUrl.isNotEmpty) {
@@ -677,6 +682,9 @@ class ChapterRepository extends BaseRepository
         for (final row in results) {
           final content = row['content'] as String;
           final contentLower = content.toLowerCase();
+          final chapterTitle = row['chapterTitle'] as String;
+          final titleMatched =
+              chapterTitle.toLowerCase().contains(keywordLower);
 
           // 查找匹配位置（每章上限 _kSearchMaxPositionsPerRow）
           final matchPositions = <MatchPosition>[];
@@ -699,28 +707,35 @@ class ChapterRepository extends BaseRepository
             index = pos + keyword.length;
           }
 
-          if (matchPositions.isEmpty) continue;
+          // 正文未命中（可能仅标题命中，或 SQL/Dart 大小写规则差异）
+          if (matchPositions.isEmpty && !titleMatched) continue;
 
           // 窗口裁剪：只保留覆盖已记录匹配的文本，位置重基到窗口坐标系
-          final windowStart = (minStart - _kSearchSnippetPadding)
-              .clamp(0, content.length);
-          final windowEnd =
-              (maxEnd + _kSearchSnippetPadding).clamp(0, content.length);
-          final snippet = content.substring(windowStart, windowEnd);
-          final rebased = matchPositions
-              .map((p) => MatchPosition(
-                    start: p.start - windowStart,
-                    end: p.end - windowStart,
-                    matchedText: p.matchedText,
-                  ))
-              .toList();
+          // （仅标题命中时无正文窗口，contentOffsetBase 记 0）
+          var windowStart = 0;
+          var snippet = '';
+          var rebased = matchPositions;
+          if (matchPositions.isNotEmpty) {
+            windowStart = (minStart - _kSearchSnippetPadding)
+                .clamp(0, content.length);
+            final windowEnd =
+                (maxEnd + _kSearchSnippetPadding).clamp(0, content.length);
+            snippet = content.substring(windowStart, windowEnd);
+            rebased = matchPositions
+                .map((p) => MatchPosition(
+                      start: p.start - windowStart,
+                      end: p.end - windowStart,
+                      matchedText: p.matchedText,
+                    ))
+                .toList();
+          }
 
           searchResults.add(ChapterSearchResult(
             novelUrl: row['novelUrl'] as String,
             novelTitle: row['novelTitle'] as String? ?? '未知小说',
             novelAuthor: row['novelAuthor'] as String? ?? '未知作者',
             chapterUrl: row['chapterUrl'] as String,
-            chapterTitle: row['chapterTitle'] as String,
+            chapterTitle: chapterTitle,
             chapterIndex: row['chapterIndex'] as int? ?? -1,
             content: snippet,
             searchKeywords: [keyword],
@@ -728,17 +743,20 @@ class ChapterRepository extends BaseRepository
             cachedAt: DateTime.fromMillisecondsSinceEpoch(
               row['cachedAt'] as int,
             ),
+            titleMatched: titleMatched,
+            contentOffsetBase: windowStart,
           ));
         }
 
+        final truncated = results.length >= _kSearchMaxRows;
         LoggerService.instance.i(
           '搜索缓存内容完成: 关键词="$keyword", 结果数=${searchResults.length}'
-          '${results.length >= _kSearchMaxRows ? ' (已截断至 $_kSearchMaxRows 行)' : ''}',
+          '${truncated ? ' (已截断至 $_kSearchMaxRows 行)' : ''}',
           category: LogCategory.database,
           tags: ['search', 'chapter_content'],
         );
 
-        return searchResults;
+        return (results: searchResults, truncated: truncated);
       },
       message: (e) => '搜索缓存内容失败: $e',
       category: LogCategory.database,

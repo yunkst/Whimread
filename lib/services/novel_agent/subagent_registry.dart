@@ -97,10 +97,12 @@ class SubagentRegistry {
   /// - [SubagentRunner.cancelAllForSession]（主 Agent cancel 级联）按注册表
   ///   找活跃 run，清掉会导致取消漏杀。
   ///
-  /// 排序稳定性：同一批快速创建的 run createdAt 同毫秒，Dart 的 List.sort
+  /// 排序稳定性：同一批快速创建的 run createdAt 同毫秒（Windows 时钟粒度粗，
+  /// 全量测试高负载下整批挤进同一毫秒实测会发生），Dart 的 List.sort
   /// 不稳定会让"跳过集"随机落在不同 run 上（挂起 run 可能被排进保留位，
-  /// 导致多清一个终态或漏清）。Map 保序，createdAt 相同时按插入序兜底，
-  /// 保证清理量确定。
+  /// 导致多清一个终态或漏清）。Map 保序，createdAt 相同时按插入序**新→旧**
+  /// 兜底（索引大者视为较新），与主排序方向一致——最老的挂起 run 稳定落在
+  /// 跳过集被保留，清理量确定。
   void pruneForSession(String parentSessionId, {required int keep}) {
     final m = _runsBySession[parentSessionId];
     if (m == null) return;
@@ -108,7 +110,7 @@ class SubagentRegistry {
     final sorted = m.values.toList().asMap().entries.toList()
       ..sort((a, b) {
         final byTime = b.value.createdAt.compareTo(a.value.createdAt);
-        return byTime != 0 ? byTime : a.key.compareTo(b.key);
+        return byTime != 0 ? byTime : b.key.compareTo(a.key);
       }); // 新→旧
     for (final e in sorted.skip(keep)) {
       final r = e.value;

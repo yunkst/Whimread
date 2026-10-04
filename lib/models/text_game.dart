@@ -77,6 +77,8 @@ class GameRules {
 ///   动态上下文只渲染名单内角色
 /// - [playerCharacterId] 玩家角色卡 id（characters 表一行，其 currentState
 ///   即玩家当前状态，同样进版本管理）
+/// - [coreExperience] 核心体验（用户想获得的游玩感受，GM 演出的最高准则；
+///   创建时必问，用户可在设定编辑页手动修改）
 /// - [worldNotes] 世界与剧情线状态条目（任务/势力动向/未解悬念，一行一条；
 ///   游戏侧数据，不进角色卡版本管理）
 /// - [worldview] 为空时回退来源小说的 backgroundSetting
@@ -87,6 +89,10 @@ class GameSettings {
 
   /// 玩家角色卡 id（characters.id；未指定 = 未设置玩家角色）
   final int? playerCharacterId;
+
+  /// 核心体验：节奏快慢/爽感来源/描写密度/叙事人称/挫败感等偏好，写成对
+  /// GM 的正向演出指令；空 = 未设定（GM 按静态协议的通用节奏演出）
+  final String coreExperience;
   final GameRules rules;
 
   /// 世界与剧情线条目（update_game_state target="world" 或手动编辑维护）
@@ -97,6 +103,7 @@ class GameSettings {
     this.opening = '',
     this.characterIds = const [],
     this.playerCharacterId,
+    this.coreExperience = '',
     this.rules = const GameRules(),
     this.worldNotes = const [],
   });
@@ -106,6 +113,7 @@ class GameSettings {
         'opening': opening,
         'characterIds': characterIds,
         if (playerCharacterId != null) 'playerCharacterId': playerCharacterId,
+        if (coreExperience.isNotEmpty) 'coreExperience': coreExperience,
         'rules': rules.toJson(),
         if (worldNotes.isNotEmpty) 'worldNotes': worldNotes,
       };
@@ -118,6 +126,7 @@ class GameSettings {
             .map((e) => e.toInt())
             .toList(),
         playerCharacterId: (json['playerCharacterId'] as num?)?.toInt(),
+        coreExperience: json['coreExperience'] as String? ?? '',
         rules: GameRules.fromJson(
             json['rules'] as Map<String, dynamic>? ?? const {}),
         worldNotes: (json['worldNotes'] as List<dynamic>? ?? const [])
@@ -151,6 +160,7 @@ class GameSettings {
     String? opening,
     List<int>? characterIds,
     int? playerCharacterId,
+    String? coreExperience,
     GameRules? rules,
     List<String>? worldNotes,
   }) {
@@ -159,6 +169,7 @@ class GameSettings {
       opening: opening ?? this.opening,
       characterIds: characterIds ?? this.characterIds,
       playerCharacterId: playerCharacterId ?? this.playerCharacterId,
+      coreExperience: coreExperience ?? this.coreExperience,
       rules: rules ?? this.rules,
       worldNotes: worldNotes ?? this.worldNotes,
     );

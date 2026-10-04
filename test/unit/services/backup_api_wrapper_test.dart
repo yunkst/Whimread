@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// 轻量级 Dio HTTP 适配器 Mock
 ///
@@ -59,16 +58,14 @@ void main() {
   late _MockAdapter mockAdapter;
 
   setUp(() {
-    SharedPreferences.setMockInitialValues({
-      'backend_host': 'http://localhost:3800',
-    });
     mockAdapter = _MockAdapter();
   });
 
   /// 构造已初始化且带设备凭证的 wrapper
   Future<ApiServiceWrapper> makeApi() async {
     final api = ApiServiceWrapper();
-    await api.init();
+    // Host 唯一来源是打包注入的 dart-define，测试直接显式注入假 Host
+    await api.init(baseUrl: 'http://localhost:3800');
     // init() 重建了 dio，需要替换 adapter
     api.dio.httpClientAdapter = mockAdapter;
     api.authHeaderProvider = () async => {'Authorization': 'Bearer test-jwt'};

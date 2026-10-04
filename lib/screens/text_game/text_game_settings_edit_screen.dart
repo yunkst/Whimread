@@ -1,8 +1,8 @@
 /// 游戏设定手动编辑页（游玩页/管理页的查看设定 sheet 进入）
 ///
-/// 可改：标题 / 世界观 / 开场 / 规则 / 参战名单（勾选该小说下的角色卡）/
-/// 玩家角色（在参战名单中指定）。**角色卡内容**（性格/近况/说话风格/头像）
-/// 属共享角色卡，在角色卡详情/编辑页维护（本页提供入口）。
+/// 可改：标题 / 核心体验 / 世界观 / 开场 / 规则 / 参战名单（勾选该小说下的
+/// 角色卡）/ 玩家角色（在参战名单中指定）。**角色卡内容**（性格/近况/
+/// 说话风格/头像）属共享角色卡，在角色卡详情/编辑页维护（本页提供入口）。
 /// 保存 = repo.update 整行更新 + invalidate 列表；游戏中编辑下一轮生效
 /// （场景每次运行从数据库重载角色卡）。
 library;
@@ -34,6 +34,7 @@ class TextGameSettingsEditScreen extends ConsumerStatefulWidget {
 class _TextGameSettingsEditScreenState
     extends ConsumerState<TextGameSettingsEditScreen> {
   final _title = TextEditingController();
+  final _coreExperience = TextEditingController();
   final _worldview = TextEditingController();
   final _opening = TextEditingController();
   final _narrativeStyle = TextEditingController();
@@ -70,6 +71,7 @@ class _TextGameSettingsEditScreenState
     }
     final s = game.settings;
     _title.text = game.title;
+    _coreExperience.text = s.coreExperience;
     _worldview.text = s.worldview;
     _opening.text = s.opening;
     _narrativeStyle.text = s.rules.narrativeStyle;
@@ -105,6 +107,7 @@ class _TextGameSettingsEditScreenState
   @override
   void dispose() {
     _title.dispose();
+    _coreExperience.dispose();
     _worldview.dispose();
     _opening.dispose();
     _narrativeStyle.dispose();
@@ -135,6 +138,7 @@ class _TextGameSettingsEditScreenState
     await ref.read(textGameRepositoryProvider).update(game.copyWith(
           title: title,
           settings: game.settings.copyWith(
+            coreExperience: _coreExperience.text.trim(),
             worldview: _worldview.text.trim(),
             opening: _opening.text.trim(),
             worldNotes: _worldNotes.text
@@ -162,16 +166,22 @@ class _TextGameSettingsEditScreenState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('编辑设定'),
-        actions: [
-          TextButton.icon(
-            onPressed: _loading ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: const Text('保存'),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('编辑设定')),
+      // 底部固定保存栏：表单两屏多长，滚到底部改完参战名单不必滚回顶部保存
+      bottomNavigationBar: (_loading || _error != null)
+          ? null
+          : SafeArea(
+              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('保存设定'),
+                ),
+              ),
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -183,13 +193,22 @@ class _TextGameSettingsEditScreenState
                     children: [
                       _sectionLabel(context, '基本信息'),
                       _field(_title, label: '游戏标题'),
+                      _field(_coreExperience,
+                          label: '核心体验',
+                          helper:
+                              '想获得的游玩感受：节奏/爽感来源/叙事人称/挫败感——GM 演出的最高准则，与其它设定冲突时优先',
+                          maxLines: 4),
                       _field(_worldview,
-                          label: '世界观背景（留空 = 用绑定小说的背景设定）',
+                          label: '世界观背景',
+                          helper: '留空 = 用绑定小说的背景设定',
                           maxLines: 5),
                       _field(_opening, label: '开场情境', maxLines: 3),
                       const SizedBox(height: 20),
                       _sectionLabel(context, '游戏规则'),
-                      _field(_narrativeStyle, label: '叙事风格', maxLines: 2),
+                      _field(_narrativeStyle,
+                          label: '叙事风格',
+                          helper: '文风基调（如古龙式短句）；与核心体验冲突时以核心体验为准',
+                          maxLines: 2),
                       _field(_contentBoundary, label: '内容边界', maxLines: 2),
                       Row(
                         children: [
@@ -230,7 +249,8 @@ class _TextGameSettingsEditScreenState
                       const SizedBox(height: 20),
                       _sectionLabel(context, '世界与剧情线'),
                       _field(_worldNotes,
-                          label: '任务/势力动向/未解悬念（每行一条，游戏内 AI 也会更新）',
+                          label: '任务/势力动向/未解悬念',
+                          helper: '每行一条；游戏内 AI 也会更新',
                           maxLines: 4),
                       const SizedBox(height: 20),
                       _sectionLabel(context,
@@ -328,6 +348,7 @@ class _TextGameSettingsEditScreenState
   Widget _field(
     TextEditingController controller, {
     required String label,
+    String? helper,
     int maxLines = 1,
   }) {
     return Padding(
@@ -337,6 +358,10 @@ class _TextGameSettingsEditScreenState
         maxLines: maxLines,
         decoration: InputDecoration(
           labelText: label,
+          // 说明文字放 helperText（可换行）：label 在边框上单行省略，
+          // 长说明挂 label 会被截断（核心体验字段踩过）
+          helperText: helper,
+          helperMaxLines: 2,
           border: const OutlineInputBorder(),
           isDense: true,
         ),

@@ -56,12 +56,15 @@ class BackupService {
     'device_jwt',
   };
 
-  /// 默认排除的键前缀（WebView Cookie、迁移标记等）
+  /// 默认排除的键前缀（WebView Cookie、迁移标记、自配 LLM 模式遗留 key 等）
   static const List<String> _excludedPrefixes = [
     'webview_',
     'migrated_',
     'global_active_migrated',
-    'llm_config_migrated',
+    'llm_configs_migrated',
+    'active_llm_profile',
+    'llm_api_keys_cleared',
+    'dsl_engine_',
   ];
 
   // 单例模式

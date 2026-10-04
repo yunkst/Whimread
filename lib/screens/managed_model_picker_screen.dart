@@ -15,7 +15,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/constants/build_config.dart';
 import '../core/providers/device_quota_provider.dart';
 import '../core/providers/managed_model_provider.dart';
 import '../core/theme/app_colors.dart';
@@ -68,22 +67,6 @@ class _ManagedModelPickerScreenState
 
   @override
   Widget build(BuildContext context) {
-    // 非托管包 → 直接提示不可用(防御性兜底,正常流程下不会进到此页)
-    if (!kHasBundledBackend) {
-      return Scaffold(
-        appBar: const LibraryAppBar(title: 'AI 模型选择'),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              '当前构建未配置托管后端,无法选择模型。',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      );
-    }
-
     final state = ref.watch(managedModelProvider);
     final colors = context.appColors;
     final catalog = state.catalog;

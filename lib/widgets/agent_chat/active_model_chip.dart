@@ -7,7 +7,6 @@
 ///     让用户看到实际计费的模型而不只是「模型」占位;resolveForRequest 已确认该选择
 ///     在请求路径上仍在生效(buildManagedProvider 会信任本地选择)。
 ///   - 目录未知 + 无选中 → 显示「模型」灰底占位
-///   - 非托管包 → 不渲染(返回 SizedBox.shrink())
 ///
 /// 点击 → [showAgentModelPickerSheet] 打开底部抽屉快速切换。
 library;
@@ -15,7 +14,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants/build_config.dart';
 import '../../core/providers/managed_model_provider.dart';
 import '../../core/theme/app_colors.dart';
 import 'model_picker_sheet.dart';
@@ -25,9 +23,6 @@ class ActiveModelChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 非托管包:客户端 LLM 走用户自配,模型概念不复存在,隐藏
-    if (!kHasBundledBackend) return const SizedBox.shrink();
-
     final state = ref.watch(managedModelProvider);
     final colors = context.appColors;
     final catalog = state.catalog;

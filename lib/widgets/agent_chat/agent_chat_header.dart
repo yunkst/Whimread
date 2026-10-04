@@ -19,7 +19,7 @@ import 'quota_badge.dart';
 class AgentChatHeader extends ConsumerWidget {
   final VoidCallback? onHistory;
   final VoidCallback? onNewSession;
-  final VoidCallback? onConfig;
+  final VoidCallback? onPickModel;
   final VoidCallback? onToggleFullscreen;
   final VoidCallback? onClose;
   final bool isFullscreen;
@@ -28,7 +28,7 @@ class AgentChatHeader extends ConsumerWidget {
     super.key,
     this.onHistory,
     this.onNewSession,
-    this.onConfig,
+    this.onPickModel,
     this.onToggleFullscreen,
     this.onClose,
     this.isFullscreen = false,
@@ -73,7 +73,7 @@ class AgentChatHeader extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              _ScenarioMenu(onConfig: onConfig, onHistory: onHistory),
+              _ScenarioMenu(onPickModel: onPickModel, onHistory: onHistory),
               IconButton(
                 tooltip: isFullscreen ? '退出全屏' : '全屏',
                 icon: Icon(
@@ -101,9 +101,8 @@ class AgentChatHeader extends ConsumerWidget {
           ),
 const SizedBox(height: 6),
           _ContextLine(isWebview: isWebview, chatState: chatState),
-          // 托管包:左边 chip 切模型,右边 QuotaBadge 显示余额
-          // 非托管包:两者内部自行隐藏,留空 Row 占位
           const SizedBox(height: 4),
+          // 左边 chip 切模型,右边 QuotaBadge 显示余额
           Row(
             children: const [
               ActiveModelChip(),
@@ -118,9 +117,9 @@ const SizedBox(height: 6),
 }
 
 class _ScenarioMenu extends ConsumerWidget {
-  final VoidCallback? onConfig;
+  final VoidCallback? onPickModel;
   final VoidCallback? onHistory;
-  const _ScenarioMenu({this.onConfig, this.onHistory});
+  const _ScenarioMenu({this.onPickModel, this.onHistory});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,8 +130,8 @@ class _ScenarioMenu extends ConsumerWidget {
       icon: Icon(AgentIcons.dots, size: 19),
       color: colors.paper,
       onSelected: (value) {
-        if (value == 'config') {
-          onConfig?.call();
+        if (value == 'model') {
+          onPickModel?.call();
           return;
         }
         if (value == 'history') {
@@ -161,7 +160,7 @@ class _ScenarioMenu extends ConsumerWidget {
             ]),
           ),
         const PopupMenuDivider(),
-        const PopupMenuItem(value: 'config', child: Text('场景配置')),
+        const PopupMenuItem(value: 'model', child: Text('选择模型')),
         const PopupMenuItem(value: 'history', child: Text('会话历史')),
       ],
     );

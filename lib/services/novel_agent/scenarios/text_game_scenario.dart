@@ -13,6 +13,12 @@
 /// - `update_game_state` 把重大变化写进角色卡的 currentState（近况演化层，
 ///   source='text_game'，带原因 → 角色卡版本历史可溯源可回滚）
 ///
+/// 核心体验（settings.coreExperience）：用户想获得的游玩感受（节奏/爽感来源/
+/// 描写密度/人称/挫败感），创建时必问、用户可在设定编辑页改。动态块置顶
+/// 渲染并在静态协议里声明为**最高准则**——本协议原有的通用节奏默认值
+/// （300-600 字/回合）退为"未设定核心体验时"的兜底，否则用户的体验诉求
+/// 会被写死的 house style 压过。
+///
 /// 回合协议（系统提示词中约束 + 工具校验兜底）：
 /// - 旁白（环境/时间/动作/神态描写）→ `narrate(text)`；角色台词 →
 ///   `speak(character, text)`，text 只放直接引语（台词与描写分离，
@@ -239,14 +245,17 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
 
     buf.writeln('你是文字游戏「${game.title}」的游戏主持人（GM）。'
         '你负责描写世界、扮演登场角色、推动剧情，并在每个回合结束时把'
-        '剧情的走向交给玩家决定。');
+        '剧情的走向交给玩家决定。玩家来玩是为了获得他想要的体验——'
+        '设定中的「核心体验」是演出的最高准则：回合节奏、描写详略、'
+        '叙事人称、选项形态都以它为准，与其它设定或本协议的通用规则'
+        '冲突时，以核心体验为准。');
 
     buf.writeln();
     buf.writeln('## 游戏设定在哪');
-    buf.writeln('完整的游戏设定（世界观、开场、登场角色档案与近况、玩家角色'
-        '当前状态、规则）在每轮对话末尾的「游戏当前状态」块中，**以它为准**：'
-        '角色该是什么样、关系如何、实力几何，都依该块演出；更早轮次里'
-        '可能已过时的描述不要沿用。');
+    buf.writeln('完整的游戏设定（核心体验、世界观、开场、登场角色档案与近况、'
+        '玩家角色当前状态、规则）在每轮对话末尾的「游戏当前状态」块中，'
+        '**以它为准**：角色该是什么样、关系如何、实力几何，都依该块演出；'
+        '更早轮次里可能已过时的描述不要沿用。');
 
     buf.writeln();
     buf.writeln('## 输出协议（必须严格遵守）');
@@ -257,10 +266,15 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         '塞进台词。禁止不调用工具直接输出正文。');
     buf.writeln('2. text 参数放在所有参数的最后输出（利于玩家端流式渲染）。');
     buf.writeln('3. 每段旁白、每句台词单独调用一次工具；一回合可连续调用多次。');
-    buf.writeln('4. 单回合节奏：1-3 段旁白 + 适量台词，总长 300-600 字，不要拖沓。');
+    buf.writeln('4. 单回合节奏与篇幅以「游戏当前状态」块中的核心体验为准'
+        '（快节奏就短平快直给，慢热沉浸就把铺陈写足，人称视角同样服从它）；'
+        '未设定核心体验时按通用节奏：1-3 段旁白 + 适量台词，总长 300-600 字，'
+        '不要拖沓。');
     buf.writeln('5. 回合收尾：内容输出完后，必须调用 '
         'present_choices(choices=[{label, hint}...]) 提交选项，然后立即停止，'
-        '等待玩家选择或自由输入。选项数量以「游戏当前状态」块中的规则为准。');
+        '等待玩家选择或自由输入。选项数量以「游戏当前状态」块中的规则为准；'
+        '选项的形态贴合核心体验（战斗向给行动抉择，角色互动向可以是'
+        '「说什么/怎么回应」，解谜向给推理路线）。');
     buf.writeln('6. 状态记录：当角色/玩家发生**重大且持久**的变化（致残、'
         '突破等级、获得或失去关键物品、立场关系质变），或世界出现新任务/'
         '势力动向/重要悬念时，调用 update_game_state：变化用 add_facts 新增'
@@ -293,6 +307,14 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
     final buf = StringBuffer();
 
     buf.writeln('## 游戏当前状态（每轮刷新，以此为准）');
+
+    // 核心体验置顶：GM 每轮最先读到，压过协议里的通用节奏默认值
+    if (s.coreExperience.isNotEmpty) {
+      buf.writeln('### 核心体验（演出的最高准则）');
+      buf.writeln('玩家想获得的游玩体验如下——回合节奏、描写详略、叙事人称、'
+          '选项形态都以此为准，与其它设定冲突时优先服从这里：');
+      buf.writeln(s.coreExperience);
+    }
 
     buf.writeln('### 世界观');
     final worldview = s.worldview.isNotEmpty

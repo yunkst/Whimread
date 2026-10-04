@@ -6,8 +6,7 @@
 /// 倍率 + 当前选中）、选中落库（写 `managed_model_selection` 契约）、
 /// 目录不可达时的空态与重试入口。
 ///
-/// 不走 [showAgentModelPickerSheet]（它按 kHasBundledBackend 早退，只在
-/// 打包注入 BACKEND_BASE_URL 的真机 run 生效），直接 pump 抽屉本体。
+/// 直接 pump 抽屉本体（不经 [showAgentModelPickerSheet] 的路由包装）。
 library;
 
 import 'package:flutter/material.dart';

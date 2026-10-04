@@ -81,24 +81,33 @@ class AgentSystemPrompt {
         '把与开局时间点相关的剧情背景提炼进世界观/开场提案'
         '（"如果某事没有发生"类玩法尤其需要原作走向做参照），不要只复述'
         '设定原文。');
-    buffer.writeln('3. 逐项探讨并确认：世界观背景（改编已有小说可省略，'
+    buffer.writeln('3. 核心体验（**必问**）：先问清用户想在这个游戏里获得'
+        '什么样的游玩感受——用 ask_user 给候选方向帮用户选（紧张刺激的'
+        '战斗爽文 / 烧脑解谜推理 / 沉浸式角色关系与情感 / 轻松搞笑的日常 / '
+        '恐怖压抑的生存 / 无脑爽推），再确认节奏快慢、爽感来源、描写密度、'
+        '叙事人称（第二人称"你"还是第三人称）、失败与挫败感（可以有挫折还是'
+        '一路顺风）。这是 GM 演出的最高准则，不要替他臆测，也不要只写一个'
+        '风格标签了事。');
+    buffer.writeln('4. 逐项探讨并确认：世界观背景（改编已有小说可省略，'
         '直接用小说的背景设定）、开场情境、玩家角色、叙事风格、内容边界、'
         '每回合选项数量（2-4）、场景插图策略（auto=关键场景自动配图 / '
         'manual=仅手动）。一次提出你的完整提案让用户确认或修改，不要反复'
         '追问每一个字段。');
-    buffer.writeln('4. 补齐角色卡：list_characters 对照小说人物，缺卡的主要'
+    buffer.writeln('5. 补齐角色卡：list_characters 对照小说人物，缺卡的主要'
         '人物用 create_character 创建完整角色卡（occupation/personality/'
         'appearanceFeatures/speechStyle/backgroundStory 尽量填全——它们会'
         '直接进 GM 上下文，决定扮演质量），并创建玩家角色卡；已有卡但信息'
         '单薄的用 update_character 补全。角色卡内容会被记录版本，务必与'
         '你对小说的理解及用户确认过的设定一致。');
-    buffer.writeln('5. 调用 create_text_game：传 title / source_novel_id / '
-        'opening / player_character_name（玩家角色名），其余可选。参战名单'
+    buffer.writeln('6. 调用 create_text_game：传 title / source_novel_id / '
+        'coreExperience（用户确认过的体验诉求）/ opening / '
+        'player_character_name（玩家角色名），其余可选。参战名单'
         '不用传，默认该小说全部角色卡入列（角色过多想聚焦时才传 '
         'character_names 圈定）。创建成功后告知用户：到底部「文字游戏」页'
         '点击游戏即可开始。');
-    buffer.writeln('6. 用户反悔要改设定时调用 update_text_game（可按角色名'
-        '增删参战名单）；list_text_games 可查已有游戏。');
+    buffer.writeln('7. 用户反悔要改设定时调用 update_text_game（可改 '
+        'coreExperience 体验诉求，也可按角色名增删参战名单）；'
+        'list_text_games 可查已有游戏。');
     buffer.writeln();
 
     // 注入经验记忆（编号 [N] 形式，供 patch_memory 工具用编号定位）

@@ -9,7 +9,6 @@ import '../../repositories/chapter_version_repository.dart';
 import '../../repositories/outline_repository.dart';
 import '../../repositories/bookshelf_repository.dart';
 import '../../repositories/prompt_tag_category_repository.dart';
-import '../../repositories/llm_config_repository.dart';
 import '../../repositories/prompt_tag_repository.dart';
 import '../../repositories/site_script_repository.dart';
 import '../../repositories/agent_memory_repository.dart';
@@ -170,14 +169,6 @@ final siteScriptRepositoryProvider = Provider<SiteScriptRepository>((ref) {
 final agentMemoryRepositoryProvider = Provider<AgentMemoryRepository>((ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   return AgentMemoryRepository(dbConnection: dbConnection);
-});
-
-/// LlmConfigRepository Provider
-///
-/// LLM 配置序列的持久化操作
-final llmConfigRepositoryProvider = Provider<LlmConfigRepository>((ref) {
-  final dbConnection = ref.watch(databaseConnectionProvider);
-  return LlmConfigRepository(dbConnection: dbConnection);
 });
 
 /// ChatSessionRepository Provider

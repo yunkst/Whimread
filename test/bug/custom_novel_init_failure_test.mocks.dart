@@ -139,10 +139,11 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
       );
 
   @override
-  _i7.Future<void> init() => (super.noSuchMethod(
+  _i7.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
         Invocation.method(
           #init,
           [],
+          {#baseUrl: baseUrl},
         ),
         returnValue: _i7.Future<void>.value(),
         returnValueForMissingStub: _i7.Future<void>.value(),
@@ -156,17 +157,6 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
         ),
         returnValue: _i7.Future<String?>.value(),
       ) as _i7.Future<String?>);
-
-  @override
-  _i7.Future<void> setConfig({required String? host}) => (super.noSuchMethod(
-        Invocation.method(
-          #setConfig,
-          [],
-          {#host: host},
-        ),
-        returnValue: _i7.Future<void>.value(),
-        returnValueForMissingStub: _i7.Future<void>.value(),
-      ) as _i7.Future<void>);
 
   @override
   void dispose() => super.noSuchMethod(
@@ -467,19 +457,25 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i7.Future<Map<String, ({int cached, int total})>>);
 
   @override
-  _i7.Future<List<_i12.ChapterSearchResult>> searchInCachedContent(
+  _i7.Future<({List<_i12.ChapterSearchResult> results, bool truncated})>
+      searchInCachedContent(
     String? keyword, {
     String? novelUrl,
   }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #searchInCachedContent,
-          [keyword],
-          {#novelUrl: novelUrl},
-        ),
-        returnValue: _i7.Future<List<_i12.ChapterSearchResult>>.value(
-            <_i12.ChapterSearchResult>[]),
-      ) as _i7.Future<List<_i12.ChapterSearchResult>>);
+          (super.noSuchMethod(
+            Invocation.method(
+              #searchInCachedContent,
+              [keyword],
+              {#novelUrl: novelUrl},
+            ),
+            returnValue: _i7.Future<
+                    ({
+                      List<_i12.ChapterSearchResult> results,
+                      bool truncated
+                    })>.value(
+                (results: <_i12.ChapterSearchResult>[], truncated: false)),
+          ) as _i7.Future<
+              ({List<_i12.ChapterSearchResult> results, bool truncated})>);
 }
 
 /// A class which mocks [INovelRepository].

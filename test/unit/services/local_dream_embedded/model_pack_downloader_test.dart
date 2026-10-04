@@ -9,6 +9,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
 import 'package:dio/dio.dart';
@@ -91,8 +92,27 @@ void main() {
       if (path == '/pack.zip') {
         packRequests++;
         final bytes = File(zipPath).readAsBytesSync();
+        // 越界 Range → 416（真实 CDN 行为），content-range 携带全量大小。
+        // 不越界的 Range 仍忽略（回 200 全量），维持既有测试语义。
+        final range = request.headers.value('range');
+        final start = range == null
+            ? 0
+            : int.tryParse(
+                    RegExp(r'bytes=(\d+)-').firstMatch(range)?.group(1) ??
+                        '0') ??
+                0;
+        if (range != null && start >= bytes.length) {
+          request.response.statusCode = 416;
+          request.response.headers
+              .set('content-range', 'bytes */${bytes.length}');
+          await request.response.close();
+          return;
+        }
         request.response.headers.contentType =
             ContentType('application', 'zip');
+        // 真实 CDN 都带 Content-Length（否则下载器拿不到总量，
+        // 进度只能停在 0%）；这里保持不支持 Range 的行为不变
+        request.response.contentLength = bytes.length;
         request.response.add(bytes);
         await request.response.close();
         return;
@@ -107,7 +127,16 @@ void main() {
     container.dispose();
     await db.close();
     PathProviderPlatform.instance = originalPathProvider;
-    if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+    // Windows：解压 isolate 的文件句柄释放滞后于 Isolate.run 返回，
+    // 立即删临时目录偶发 errno=32（文件被占用），重试兜底
+    for (var attempt = 0; attempt < 6; attempt++) {
+      try {
+        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+        break;
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
   });
 
   LocalDreamPackEntry entry() =>
@@ -331,6 +360,183 @@ void main() {
     // 任务结束后行已 ready，无 downloading 行可自愈
     expect(await downloader.resumeOrphanDownloads(), 0);
   });
+
+  test('progressSamples：广播细粒度采样（真实字节/速度/百分比，收尾到 100）',
+      () async {
+    final samples = <PackDownloadSample>[];
+    final sub = downloader.progressSamples.listen(samples.add);
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+
+    await downloader.startDownload(row);
+    await sub.cancel();
+
+    expect(samples, isNotEmpty, reason: '下载过程必须广播采样供 UI 细看');
+    for (final s in samples) {
+      expect(s.modelId, row.id);
+      expect(s.bytesPerSecond, greaterThanOrEqualTo(0));
+      expect(s.percent, inInclusiveRange(0, 100));
+      if (s.totalBytes != null) {
+        expect(s.receivedBytes, lessThanOrEqualTo(s.totalBytes!));
+      }
+    }
+    // 字节只增不减（进度条不会倒退）
+    for (var i = 1; i < samples.length; i++) {
+      expect(samples[i].receivedBytes,
+          greaterThanOrEqualTo(samples[i - 1].receivedBytes));
+    }
+    // 收尾采样：真实百分比走到 100（UI 进度条不卡在 95%）
+    expect(samples.last.percent, 100);
+    expect(samples.last.etaSeconds, 0);
+  });
+
+  test('断点已完整（416 且大小吻合）→ 跳过下载直接解压 → ready', () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    // 模拟「上次已下完、进入解压前被杀」：.part 是完整 zip
+    File('${row.filePath}.zip.part')
+        .writeAsBytesSync(File(p.join(tempDir.path, 'pack.zip')).readAsBytesSync());
+
+    await downloader.startDownload(row);
+
+    final latest = await repo.getById(row.id!);
+    expect(latest!.status, ImageModelStatus.ready);
+    expect(packRequests, 1, reason: '断点完整时不应重下整个包');
+  });
+
+  test('断点越界（416）→ 截断 .part 全量重下 → ready 且内容正确', () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    // .part 比远端全量还大（远端文件换小/换包）
+    final part = File('${row.filePath}.zip.part');
+    part.writeAsBytesSync(
+        List.filled(File(p.join(tempDir.path, 'pack.zip')).lengthSync() + 100, 9));
+
+    await downloader.startDownload(row);
+
+    final latest = await repo.getById(row.id!);
+    expect(latest!.status, ImageModelStatus.ready);
+    for (final e in packFiles.entries) {
+      expect(File(p.join(latest.filePath, e.key)).readAsBytesSync(), e.value,
+          reason: e.key);
+    }
+  });
+
+  test('完整大小但内容损坏 → failed 且 .part 被清理（不陷入 416 死循环）',
+      () async {
+    final repo = container.read(imageModelRepositoryProvider);
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${server.port}/pack.zip',
+    );
+    // 大小吻合但内容是垃圾 → 416 后直接解压失败
+    final part = File('${row.filePath}.zip.part');
+    part.writeAsBytesSync(
+        List.filled(File(p.join(tempDir.path, 'pack.zip')).lengthSync(), 7));
+
+    await downloader.startDownload(row);
+
+    final latest = await repo.getById(row.id!);
+    expect(latest!.status, ImageModelStatus.failed);
+    expect(latest.errorMessage, contains('损坏'));
+    expect(part.existsSync(), isFalse,
+        reason: '坏 .part 必须清理，否则下次续传 416→解压失败无限循环');
+  });
+
+  test('大条目流式解压：24MB 条目正确落盘（GB 级权重不整块进内存）', () async {
+    // 用户实测事故：SDXL NPU 包进度到 95% 后 failed(Out of Memory)——
+    // archive 3.6.1 的 writeContent 对 DEFLATE 条目整块解压进内存。
+    // 修复后走 decompress(output) 流式路径；本例用 24MB 条目验证
+    // 多块流式解压的内容正确性（GB 级条目的内存行为由代码路径保证）。
+    final repo = container.read(imageModelRepositoryProvider);
+    final bigBytes = Uint8List(24 * 1024 * 1024);
+    for (var i = 0; i < bigBytes.length; i++) {
+      bigBytes[i] = i % 251; // 可压缩内容 → 编解码都快
+    }
+    final bigZipPath = p.join(tempDir.path, 'big.zip');
+    final bigEncoder = ZipFileEncoder();
+    bigEncoder.create(bigZipPath);
+    // 复用 setUp 写好的必需文件（名字必须与 requiredFiles 一致）
+    for (final entry in packFiles.entries) {
+      bigEncoder.addFile(File(p.join(tempDir.path, entry.key)));
+    }
+    final bigTmp = File(p.join(tempDir.path, 'unet.mnn'))
+      ..writeAsBytesSync(bigBytes);
+    bigEncoder.addFile(bigTmp);
+    bigEncoder.close();
+    final bigPack = File(bigZipPath).readAsBytesSync();
+
+    final bigServer = await HttpServer.bind('127.0.0.1', 0);
+    bigServer.listen((request) async {
+      request.response.contentLength = bigPack.length;
+      request.response.add(bigPack);
+      await request.response.close();
+    });
+    addTearDown(() => bigServer.close(force: true));
+
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${bigServer.port}/big.zip',
+    );
+    await downloader.startDownload(row);
+
+    final latest = await repo.getById(row.id!);
+    expect(latest!.status, ImageModelStatus.ready,
+        reason: latest.errorMessage);
+    final out = File(p.join(latest.filePath, 'unet.mnn'));
+    expect(out.existsSync(), isTrue);
+    expect(out.lengthSync(), bigBytes.length);
+    expect(out.readAsBytesSync(), bigBytes);
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('macOS 资源叉条目被跳过：__MACOSX/._x.mnn 不覆盖真文件', () async {
+    // 对齐 Local Dream unzipFile 的过滤规则：跳过 . 开头与 __MACOSX/ 条目，
+    // 否则扁平化后的 '._x.mnn'（几 KB 空壳）会覆盖真正的 x.mnn
+    final repo = container.read(imageModelRepositoryProvider);
+    final macZipPath = p.join(tempDir.path, 'mac.zip');
+    final macEncoder = ZipFileEncoder();
+    macEncoder.create(macZipPath);
+    for (final entry in packFiles.entries) {
+      macEncoder.addFile(File(p.join(tempDir.path, entry.key)));
+    }
+    // 真正的权重文件
+    final real = File(p.join(tempDir.path, 'unet.mnn'))
+      ..writeAsBytesSync(utf8.encode('REAL-UNET-WEIGHTS'));
+    macEncoder.addFile(real);
+    // macOS 资源叉：解压后 basename = ._unet.mnn
+    final fork = File(p.join(tempDir.path, '._unet.mnn'))
+      ..writeAsBytesSync(utf8.encode('MACOSX-RESOURCE-FORK'));
+    macEncoder.addFile(fork);
+    macEncoder.close();
+    final macPack = File(macZipPath).readAsBytesSync();
+
+    final macServer = await HttpServer.bind('127.0.0.1', 0);
+    macServer.listen((request) async {
+      request.response.contentLength = macPack.length;
+      request.response.add(macPack);
+      await request.response.close();
+    });
+    addTearDown(() => macServer.close(force: true));
+
+    final row = await downloader.createDownloadingRow(
+      entry: entry(),
+      zipUrl: 'http://127.0.0.1:${macServer.port}/mac.zip',
+    );
+    await downloader.startDownload(row);
+
+    final latest = await repo.getById(row.id!);
+    expect(latest!.status, ImageModelStatus.ready, reason: latest.errorMessage);
+    expect(File(p.join(latest.filePath, 'unet.mnn')).readAsStringSync(),
+        'REAL-UNET-WEIGHTS');
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('recoverInterruptedDownloads：downloading 行归位 paused', () async {
     final row = await downloader.createDownloadingRow(

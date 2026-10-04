@@ -17,7 +17,7 @@ import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/widgets/agent_chat/agent_chat_composer.dart';
 import 'package:novel_app/widgets/agent_chat/agent_chat_header.dart';
 import 'package:novel_app/widgets/agent_chat/agent_chat_messages.dart';
-import 'package:novel_app/widgets/agent_chat/agent_scenario_config_dialog.dart';
+import 'package:novel_app/widgets/agent_chat/model_picker_sheet.dart';
 import 'package:novel_app/widgets/agent_chat/agent_status_strip.dart';
 import 'package:novel_app/widgets/agent_chat/chat_history_sheet.dart';
 
@@ -120,7 +120,7 @@ class _AgentChatDialogState extends ConsumerState<AgentChatDialog> {
               AgentChatHeader(
                 onHistory: () => _showHistorySheet(),
                 onNewSession: () => _startNewSession(),
-                onConfig: () => _showScenarioConfigDialog(),
+                onPickModel: () => _showModelPicker(),
                 onToggleFullscreen: () => setState(() => _isFullscreen = !_isFullscreen),
                 isFullscreen: _isFullscreen,
                 onClose: () => Navigator.of(context).maybePop(),
@@ -181,18 +181,12 @@ class _AgentChatDialogState extends ConsumerState<AgentChatDialog> {
     await ref.read(scenarioSessionsProvider.notifier).startNewSession(scenarioId);
   }
 
-  /// 弹出场景级 LLM 配置对话框
+  /// 弹出 AI 模型选择抽屉
   ///
-  /// 让用户为当前场景单独配置 LLM 后端（覆盖全局默认）。
-  /// 配置写入 SharedPreferences，下次 sendMessage 自动生效。
-  Future<void> _showScenarioConfigDialog() async {
-    final chatState = ref.read(currentChatStateProvider);
-    await showDialog<bool>(
-      context: context,
-      builder: (_) => AgentScenarioConfigDialog(
-        scenarioId: chatState.scenarioId,
-      ),
-    );
+  /// LLM 走托管后端，模型为全局单值，写入 managed_model_selection，
+  /// 下次发送消息自动生效。
+  Future<void> _showModelPicker() async {
+    await showAgentModelPickerSheet(context);
   }
 
   /// 点击 + 触发选图 -> 上传 -> 预览。

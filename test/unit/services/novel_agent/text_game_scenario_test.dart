@@ -294,6 +294,9 @@ void main() {
       // 身份与协议
       expect(prompt, contains('流云试炼'));
       expect(prompt, contains('游戏主持人'));
+      expect(prompt, contains('核心体验'), reason: '静态协议声明核心体验为最高准则');
+      expect(prompt, contains('以核心体验为准'));
+      expect(prompt, contains('300-600'), reason: '通用节奏保留为核心体验未设定时的兜底');
       expect(prompt, contains('游戏当前状态'), reason: '指针：设定数据在动态块');
       expect(prompt, contains('narrate'));
       expect(prompt, contains('speak'));
@@ -364,6 +367,35 @@ void main() {
       expect(block, contains('修仙世界，灵气衰竭'), reason: '来自 novel.backgroundSetting');
       expect(block, contains('暂无记录'));
       expect(block, contains('target="world"'));
+    });
+
+    test('核心体验：置顶小节 + 声明最高准则；未设定时不出该小节', () {
+      final game = _game().copyWith(
+        settings: _game()
+            .settings
+            .copyWith(coreExperience: '快节奏战斗爽文，第二人称，允许失败'),
+      );
+      final block = _scenario(
+        game: game,
+        novel: _novel(),
+        cast: [_card(101, '林昭'), _card(102, '沈砚')],
+      ).buildDynamicContext(const AgentScenarioContext());
+      expect(block, contains('核心体验'));
+      expect(block, contains('快节奏战斗爽文，第二人称，允许失败'));
+      expect(block, contains('最高准则'));
+      // 置顶：体验小节排在世界观之前（GM 每轮最先读到）
+      expect(
+        block.indexOf('核心体验') < block.indexOf('### 世界观'),
+        isTrue,
+        reason: '核心体验小节必须排在世界观之前',
+      );
+
+      // 未设定 → 不渲染空小节（静态协议的通用节奏兜底）
+      final unset = _scenario(
+        novel: _novel(),
+        cast: [_card(101, '林昭'), _card(102, '沈砚')],
+      ).buildDynamicContext(const AgentScenarioContext());
+      expect(unset, isNot(contains('核心体验')));
     });
 
     test('manual 策略：插图规则为仅玩家要求时调用', () {

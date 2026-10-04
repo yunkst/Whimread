@@ -9,7 +9,7 @@
 /// - 应用日志采集来自 [LoggerService.instance.getLogs()] 内存环形队列,
 ///   cap 300 条 + 单条 message 截断 500 字符,与 feedback 云函数入参上限对齐
 /// - LLM 调用日志采集来自 [LlmLogger.instance.getRecent()],
-///   上限 10 条 + 单条 response 截断 20K 字符 + 总字符预算 128KB(防 body 越 512KB)。
+///   上限 30 条 + 单条 response 截断 20K 字符 + 总字符预算 128KB(防 body 越 512KB)。
 ///   SSE 流式请求在 LlmLogger 侧已聚合为单条 chat.completion 形态 JSON(见
 ///   IoLlmHttpClient._reconstructStreamedJson),无需客户端再拼接。
 /// - host 解析 / JWT 鉴权 / Dio 超时与 [LogReporterService] 完全同源
@@ -130,7 +130,7 @@ class FeedbackService {
   static const int maxLogMessageChars = 500;
 
   /// LLM 调用日志附加上限(与云函数 MAX_LLM_ENTRIES_PER_REPORT 对齐)
-  static const int maxAttachedLlmLogs = 10;
+  static const int maxAttachedLlmLogs = 30;
 
   /// LLM 单条 response_body 截断长度(与云函数 MAX_LLM_RESPONSE_CHARS 对齐)
   ///

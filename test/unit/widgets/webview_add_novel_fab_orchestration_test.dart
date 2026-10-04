@@ -98,5 +98,10 @@ void main() {
     expect(request.mode, LaunchMode.autoSend);
     expect(request.draftMessage, isNotEmpty);
     expect(request.context['failureReason'], 'noScript');
+
+    // ApiServiceWrapper 后台自动初始化（无托管 Host 时失败并记错误日志）
+    // 会排一个 1s 的日志持久化 Timer；fake_async 不推进时间会以
+    // 「Timer still pending」失败测试体，这里推进过它。
+    await tester.pump(const Duration(seconds: 2));
   });
 }

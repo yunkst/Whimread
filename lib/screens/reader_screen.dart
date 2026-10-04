@@ -48,6 +48,7 @@ import '../controllers/reader_content_controller.dart';
 import '../controllers/reader_concat_controller.dart';
 import '../services/logger_service.dart';
 import '../utils/error_helper.dart';
+import '../utils/reading_anchor_math.dart';
 // Riverpod Providers
 import '../core/providers/services/network_service_providers.dart';
 import '../core/providers/chapter_mutation_provider.dart';
@@ -357,7 +358,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (widget.searchResult != null &&
         widget.searchResult!.chapterUrl == _currentChapter.url) {
       _anchorRestorePending = false;
-      _scrollToSearchMatch();
+      unawaited(_scrollToSearchMatch());
       return;
     }
     // 首次进入阅读页：尝试恢复上次章内阅读位置
@@ -377,39 +378,56 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }
 
   /// 滚动到搜索匹配位置
-  void _scrollToSearchMatch() {
-    if (widget.searchResult == null ||
-        widget.searchResult!.matchPositions.isEmpty) {
+  ///
+  /// 搜索结果的 matchPositions 是正文片段窗口内的相对坐标，直接拿它估算
+  /// 滚动偏移坐标系就是错的；先经 contentOffsetBase 还原成整章绝对偏移，
+  /// 再映射为段落锚点，复用 [_concat.restoreAnchor] 的迭代精确定位。
+  Future<void> _scrollToSearchMatch() async {
+    final result = widget.searchResult;
+    if (result == null) return;
+
+    // 等内容首帧布局完成（锚点迭代定位依赖已构建的 ListView）
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scrollController.hasClients) return;
+
+    final rawContent = _concat.rawContentOf(result.chapterUrl);
+    if (rawContent == null) {
+      // 正文尚未进入拼接块：退回章首（起点未布局则回退 0）
+      final target = _concat.scrollOffsetOfChapterStart(result.chapterUrl);
+      _scrollController.jumpTo(target ?? 0);
+      LoggerService.instance.w(
+        '搜索跳转：正文未入拼接块，退回章首 ${result.chapterTitle}',
+        category: LogCategory.ui,
+        tags: ['reader', 'search', 'jump', 'fallback'],
+      );
       return;
     }
 
-    // 延迟执行滚动，确保内容已经渲染
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        final firstMatch = widget.searchResult!.firstMatch;
-        if (firstMatch != null) {
-          // 估算滚动位置（基于字符位置的粗略估算）
-          // 这里假设平均每个字符占用一定的高度
-          final estimatedScrollOffset = (firstMatch.start * 0.3).toDouble();
+    // 仅标题命中（无正文匹配）时落章首
+    final absoluteOffset = result.firstMatchAbsoluteOffset ?? 0;
+    final anchor = ReadingAnchorMath.anchorForCharOffset(
+      chapterUrl: result.chapterUrl,
+      content: rawContent,
+      charOffset: absoluteOffset,
+    );
+    if (anchor == null) return;
 
-          final maxScrollExtent = _scrollController.position.maxScrollExtent;
-          final targetOffset =
-              estimatedScrollOffset.clamp(0.0, maxScrollExtent);
-
-          _scrollController.animateTo(
-            targetOffset,
-            duration: const Duration(milliseconds: 800),
-            curve: Curves.easeOutCubic,
-          );
-
-          // 显示跳转提示
-          ToastUtils.showInfo(
-            '已跳转到匹配位置 (${widget.searchResult!.matchCount} 处匹配)',
-            context: context,
-          );
-        }
-      }
-    });
+    final restored = await _concat.restoreAnchor(anchor);
+    if (!mounted) return;
+    if (restored) {
+      ToastUtils.showInfo(
+        result.matchCount > 0
+            ? '已跳转到匹配位置 (${result.matchCount}处匹配)'
+            : '已打开匹配章节 ${result.chapterTitle}',
+        context: context,
+      );
+    } else {
+      LoggerService.instance.w(
+        '搜索跳转未收敛: paragraphIndex=${anchor.paragraphIndex}',
+        category: LogCategory.ui,
+        tags: ['reader', 'search', 'jump', 'unconverged'],
+      );
+    }
   }
 
   /// 导航到指定章节（支持自动滚动状态保持）

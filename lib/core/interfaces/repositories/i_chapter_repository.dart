@@ -93,12 +93,23 @@ abstract class IChapterRepository {
 
   // ========== 章节内容搜索 ==========
 
-  /// 搜索缓存章节内容
+  /// 搜索缓存章节内容（章节正文与标题）
   ///
   /// [keyword] 搜索关键词
   /// [novelUrl] 可选的小说URL，用于限制搜索范围
-  /// 返回匹配的章节搜索结果列表
-  Future<List<ChapterSearchResult>> searchInCachedContent(
+  ///
+  /// 返回命中结果列表及是否被行数上限截断（[ChapterSearchResultSet]）。
+  /// 关键词命中正文或章节标题任一即返回该章；仅标题命中的行
+  /// [ChapterSearchResult.matchPositions] 为空、
+  /// [ChapterSearchResult.titleMatched] 为 true。
+  ///
+  /// 内存护栏（防止搜常见字命中全书导致 OOM）：
+  /// - 命中行数上限 200（SQL LIMIT），超量时 truncated=true
+  /// - 每章最多记录 20 个匹配位置
+  /// - content 只携带覆盖已记录匹配的窗口文本（前后各留 60 字符），
+  ///   匹配位置重基到窗口坐标系；整章绝对偏移用
+  ///   [ChapterSearchResult.contentOffsetBase] 还原
+  Future<ChapterSearchResultSet> searchInCachedContent(
     String keyword, {
     String? novelUrl,
   });

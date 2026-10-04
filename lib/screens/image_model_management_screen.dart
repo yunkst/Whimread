@@ -11,7 +11,7 @@
 /// [imageModelAdminServiceProvider] 门面（改库 → 刷新的约定只此一份）。
 library;
 
-import 'dart:async' show unawaited;
+import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:io' show Platform;
 
 import 'package:file_picker/file_picker.dart';
@@ -24,7 +24,9 @@ import '../../core/providers/image_model_download_providers.dart';
 import '../../models/image_model.dart';
 import '../../services/image_generation/image_generation_providers.dart';
 import '../../services/local_dream_embedded/model_pack.dart';
+import '../../services/local_dream_embedded/model_pack_downloader.dart';
 import '../../services/logger_service.dart';
+import '../../utils/format_utils.dart';
 import '../../utils/toast_utils.dart';
 import '../../widgets/common/common_widgets.dart';
 import 'image_model/dialogs/image_gen_test_sheet.dart';
@@ -390,11 +392,9 @@ class _CatalogEntryCard extends StatelessWidget {
             ),
             if (downloadingRow != null) ...[
               const SizedBox(height: 6),
-              LinearProgressIndicator(
-                  value: downloadingRow.progress / 100.0),
-              const SizedBox(height: 2),
-              Text('下载中 ${downloadingRow.progress}%',
-                  style: theme.textTheme.bodySmall),
+              _LiveDownloadProgress(
+                  modelId: downloadingRow.id!,
+                  dbPercent: downloadingRow.progress),
             ],
             // failed/paused 不算已添加，此处仍显示下载入口；failed 附失败原因
             if (failRow != null) ...[
@@ -475,10 +475,8 @@ class _ModelCard extends ConsumerWidget {
             // 生命周期区：进度条 / 错误信息 / 状态操作按钮
             if (model.status == ImageModelStatus.downloading) ...[
               const SizedBox(height: 10),
-              LinearProgressIndicator(value: model.progress / 100.0),
-              const SizedBox(height: 4),
-              Text('下载中 ${model.progress}%',
-                  style: Theme.of(context).textTheme.bodySmall),
+              _LiveDownloadProgress(
+                  modelId: model.id!, dbPercent: model.progress),
             ] else if (model.status == ImageModelStatus.paused) ...[
               const SizedBox(height: 10),
               LinearProgressIndicator(value: model.progress / 100.0),
@@ -688,5 +686,99 @@ class _ModelCard extends ConsumerWidget {
         await admin.save(model.copyWith(isEnabled: !model.isEnabled));
         break;
     }
+  }
+}
+
+/// 下载进度行（细粒度实时）：百分比 + 已下/总量 + 速度 + 剩余时间
+///
+/// 库里的 progress 是 1% 粒度的整数（4GB 包的 1% = 40MB，慢速下载时
+/// 几十秒不动，看着像卡死）。这里订阅下载器的 ≈2Hz 内存采样流，展示真实
+/// 字节与速度——用户在动还是真卡住一眼可见。流还没产出时回退 DB 百分比。
+class _LiveDownloadProgress extends ConsumerStatefulWidget {
+  final int modelId;
+
+  /// 冷启动/流未就绪时的回退百分比
+  final int dbPercent;
+
+  const _LiveDownloadProgress({
+    required this.modelId,
+    required this.dbPercent,
+  });
+
+  @override
+  ConsumerState<_LiveDownloadProgress> createState() =>
+      _LiveDownloadProgressState();
+}
+
+class _LiveDownloadProgressState
+    extends ConsumerState<_LiveDownloadProgress> {
+  StreamSubscription<PackDownloadSample>? _sub;
+  PackDownloadSample? _sample;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = ref
+        .read(localDreamPackDownloaderProvider)
+        .progressSamples
+        .listen((s) {
+      if (s.modelId != widget.modelId || !mounted) return;
+      setState(() => _sample = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  static String _eta(double seconds) {
+    if (seconds < 60) return '${seconds.ceil()} 秒';
+    if (seconds < 3600) {
+      final m = seconds ~/ 60;
+      final s = (seconds % 60).round();
+      return '$m 分 $s 秒';
+    }
+    return '约 ${(seconds / 3600).ceil()} 小时';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = _sample;
+    final percent = s?.percent ?? widget.dbPercent;
+    final ratio = s?.totalBytes != null && s!.totalBytes! > 0
+        ? (s.receivedBytes / s.totalBytes!).clamp(0.0, 1.0)
+        : widget.dbPercent / 100.0;
+
+    final parts = <String>['下载中 $percent%'];
+    if (s != null) {
+      parts.add(s.totalBytes != null
+          ? '${FormatUtils.formatFileSize(s.receivedBytes)} / '
+              '${FormatUtils.formatFileSize(s.totalBytes!)}'
+          : FormatUtils.formatFileSize(s.receivedBytes));
+      if (s.bytesPerSecond > 0) {
+        parts.add('${FormatUtils.formatFileSize(s.bytesPerSecond.round())}/s');
+        final eta = s.etaSeconds;
+        if (eta != null) parts.add('剩余 ${_eta(eta)}');
+      } else {
+        parts.add('等待数据…');
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LinearProgressIndicator(value: ratio),
+        const SizedBox(height: 4),
+        Text(
+          parts.join(' · '),
+          style: theme.textTheme.bodySmall,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
   }
 }

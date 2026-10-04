@@ -11,33 +11,34 @@ class ChapterSearchService {
   ChapterSearchService({required IChapterRepository chapterRepository})
       : _chapterRepository = chapterRepository;
 
-  /// 在指定小说的缓存内容中搜索关键词
+  /// 在指定小说的缓存内容中搜索关键词（章节正文 + 章节标题）
   ///
   /// [novelUrl] 小说的URL，用于限制搜索范围
   /// [keyword] 搜索关键词
   ///
-  /// 返回匹配的章节搜索结果列表
-  Future<List<ChapterSearchResult>> searchInNovel(
+  /// 返回按章节索引排序的搜索结果；命中行数超过仓储上限时 truncated=true，
+  /// 调用方需向用户提示结果不完整。
+  Future<ChapterSearchResultSet> searchInNovel(
     String novelUrl,
     String keyword,
   ) async {
     if (keyword.trim().isEmpty) {
-      return [];
+      return (results: const <ChapterSearchResult>[], truncated: false);
     }
 
     try {
-      final results = await _chapterRepository.searchInCachedContent(
+      final page = await _chapterRepository.searchInCachedContent(
         keyword.trim(),
         novelUrl: novelUrl,
       );
 
       // 按章节索引排序
-      final sortedResults = List<ChapterSearchResult>.from(results);
+      final sortedResults = List<ChapterSearchResult>.from(page.results);
       sortedResults.sort((a, b) {
         return a.chapterIndex.compareTo(b.chapterIndex);
       });
 
-      return sortedResults;
+      return (results: sortedResults, truncated: page.truncated);
     } catch (e, st) {
       LoggerService.instance.e(
         'searchInNovel 失败: novelUrl=$novelUrl keyword=$keyword - $e',

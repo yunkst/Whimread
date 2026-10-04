@@ -117,10 +117,11 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
       );
 
   @override
-  _i6.Future<void> init() => (super.noSuchMethod(
+  _i6.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
         Invocation.method(
           #init,
           [],
+          {#baseUrl: baseUrl},
         ),
         returnValue: _i6.Future<void>.value(),
         returnValueForMissingStub: _i6.Future<void>.value(),
@@ -134,17 +135,6 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
         ),
         returnValue: _i6.Future<String?>.value(),
       ) as _i6.Future<String?>);
-
-  @override
-  _i6.Future<void> setConfig({required String? host}) => (super.noSuchMethod(
-        Invocation.method(
-          #setConfig,
-          [],
-          {#host: host},
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
 
   @override
   void dispose() => super.noSuchMethod(

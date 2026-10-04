@@ -369,6 +369,25 @@ class MockScenarioSession extends _i1.Mock implements _i2.ScenarioSession {
       ) as _i5.Future<void>);
 
   @override
+  bool answerAskUser(
+    String? toolCallId, {
+    List<String>? selected,
+    String? freeText,
+  }) =>
+      (super.noSuchMethod(
+        Invocation.method(
+          #answerAskUser,
+          [toolCallId],
+          {
+            #selected: selected,
+            #freeText: freeText,
+          },
+        ),
+        returnValue: false,
+        returnValueForMissingStub: false,
+      ) as bool);
+
+  @override
   _i5.Future<void> retryLastRound() => (super.noSuchMethod(
         Invocation.method(
           #retryLastRound,

@@ -6,7 +6,6 @@ import 'dart:io';
 import '../core/backend/backend_config.dart';
 import '../models/remote_script.dart';
 import 'logger_service.dart';
-import 'preferences_service.dart';
 
 /// API 服务封装层
 ///
@@ -82,8 +81,11 @@ class ApiServiceWrapper {
   ///
   /// 必须在使用前调用一次。复用构造时一次性创建的 [Dio] 实例（不再重建）,
   /// 仅更新其配置 / Adapter / 拦截器,避免连接池与 LogInterceptor 泄漏。
-  Future<void> init() async {
-    final host = await getHost();
+  ///
+  /// [baseUrl] 仅供测试注入假 Host（生产 Host 唯一来源是打包注入的
+  /// `BACKEND_BASE_URL`,经 [getHost] 解析）。
+  Future<void> init({String? baseUrl}) async {
+    final host = baseUrl ?? await getHost();
 
     LoggerService.instance.d(
       '=== ApiServiceWrapper 初始化 ===',
@@ -182,15 +184,8 @@ class ApiServiceWrapper {
 // 统一错误处理
 // ========================================================================
 
-  /// 获取配置的 Host（统一走 [resolveBackendHost]，不要直接读 prefs key）
+  /// 获取配置的 Host（统一走 [resolveBackendHost]，Host 由打包注入）
   Future<String?> getHost() => resolveBackendHost();
-
-  /// 设置后端配置（本地开发自定义 Host 用；托管模式 Host 以打包注入为准）
-  Future<void> setConfig({required String host}) async {
-    await PreferencesService.instance
-        .setString(kPrefsBackendHostKey, host.trim());
-    await init();
-  }
 
   /// 统一错误处理
   Exception _handleError(dynamic error) {

@@ -1,7 +1,7 @@
 /// 设备额度徽标（AI 剩余点数）
 ///
 /// 展示规则（数据源 [deviceQuotaProvider]，60s 缓存）：
-/// - 非托管包 / 余额不可知（未注册、查询失败且无旧值）→ 不渲染任何内容
+/// - 余额不可知（未注册、查询失败且无旧值）→ 不渲染任何内容
 /// - 余额 > 20 → 主色「AI 剩余 N 点」
 /// - 20 ≥ 余额 > 0 → 警告色，提示即将耗尽
 /// - 余额 = 0 → 错误色「额度已用完」；未用过 Star 兑换时点击直接弹
@@ -12,7 +12,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants/build_config.dart';
 import '../../core/providers/device_quota_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../services/device/device_auth_service.dart' show StarRedeemResult;
@@ -53,9 +52,6 @@ class _QuotaBadgeState extends ConsumerState<QuotaBadge> {
 
   @override
   Widget build(BuildContext context) {
-    // 非托管包：客户端 LLM 走用户自配，无额度概念，直接隐藏
-    if (!kHasBundledBackend) return const SizedBox.shrink();
-
     final state = ref.watch(deviceQuotaProvider);
     final info = state.info;
     // 余额不可知（未注册/查询失败且无旧值）：隐藏不打扰

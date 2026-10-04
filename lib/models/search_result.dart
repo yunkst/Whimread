@@ -11,6 +11,14 @@ class ChapterSearchResult {
   final List<MatchPosition> matchPositions;
   final DateTime cachedAt;
 
+  /// 关键词是否命中章节标题（标题单独命中时 [matchPositions] 可为空）
+  final bool titleMatched;
+
+  /// [content] 片段窗口起点在整章正文中的绝对字符偏移。
+  /// [matchPositions] 是窗口内相对坐标，消费方需要整章坐标时用
+  /// contentOffsetBase + position.start 还原。
+  final int contentOffsetBase;
+
   const ChapterSearchResult({
     required this.novelUrl,
     required this.novelTitle,
@@ -22,6 +30,8 @@ class ChapterSearchResult {
     required this.searchKeywords,
     required this.matchPositions,
     required this.cachedAt,
+    this.titleMatched = false,
+    this.contentOffsetBase = 0,
   });
 
   /// 获取匹配数量
@@ -31,9 +41,22 @@ class ChapterSearchResult {
   MatchPosition? get firstMatch =>
       matchPositions.isNotEmpty ? matchPositions.first : null;
 
+  /// 第一个匹配在整章正文中的绝对字符偏移（无正文匹配返回 null）
+  int? get firstMatchAbsoluteOffset => matchPositions.isEmpty
+      ? null
+      : contentOffsetBase + matchPositions.first.start;
+
   /// 获取章节索引文本
   String get chapterIndexText => '第 ${chapterIndex + 1} 章';
 }
+
+/// 一次章节内容搜索的完整返回：结果列表 + 是否被行数上限截断。
+///
+/// 截断时 results 只含上限内的命中章节，UI/工具调用方应向用户提示结果不完整。
+typedef ChapterSearchResultSet = ({
+  List<ChapterSearchResult> results,
+  bool truncated,
+});
 
 /// 匹配位置信息
 class MatchPosition {

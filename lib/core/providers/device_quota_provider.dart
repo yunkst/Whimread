@@ -8,8 +8,8 @@
 /// 传输层 LlmUsageNotifier 事件经 main.dart 桥接进来，带 1.5s 尾沿
 /// 防抖（agent 一轮对话 N 次 tool 调用只刷 1 次）。
 ///
-/// `info == null` 表示额度不可知：非托管包（kHasBundledBackend=false）、
-/// 设备尚未注册（fetchQuota 有意不触发注册副作用）、或查询失败。
+/// `info == null` 表示额度不可知：设备尚未注册（fetchQuota 有意不触发
+/// 注册副作用）、或查询失败。
 /// UI 对 null 的统一处理是隐藏入口，不打扰用户。
 library;
 

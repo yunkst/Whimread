@@ -4,7 +4,7 @@
 /// 后端契约见 `cloudfunctions/llm-proxy/model-catalog.js#catalogToResponse`。
 ///
 /// 选中的模型通过 `managed_model_selection` SharedPreferences key 持久化
-/// (单值,适用于所有 Agent 场景;各场景独立选择在 LlmConfigService 那边另议)。
+/// (单值,对所有 Agent 场景统一生效,场景级独立选择已随自配模式移除)。
 library;
 
 import 'package:dio/dio.dart';

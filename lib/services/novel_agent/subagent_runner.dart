@@ -325,7 +325,7 @@ class SubagentRunner {
 
   /// 为子 Agent 构造 LlmProvider。
   ///
-  /// - 默认走 [llmConfigServiceProvider] 拿 writing 场景激活配置；
+  /// - 默认走 [llmConfigServiceProvider] 构建托管后端通道；
   /// - 测试可通过 [_llmProviderFactoryOverride] 注入 mock provider。
   Future<LlmProvider> _buildLlmForScenario(String scenarioId) async {
     final factoryOverride = _llmProviderFactoryOverride;
@@ -335,7 +335,8 @@ class SubagentRunner {
     final configService = ref.read(llmConfigServiceProvider);
     final llm = await configService.buildActiveProvider(scenarioId);
     if (llm == null) {
-      throw StateError('LLM 未配置（scenarioId=$scenarioId），子 Agent 无法启动');
+      throw StateError(
+          'AI 服务不可用（scenarioId=$scenarioId），子 Agent 无法启动');
     }
     return llm;
   }

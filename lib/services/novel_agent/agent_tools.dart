@@ -205,11 +205,14 @@ class AgentTools {
     'function': {
       'name': 'search_in_chapters',
       'description':
-          '在当前小说所有已缓存章节中搜索包含指定关键词的内容，返回关键词周围约 80 字的'
-          '上下文片段（带前后省略号），适合定位特定情节、道具、台词、设定。\n'
+          '在当前小说所有已缓存章节中搜索指定关键词，命中**正文或章节标题**任一即返回。'
+          '正文命中时返回关键词周围约 80 字的上下文片段（带前后省略号），'
+          '适合定位特定情节、道具、台词、设定。\n'
           '返回顶层包含 keyword、totalChaptersHit、totalMatches、truncated、'
           'truncatedChapters、count 等统计字段；每章返回 position、chapterTitle、'
-          'matchCount、matchedText（关键词回显）和 snippets（采样后的上下文片段）。\n'
+          'matchCount（正文命中次数）、titleMatched（是否仅标题命中）、'
+          'matchedText（关键词回显，仅标题命中时为章节标题）、'
+          'snippets（上下文片段，仅标题命中时为空）。\n'
           '高频词（如主角名）会命中很多章节，建议用 positionFrom/positionTo 分段查询'
           '（每次 20-50 章），避免单次结果过大；position 来自 list_chapters。\n'
           '服务端对单次返回的章节数和片段数有兜底上限（分别为 50 章 / 每章 3 片段 / 全局 30'
@@ -972,8 +975,8 @@ class AgentTools {
           '/ get_outline，必要时抽读关键章节），对世界观、剧情脉络与人物关系'
           '有充分理解；② 该小说的主要人物与玩家角色已有完整角色卡（缺的先 '
           'create_character 创建，信息尽量填全）。参战角色**按角色名引用**，'
-          '你无需关心其内部 id。调用前世界观、玩家角色、规则已与用户逐项探讨'
-          '并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
+          '你无需关心其内部 id。调用前核心体验、世界观、玩家角色、规则已与'
+          '用户逐项探讨并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
       'parameters': <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -986,6 +989,17 @@ class AgentTools {
             'description':
                 '绑定的小说 id（list_novels 返回的 id，必填）。参战角色卡都'
                 '属于这本小说；自定义玩法就先用 create_novel 建一本轻量小说壳',
+          },
+          'coreExperience': {
+            'type': 'string',
+            'description':
+                '核心体验（50-150 字，必填）：用户想在这个游戏里获得什么样的'
+                '感受——**先问清用户再写**，不要替他臆测。覆盖维度：节奏'
+                '（快节奏爽点密集 / 慢热沉浸铺陈）、爽感来源（碾压变强 / '
+                '烧脑解谜 / 情感羁绊 / 恐怖求生）、描写密度、叙事人称'
+                '（第二人称"你" / 第三人称）、失败与挫败（允许挫折 / '
+                '一路顺风）。写成一段对 GM 的正向演出指令：GM 以它为最高'
+                '准则，与其它设定冲突时优先服从它',
           },
           'opening': {
             'type': 'string',
@@ -1031,7 +1045,7 @@ class AgentTools {
                 'manual=仅玩家手动要求时生成',
           },
         },
-        'required': ['title', 'source_novel_id', 'opening',
+        'required': ['title', 'source_novel_id', 'coreExperience', 'opening',
           'player_character_name'],
       },
     },
@@ -1118,6 +1132,11 @@ class AgentTools {
             'description': 'list_text_games 返回的游戏 id',
           },
           'title': {'type': 'string', 'description': '新标题'},
+          'coreExperience': {
+            'type': 'string',
+            'description': '新核心体验（用户想获得的游玩感受，GM 演出的最高准则）；'
+                '传空串 = 清空，GM 回退通用演出节奏',
+          },
           'worldview': {'type': 'string', 'description': '新世界观背景'},
           'opening': {'type': 'string', 'description': '新开场情境'},
           'narrativeStyle': {'type': 'string', 'description': '新叙事风格'},

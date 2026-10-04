@@ -78,6 +78,19 @@
    系统抽取一个作为既定事实回填；GM 必须照结果演出，不得改写或重复判定
    （防"掷骰作弊"）。
 
+## 核心体验（演出的最高准则）
+
+`settings_json.coreExperience`：用户想获得的**游玩感受**（节奏快慢/爽感来源/
+描写密度/叙事人称/挫败感容忍度），写成对 GM 的正向演出指令。来源三处：
+创建时写作助手**必问**（ask_user 给候选方向）→ create_text_game 必填；
+游玩中用户在设定编辑页手动修改；写作助手 update_text_game 可改。
+
+GM 协议侧的让位（防体验偏差）：静态协议身份段声明「核心体验是演出的最高
+准则，与其它设定或通用规则冲突时以它为准」；原硬编码的回合节奏默认值
+（1-3 段旁白 + 300-600 字）退为**未设定核心体验时**的兜底；动态块把
+「核心体验」小节**置顶渲染**（排在世界观之前），GM 每轮最先读到。
+无工具纠偏通道——体验诉求的修改只走设定编辑页 / update_text_game。
+
 ## 上下文布局（缓存友好）
 
 ```
@@ -296,12 +309,15 @@ update_game_state·create_character）在**成功修改后**追加一条改后�
 ## 创建入口（小说写作助手）
 
 `WritingScenario` 工具：`create_text_game`（**必绑小说**：source_novel_id +
-character_ids 参战名单 + player_character_id 玩家卡，全经归属校验；双行
-落库）/ `list_text_games` / `update_text_game`（参战名单支持
-add/remove_character_ids 增量调整或 character_ids 整体替换，二者互斥，
-玩家角色不可移出）。系统提示词「文字游戏」流程：确定绑定小说（书架小说
-id，或 create_novel 建轻量壳）→ 逐项探讨确认 → create_character 落全部
-角色卡（含玩家卡）→ create_text_game 传 id 引用 → 提示前往「文字游戏」页。
+**coreExperience（核心体验，必问必填）** + character_names 参战名单 +
+player_character_name 玩家卡（按角色名引用，全经归属校验）；双行落库）/
+`list_text_games` / `update_text_game`（参战名单支持 add/remove_character_names
+增量调整或 character_names 整体替换，二者互斥，玩家角色不可移出；可改
+coreExperience，传空串 = 清空、GM 回退通用节奏）。系统提示词「文字游戏」
+流程：确定绑定小说（书架小说 id，或 create_novel 建轻量壳）→ 逐项探讨确认
+（**核心体验必问**：用 ask_user 给候选方向 + 节奏/人称/挫败感确认）→
+create_character 落全部角色卡（含玩家卡）→ create_text_game 传角色名引用 →
+提示前往「文字游戏」页。
 
 ## UI 入口
 
@@ -326,7 +342,8 @@ character_revisions: id / characterId / snapshotJson(改后整卡) /
 ```
 
 settingsJson（瘦身后）：worldview（空 = 回退小说 backgroundSetting）/
-opening / **characterIds（参战名单，引用 characters.id）** /
+opening / **coreExperience（核心体验，GM 演出最高准则）** /
+**characterIds（参战名单，引用 characters.id）** /
 **playerCharacterId（玩家角色卡 id）** / **worldNotes（世界与剧情线条目）** /
 rules[narrativeStyle, contentBoundary, choicesCount(2-4), imagePolicy(auto|manual)]。
 
@@ -339,10 +356,11 @@ rules[narrativeStyle, contentBoundary, choicesCount(2-4), imagePolicy(auto|manua
 ## 手动编辑设定
 
 游玩页/管理页的「查看设定」sheet 底部有「编辑设定」入口，进入全屏编辑页：
-标题 / 世界观 / 开场 / 规则（叙事风格、内容边界、选项数、插图策略）/
-**世界与剧情线（每行一条）** / **参战名单勾选（该小说下的角色卡）+ 玩家
-角色指定**。角色卡内容（性格/近况账本/说话风格/头像）属共享卡，点行进
-角色详情/编辑页维护（近况字段同样每行一条）。保存后游戏中下一轮生效。
+标题 / **核心体验（GM 演出的最高准则）** / 世界观 / 开场 / 规则（叙事风格、
+内容边界、选项数、插图策略）/ **世界与剧情线（每行一条）** / **参战名单
+勾选（该小说下的角色卡）+ 玩家角色指定**。角色卡内容（性格/近况账本/
+说话风格/头像）属共享卡，点行进角色详情/编辑页维护（近况字段同样每行一条）。
+保存后游戏中下一轮生效。
 
 ## 已知边界（v1 接受）
 

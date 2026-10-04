@@ -126,7 +126,11 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i3.Future<Map<String, ({int cached, int total})>>);
 
   @override
-  _i3.Future<List<_i5.ChapterSearchResult>> searchInCachedContent(
+  _i3.Future<
+      ({
+        List<_i5.ChapterSearchResult> results,
+        bool truncated
+      })> searchInCachedContent(
     String? keyword, {
     String? novelUrl,
   }) =>
@@ -136,7 +140,11 @@ class MockIChapterRepository extends _i1.Mock
           [keyword],
           {#novelUrl: novelUrl},
         ),
-        returnValue: _i3.Future<List<_i5.ChapterSearchResult>>.value(
-            <_i5.ChapterSearchResult>[]),
-      ) as _i3.Future<List<_i5.ChapterSearchResult>>);
+        returnValue: _i3.Future<
+            ({
+              List<_i5.ChapterSearchResult> results,
+              bool truncated
+            })>.value((results: <_i5.ChapterSearchResult>[], truncated: false)),
+      ) as _i3
+          .Future<({List<_i5.ChapterSearchResult> results, bool truncated})>);
 }

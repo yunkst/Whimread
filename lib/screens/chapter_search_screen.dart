@@ -99,9 +99,8 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
   /// 构建所有匹配项的高亮显示
   List<Widget> _buildMatchHighlights(ChapterSearchResult result) {
     if (result.matchPositions.isEmpty) {
-      return const [
-        SizedBox.shrink(),
-      ];
+      // 仅标题命中：无正文片段可展示
+      return const [];
     }
 
     return result.matchPositions.map((position) {
@@ -153,7 +152,7 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
 
     // 当searchQuery更新且不为空时，自动开始搜索并设置loading
     // 当searchResultsProvider完成时，自动清除loading
-    ref.listen<AsyncValue<List<ChapterSearchResult>>>(
+    ref.listen<AsyncValue<ChapterSearchResultSet>>(
       searchResultsProvider,
       (previous, next) {
         // 如果搜索完成（无论是成功还是失败），都清除loading状态
@@ -174,7 +173,7 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
               );
             } else if (next.value != null) {
               LoggerService.instance.i(
-                '章节搜索成功，找到 ${next.value!.length} 个结果',
+                '章节搜索成功，找到 ${next.value!.results.length} 个结果',
                 category: LogCategory.ui,
                 tags: ['search', 'chapter', 'success'],
               );
@@ -252,7 +251,7 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
   Widget _buildSearchResults(
     BuildContext context,
     SearchStateData searchState,
-    AsyncValue<List<ChapterSearchResult>> searchResultsAsync,
+    AsyncValue<ChapterSearchResultSet> searchResultsAsync,
     AsyncValue<List<Chapter>> chaptersAsync,
   ) {
     // 显示加载中
@@ -300,6 +299,13 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
                 color: context.appColors.inkSoft.withValues(alpha: 0.8),
               ),
             ),
+            Text(
+              '仅搜索已缓存（读过）的章节',
+              style: AppTypography.metaItalic.copyWith(
+                fontSize: 12,
+                color: context.appColors.inkSoft.withValues(alpha: 0.6),
+              ),
+            ),
           ],
         ),
       );
@@ -312,7 +318,9 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
           child: CircularProgressIndicator(),
         );
       },
-      data: (searchResults) {
+      data: (page) {
+        final searchResults = page.results;
+
         // 无结果
         if (searchResults.isEmpty) {
           return Center(
@@ -341,7 +349,7 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '提示：可以搜索章节标题或内容',
+                  '提示：可搜索章节标题或内容（仅已缓存章节）',
                   style: AppTypography.metaItalic.copyWith(
                     color: context.appColors.inkSoft.withValues(alpha: 0.6),
                   ),
@@ -355,90 +363,134 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
         return chaptersAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           data: (chapters) {
-            return ListView.builder(
-              itemCount: searchResults.length,
-              itemBuilder: (context, index) {
-                final result = searchResults[index];
-                final chapter = _findChapterByUrl(chapters, result.chapterUrl);
+            return Column(
+              children: [
+                // 截断提示：命中章节超过仓储上限时明确告知结果不完整
+                if (page.truncated)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.appColors.paper,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: context.appColors.inkSoft.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      '命中章节较多，仅显示前 ${searchResults.length} 章，'
+                      '可尝试更精确的关键词',
+                      style: AppTypography.metaItalic.copyWith(
+                        fontSize: 13,
+                        color: context.appColors.inkSoft,
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: searchResults.length,
+                    itemBuilder: (context, index) {
+                      final result = searchResults[index];
+                      final chapter =
+                          _findChapterByUrl(chapters, result.chapterUrl);
 
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  elevation: 2,
-                  child: ListTile(
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: result.matchPositions.isNotEmpty
-                              ? TitleHighlight(
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        elevation: 2,
+                        child: ListTile(
+                          title: Row(
+                            children: [
+                              if (result.chapterIndex >= 0) ...[
+                                Text(
+                                  result.chapterIndexText,
+                                  style: AppTypography.metaItalic.copyWith(
+                                    fontSize: 12,
+                                    color: context.appColors.inkSoft,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              Expanded(
+                                child: TitleHighlight(
                                   title: result.chapterTitle,
                                   keywords: result.searchKeywords,
                                   style: AppTypography.novelTitle.copyWith(
                                     fontSize: 16,
                                   ),
+                                ),
+                              ),
+                              // 仅标题命中时无正文片段，用标记说明命中来源
+                              if (result.matchCount > 0)
+                                Text(
+                                  ' (${result.matchCount}处匹配)',
+                                  style: AppTypography.metaItalic.copyWith(
+                                    color: context.appColors.inkSoft,
+                                  ),
                                 )
-                              : Text(
-                                  result.chapterTitle,
-                                  style: AppTypography.novelTitle.copyWith(
-                                    fontSize: 16,
+                              else if (result.titleMatched)
+                                Text(
+                                  ' (标题匹配)',
+                                  style: AppTypography.metaItalic.copyWith(
+                                    color: context.appColors.inkSoft,
                                   ),
                                 ),
-                        ),
-                        if (result.matchCount > 0)
-                          Text(
-                            ' (${result.matchCount}处匹配)',
-                            style: AppTypography.metaItalic.copyWith(
-                              color: context.appColors.inkSoft,
-                            ),
+                            ],
                           ),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 匹配的文本片段列表（带高亮）
-                        ..._buildMatchHighlights(result),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // 匹配的文本片段列表（带高亮）
+                              ..._buildMatchHighlights(result),
 
-                        // 缓存时间
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            '缓存于 ${result.cachedAt.toString().substring(0, 19).replaceAll('-', '/')}',
-                            style: AppTypography.metaItalic.copyWith(
-                              color: context.appColors.inkSoft.withValues(
-                                alpha: 0.8,
+                              // 缓存时间
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  '缓存于 ${result.cachedAt.toString().substring(0, 19).replaceAll('-', '/')}',
+                                  style: AppTypography.metaItalic.copyWith(
+                                    color: context.appColors.inkSoft
+                                        .withValues(alpha: 0.8),
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           ),
+                          onTap: () {
+                            if (chapter != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ReaderScreen(
+                                    novel: widget.novel,
+                                    chapter: chapter,
+                                    chapters: chapters,
+                                    // 传递搜索结果以便精确跳转
+                                    searchResult: result,
+                                  ),
+                                ),
+                              );
+                            } else {
+                              LoggerService.instance.e(
+                                '无法打开章节: Chapter not found for URL: ${result.chapterUrl}',
+                                category: LogCategory.database,
+                                tags: ['chapter', 'open', 'not-found'],
+                              );
+                              ToastUtils.show('无法打开该章节');
+                            }
+                          },
                         ),
-                      ],
-                    ),
-                    onTap: () {
-                      if (chapter != null) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ReaderScreen(
-                              novel: widget.novel,
-                              chapter: chapter,
-                              chapters: chapters,
-                              // 传递搜索结果以便精确跳转
-                              searchResult: result,
-                            ),
-                          ),
-                        );
-                      } else {
-                        LoggerService.instance.e(
-                          '无法打开章节: Chapter not found for URL: ${result.chapterUrl}',
-                          category: LogCategory.database,
-                          tags: ['chapter', 'open', 'not-found'],
-                        );
-                        ToastUtils.show('无法打开该章节');
-                      }
+                      );
                     },
                   ),
-                );
-              },
+                ),
+              ],
             );
           },
           error: (error, stack) {

@@ -70,6 +70,7 @@ void main() {
   Map<String, dynamic> validArgs() => {
         'title': '流云试炼',
         'source_novel_id': novelId,
+        'coreExperience': '紧张刺激的战斗爽文：快节奏直给，第二人称，允许挫折',
         'opening': '山雨欲来，主角立于山门之前',
         // 参战名单缺省 = 绑定小说全部角色卡；仅显式传名时圈定子集
         'player_character_name': '沈砚',
@@ -108,6 +109,7 @@ void main() {
     expect(s.rules.choicesCount, 4);
     expect(s.rules.imagePolicy, GameImagePolicy.manual);
     expect(s.rules.narrativeStyle, '古龙式短句');
+    expect(s.coreExperience, contains('快节奏直给'), reason: '核心体验落库');
   });
 
   test('create_text_game：显式传 character_names 圈定子集', () async {
@@ -137,6 +139,11 @@ void main() {
     final noPlayer = await executor
         .createTextGame(validArgs()..remove('player_character_name'));
     expect(noPlayer, contains('missing_player_character'));
+
+    // 核心体验必填：没问清用户想玩什么体验就不许创建
+    final noExperience = await executor
+        .createTextGame(validArgs()..remove('coreExperience'));
+    expect(noExperience, contains('missing_core_experience'));
 
     // 绑定小说下没有的角色名 → character_not_found
     final unknownName = await executor
@@ -178,6 +185,7 @@ void main() {
       await executor.updateTextGame({
         'game_id': gameId,
         'title': '改名之后',
+        'coreExperience': '烧脑解谜：慢节奏铺陈，第三人称',
         'narrativeStyle': '压迫悬疑',
         'imagePolicy': 'auto',
         'choicesCount': 2,
@@ -187,6 +195,7 @@ void main() {
 
     final game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
     expect(game.title, '改名之后');
+    expect(game.settings.coreExperience, contains('烧脑解谜'));
     expect(game.settings.rules.narrativeStyle, '压迫悬疑');
     expect(game.settings.rules.imagePolicy, GameImagePolicy.auto);
     expect(game.settings.rules.choicesCount, 2);
@@ -194,6 +203,26 @@ void main() {
     expect(game.settings.opening, '山雨欲来，主角立于山门之前');
     expect(game.settings.characterIds, containsAll([npcId, npc2Id]));
     expect(game.sourceNovelId, novelId);
+  });
+
+  test('update_text_game：coreExperience 缺省保持，传空串 = 清空', () async {
+    final created =
+        jsonDecode(await executor.createTextGame(validArgs())) as Map<String, dynamic>;
+    final gameId = created['gameId'] as int;
+
+    // 缺省 = 保持
+    await executor.updateTextGame({'game_id': gameId, 'title': '改标题'});
+    var game =
+        (await container.read(textGameRepositoryProvider).getById(gameId))!;
+    expect(game.settings.coreExperience, contains('快节奏直给'));
+
+    // 显式传空串 = 清空（GM 回退通用节奏），与工具描述一致
+    final out = jsonDecode(
+      await executor.updateTextGame({'game_id': gameId, 'coreExperience': ''}),
+    ) as Map<String, dynamic>;
+    expect(out['success'], true);
+    game = (await container.read(textGameRepositoryProvider).getById(gameId))!;
+    expect(game.settings.coreExperience, '');
   });
 
   test('update_text_game：按角色名替换参战名单与玩家角色', () async {

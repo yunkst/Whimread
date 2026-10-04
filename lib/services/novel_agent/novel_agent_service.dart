@@ -232,7 +232,7 @@ class NovelAgentService {
 
     try {
       final env = await _buildAgentEnv(scenarioId, scenarioContext);
-      if (env == null) return; // _buildAgentEnv 已 emit notConfiguredMessage
+      if (env == null) return; // _buildAgentEnv 已 emit unavailableMessage
 
       try {
         // 构造循环
@@ -343,7 +343,7 @@ class NovelAgentService {
 
     try {
       final env = await _buildAgentEnv(scenarioId, scenarioContext);
-      if (env == null) return; // _buildAgentEnv 已 emit notConfiguredMessage
+      if (env == null) return; // _buildAgentEnv 已 emit unavailableMessage
 
       try {
         final loop = AgentLoop(llm: env.llm, scenario: env.scenario);
@@ -424,10 +424,10 @@ class NovelAgentService {
   /// 构造 Agent 运行所需的 LLM Provider + Scenario。
   ///
   /// sendMessage 与 resumeFromMessages 共用：
-  /// - LLM config 拉取（支持场景级覆盖）
+  /// - LLM 通道构建（托管后端）
   /// - scenario 异步构造（可能需要初始化 Headless WebView）
   ///
-  /// 返回 null 表示 LLM 未配置（已 emit notConfiguredMessage error 事件）。
+  /// 返回 null 表示 AI 服务不可用（已 emit unavailableMessage error 事件）。
   Future<({LlmProvider llm, AgentScenario scenario})?> _buildAgentEnv(
     String scenarioId,
     AgentScenarioContext scenarioContext,
@@ -435,8 +435,8 @@ class NovelAgentService {
     final configService = ref.read(llmConfigServiceProvider);
     final llm = await configService.buildActiveProvider(scenarioId);
     if (llm == null) {
-      _controller.add(const AgentErrorEvent(
-          LlmConfigService.notConfiguredMessage));
+      _controller.add(
+          const AgentErrorEvent(LlmConfigService.unavailableMessage));
       return null;
     }
     final scenario =
