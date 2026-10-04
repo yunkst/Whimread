@@ -426,8 +426,15 @@ class _CatalogEntryCard extends StatelessWidget {
                       style: theme.textTheme.titleSmall),
                 ),
                 if (added)
-                  Icon(Icons.check_circle,
-                      size: 18, color: theme.colorScheme.primary)
+                  // 已就绪：测试入口就在下载卡上（用户要求），▶ 直达测试弹层
+                  IconButton(
+                    tooltip: '测试生图',
+                    icon: Icon(Icons.play_arrow_rounded,
+                        color: theme.colorScheme.primary, size: 28),
+                    onPressed: match.ready!.isEnabled
+                        ? () => ImageGenTestSheet.show(context, match.ready!)
+                        : null,
+                  )
                 else
                   IconButton(
                     tooltip: '下载',

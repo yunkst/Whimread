@@ -3,7 +3,8 @@
 /// 走 [ImageGenerationService] 门面同步生成（与 Agent 出图同链路）：
 /// - 引擎按需自动启动（首次含模型加载，可能数十秒），采样进度经
 ///   onProgress 透传渲染进度条
-/// - 结果是已登记的 mediaId，直接用 [MediaView] 渲染
+/// - 步数 / CFG / 种子 / 负向提示词可在面板上调整（留空 = 模型预设）
+/// - 结果是已登记的 mediaId，固定高度预览 + 点击全屏查看
 /// - 失败（缺 QNN 运行库/包缺文件/引擎未打包）展示结构化错误文案
 library;
 
@@ -37,6 +38,14 @@ class ImageGenTestSheet extends ConsumerStatefulWidget {
 
 class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
   final TextEditingController _promptController = TextEditingController();
+  late final TextEditingController _negativeController =
+      TextEditingController(text: widget.model.negativePrompt);
+  final TextEditingController _seedController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  /// 采样步数与 CFG：默认取模型预设（包内 config.json 合并值），可调
+  late int _steps = widget.model.defaultSteps;
+  late double _cfg = widget.model.defaultCfg;
 
   bool _generating = false;
   double? _progress; // 0..1 采样进度
@@ -47,7 +56,16 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
   @override
   void dispose() {
     _promptController.dispose();
+    _negativeController.dispose();
+    _seedController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  int? get _seed {
+    final text = _seedController.text.trim();
+    if (text.isEmpty) return null; // 留空 = 随机
+    return int.tryParse(text);
   }
 
   Future<void> _generate() async {
@@ -70,6 +88,13 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
         await ref.read(imageGenerationServiceProvider).generate(
               modelName: widget.model.name,
               prompt: prompt,
+              negativePrompt:
+                  _negativeController.text.trim().isEmpty
+                      ? null
+                      : _negativeController.text.trim(),
+              steps: _steps,
+              cfg: _cfg,
+              seed: _seed,
               onProgress: (step, total) {
                 if (!mounted || total <= 0) return;
                 setState(() => _progress = (step / total).clamp(0.0, 1.0));
@@ -91,7 +116,8 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
     }
     setState(() {
       _generating = false;
-      _elapsedLabel = '耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)} s';
+      _elapsedLabel =
+          '耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)} s';
       if (outcome.ok) {
         _resultMediaId = outcome.result!.mediaIds.firstOrNull;
         _progress = 1.0;
@@ -99,6 +125,33 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
         _errorText = outcome.errorJson?['message']?.toString() ?? '生成失败';
       }
     });
+    // 结果在弹层下方，生成完成后滚过去让它立即可见
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  /// 打开全屏查看
+  void _openFullscreen() {
+    final mediaId = _resultMediaId;
+    if (mediaId == null) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        body: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: Center(
+            child: MediaView(mediaId: mediaId, fullscreen: true),
+          ),
+        ),
+      ),
+    ));
   }
 
   @override
@@ -110,6 +163,7 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
     final ratio = widget.model.defaultAspectRatio.isEmpty
         ? '1:1'
         : widget.model.defaultAspectRatio;
+    final screenHeight = MediaQuery.of(context).size.height;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -119,6 +173,7 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
         bottom: 20 + MediaQuery.of(context).viewInsets.bottom,
       ),
       child: SingleChildScrollView(
+        controller: _scrollController,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -139,12 +194,63 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
               controller: _promptController,
               maxLines: 3,
               enabled: !_generating,
-              autofocus: true,
               decoration: const InputDecoration(
                 labelText: '提示词',
                 hintText: '如：1girl, solo, ancient chinese style',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _negativeController,
+              maxLines: 2,
+              enabled: !_generating,
+              decoration: const InputDecoration(
+                labelText: '负向提示词（可留空）',
+                hintText: '如：lowres, bad anatomy',
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            // ===== 出图参数 =====
+            _paramRow(
+              label: '步数',
+              valueLabel: '$_steps',
+              child: Slider(
+                value: _steps.toDouble(),
+                min: 1,
+                max: 50,
+                divisions: 49,
+                label: '$_steps',
+                onChanged: _generating
+                    ? null
+                    : (v) => setState(() => _steps = v.round()),
+              ),
+            ),
+            _paramRow(
+              label: 'CFG',
+              valueLabel: _cfg.toStringAsFixed(1),
+              child: Slider(
+                value: _cfg,
+                min: 1,
+                max: 12,
+                divisions: 44,
+                label: _cfg.toStringAsFixed(1),
+                onChanged: _generating
+                    ? null
+                    : (v) => setState(() => _cfg = v),
+              ),
+            ),
+            TextField(
+              controller: _seedController,
+              enabled: !_generating,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '种子（留空 = 随机）',
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
             ),
             const SizedBox(height: 12),
@@ -172,17 +278,51 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
             ],
             if (_resultMediaId != null) ...[
               const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: MediaView(mediaId: _resultMediaId!),
+              // 固定高度预览：滚到即可见，点击全屏查看原图
+              GestureDetector(
+                onTap: _openFullscreen,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    height: screenHeight * 0.45,
+                    width: double.infinity,
+                    child: MediaView(mediaId: _resultMediaId!),
+                  ),
+                ),
               ),
               const SizedBox(height: 6),
-              Text('生成完成 · ${_elapsedLabel ?? ''}（图片已保存，可在缓存管理中删除）',
-                  style: theme.textTheme.bodySmall),
+              Text(
+                '生成完成 · ${_elapsedLabel ?? ''} · 点击图片全屏查看'
+                '（图片已保存，可在缓存管理中删除）',
+                style: theme.textTheme.bodySmall,
+              ),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _paramRow({
+    required String label,
+    required String valueLabel,
+    required Widget child,
+  }) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        SizedBox(
+            width: 44,
+            child: Text(label,
+                style: theme.textTheme.bodySmall,
+                textAlign: TextAlign.right)),
+        Expanded(child: child),
+        SizedBox(
+            width: 52,
+            child: Text(valueLabel,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(fontWeight: FontWeight.w600))),
+      ],
     );
   }
 }

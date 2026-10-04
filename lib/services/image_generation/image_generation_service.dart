@@ -55,6 +55,12 @@ class ImageGenerationService {
     int count = 1,
     String? aspectRatio,
     void Function(int step, int total)? onProgress,
+
+    /// 手动覆盖出图参数（测试面板用）；null = 沿用模型预设
+    int? steps,
+    double? cfg,
+    int? seed,
+    String? negativePrompt,
   }) async {
     final trimmed = prompt.trim();
     if (trimmed.isEmpty) {
@@ -96,11 +102,14 @@ class ImageGenerationService {
       final result = await backend.submit(ImageGenerationRequest(
         model: model,
         prompt: trimmed,
-        // 负向提示词来自模型预设（用户配置），LLM 不传
-        negativePrompt:
-            model.negativePrompt.isEmpty ? null : model.negativePrompt,
+        // 负向提示词：调用方显式覆盖 → 模型预设（用户配置）
+        negativePrompt: negativePrompt ??
+            (model.negativePrompt.isEmpty ? null : model.negativePrompt),
         count: count.clamp(1, 4),
         aspectRatio: ratio,
+        steps: steps,
+        cfg: cfg,
+        seed: seed,
       ));
       return ImageGenerationOutcome.success(result);
     } on LocalEngineNotReadyException catch (e) {
