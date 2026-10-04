@@ -240,7 +240,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               'AI 特写：为情节生成沉浸式扩写',
               '场景插图：用文字生成配图',
               '段落改写：一键优化文笔',
-              '角色对话：和书中角色直接聊天',
             ],
           ),
         ),
