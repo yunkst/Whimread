@@ -117,6 +117,10 @@ class CharacterExecutor with ToolExecutorHelpers {
     if (aliasesErr != null) return aliasesErr;
     final (avatarMediaId, avatarErr) = parser.nullableString('avatarMediaId');
     if (avatarErr != null) return avatarErr;
+    // 头像媒体 id 必须真实存在才写入（无效 id → 消费端永远停在 miss 占位），
+    // 校验与封面等媒体引用共用同一 helper。
+    final avatarNotFound = await mediaNotFoundError(avatarMediaId);
+    if (avatarNotFound != null) return jsonEncode(avatarNotFound);
 
     final updated = existing.copyWith(
       gender: gender ?? existing.gender,

@@ -6,8 +6,8 @@ import '../media/media_view.dart';
 ///
 /// - mediaId 为空（null 或空串）→ 显示姓名首字符占位（透明背景，由父级
 ///   Container 的 genderColor 提供底色）。
-/// - mediaId 有值 → MediaView(boxFit: cover) 裁剪填满。视频自动循环静音
-///   播放（类似动图），滚出屏幕由 MediaView 的 VisibilityDetector 触发 pause。
+/// - mediaId 有值 → MediaView(boxFit: cover) 裁剪填满；解析不出（miss）时
+///   MediaView 展示"图片不可用"占位（回源已下线，miss 不自愈）。
 ///
 /// 组件填满父级约束，尺寸由调用方决定：详情页用固定尺寸 Container，
 /// 列表用 Expanded。

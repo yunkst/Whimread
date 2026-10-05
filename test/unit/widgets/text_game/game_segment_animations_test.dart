@@ -20,11 +20,6 @@ GameChoices _choices({bool active = true}) => GameChoices(
 
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
-/// Text.rich 文本匹配：带光标时 plain text 末尾含 WidgetSpan 占位符
-///（\uFFFC），find.text 精确匹配会落空，改用谓词包含匹配
-Finder _richText(String s) => find.byWidgetPredicate(
-    (w) => w is Text && (w.textSpan?.toPlainText() ?? '').contains(s));
-
 void main() {
   group('选项组错峰入场', () {
     testWidgets('animate=true：按钮透明度随时间错峰上升，播完回调一次',
@@ -77,74 +72,6 @@ void main() {
       await tester.pumpAndSettle();
       final button = tester.widget<OutlinedButton>(find.byType(OutlinedButton).first);
       expect(button.onPressed, isNull);
-    });
-  });
-
-  group('打字机光标', () {
-    testWidgets('showCaret=true → 光标块出现在文本末尾', (tester) async {
-      await tester.pumpWidget(_host(
-        GameStreamingPartsView(
-          parts: const [
-            GameStreamingPart(
-                toolCallId: 's1', name: 'narrate', text: '夜幕降临。'),
-          ],
-          showCaret: true,
-        ),
-      ));
-      // 光标容器（2.5x15 的小块）在场
-      expect(_richText('夜幕降临。'), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.pump(const Duration(milliseconds: 700)); // 跨过明灭周期
-    });
-
-    testWidgets('showCaret=false → 无光标动画（定稿段静态）', (tester) async {
-      await tester.pumpWidget(_host(
-        GameStreamingPartsView(
-          parts: const [
-            GameStreamingPart(
-                toolCallId: 's1', name: 'narrate', text: '夜幕降临。'),
-          ],
-        ),
-      ));
-      await tester.pumpAndSettle();
-      expect(_richText('夜幕降临。'), findsOneWidget);
-    });
-
-    testWidgets('多段流式：只有最后一段带光标', (tester) async {
-      await tester.pumpWidget(_host(
-        GameStreamingPartsView(
-          parts: const [
-            GameStreamingPart(
-                toolCallId: 's1', name: 'narrate', text: '第一段。'),
-            GameStreamingPart(
-                toolCallId: 's2', name: 'speak', character: '林昭',
-                text: '你来了。'),
-          ],
-          showCaret: true,
-        ),
-      ));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(_richText('第一段。'), findsOneWidget);
-      expect(_richText('你来了。'), findsOneWidget);
-    });
-
-    testWidgets('speak 角色名未流到：按旁白渲染，不出空名字签',
-        (tester) async {
-      await tester.pumpWidget(_host(
-        GameStreamingPartsView(
-          parts: const [
-            GameStreamingPart(
-                toolCallId: 's2', name: 'speak', text: '你来了。'),
-          ],
-          showCaret: true,
-        ),
-      ));
-      // 光标是循环闪烁动画，不能 pumpAndSettle（永不静止）
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 700));
-      expect(find.byType(GameDialogueView), findsNothing);
-      expect(find.byType(GameNarrationView), findsOneWidget);
-      expect(_richText('你来了。'), findsOneWidget);
     });
   });
 

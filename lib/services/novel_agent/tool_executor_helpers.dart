@@ -10,6 +10,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/database_providers.dart';
+import '../../services/media/media_proxy.dart' show mediaProxyProvider;
 import '../logger_service.dart';
 import 'agent_scenario.dart';
 
@@ -66,6 +67,37 @@ mixin ToolExecutorHelpers {
       if (suggestedTool != null) 'suggested_tool': suggestedTool,
       if (suggestedArgs != null) 'suggested_args': suggestedArgs,
     };
+  }
+
+  /// 写入媒体引用（头像 / 封面）前校验 mediaId 真实存在。
+  ///
+  /// 返回 null = 放行（id 存在，或 [mediaId] 为 null/空串——调用方语义通常是
+  /// "未提供"）；非 null = 引导错误 JSON，调用方直接 jsonEncode 返回。
+  ///
+  /// 为什么必须写前校验：mediaId 无效时消费端（MediaView）只能展示占位，
+  /// 而云端回源已下线——miss 不会自愈，用户侧看到的是一个永远转圈的图，
+  /// 且没有任何错误信息。校验把问题在写入点挡下并交回 AI 自助纠正
+  /// （用 create_images 返回的真实 mediaId，或省略该参数保持原值）。
+  ///
+  /// 判据复用 [MediaProxy.getItem]——与 MediaView.resolve 同一套解析，
+  /// 单一真理源；不做文件级检查（文件缺失是本地清理的边缘情况，
+  /// 由 MediaView 的 miss 占位兜住）。
+  Future<Map<String, dynamic>?> mediaNotFoundError(String? mediaId) async {
+    if (mediaId == null || mediaId.trim().isEmpty) return null;
+    final item = await ref.read(mediaProxyProvider).getItem(mediaId);
+    if (item != null) return null;
+    LoggerService.instance.w(
+      '媒体 id 不存在: "$mediaId"',
+      category: LogCategory.ai,
+      tags: ['agent', 'tool', 'media_not_found'],
+    );
+    return guidanceError(
+      'media_not_found',
+      'mediaId "$mediaId" 不存在（media_items 无此记录）。请先用 create_images '
+          '生成图片，使用返回结果里的真实 mediaId（images[].mediaId）；或省略'
+          '该参数保持原值不变。',
+      suggestedTool: 'create_images',
+    );
   }
 
   /// 解析当前小说 URL（从场景上下文中读取 currentNovelId）。

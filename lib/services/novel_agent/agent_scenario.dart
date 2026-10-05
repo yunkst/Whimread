@@ -129,17 +129,6 @@ abstract class AgentScenario {
   /// 工具定义列表（OpenAI Function Calling schema）
   List<Map<String, dynamic>> get tools;
 
-  /// 需要把工具参数流式透出的工具名集合。
-  ///
-  /// 文字游戏场景的 narrate / speak 用参数承载剧情正文，需要打字机流式渲染。
-  /// 命中白名单时，AgentLoop 在 LLM 流式输出工具参数的过程中按节流 emit
-  /// [ToolArgDeltaEvent]（累计文本，宽容解析）。工具的正式执行与其它工具
-  /// 完全一致（等流结束后 jsonDecode 完整参数），本机制只影响显示。
-  ///
-  /// 默认空集由 [AgentScenarioCleanupMixin] 提供（所有场景均混入该 mixin），
-  /// 子类按需 override。
-  Set<String> get streamableToolNames;
-
   /// 终止工具：调用成功后本回合立即结束，AgentLoop 不再请求下一轮。
   ///
   /// 用于「工具本身就是交付物」的场景：文字游戏的 `present_choices` 提交
@@ -155,6 +144,10 @@ abstract class AgentScenario {
   ///   才真正终止
   /// - 默认空集由 [AgentScenarioCleanupMixin] 提供，子类按需 override
   Set<String> get terminalToolNames;
+
+  /// 【后悔重置】可撤回的展示类工具名集合（见 mixin 中的同名成员文档）：
+  /// 回合未展示的草稿类调用，GM 可用 discard_output 撤回。
+  Set<String> get retractableToolNames;
 
   /// 每轮请求尾部注入的动态上下文（缓存友好布局：易变内容放请求尾部，
   /// 静态协议放开头，前缀稳定可命中供应商的 prompt cache）。
@@ -244,11 +237,20 @@ abstract class AgentScenario {
 /// 场景类通过 `with AgentScenarioCleanupMixin implements AgentScenario`
 /// 即可获得 [cleanup] / [setCleanupTask] 的默认实现，无需各自重复字段逻辑。
 mixin AgentScenarioCleanupMixin implements AgentScenario {
-  /// [AgentScenario.streamableToolNames] 的默认实现：不透传任何工具参数。
-  /// 放在 mixin 里让所有 `with AgentScenarioCleanupMixin implements
-  /// AgentScenario` 的场景自动获得默认值，无需逐个实现。
+  /// 【后悔重置】可撤回的展示类工具名集合。
+  ///
+  /// 文字游戏场景声明 narrate / speak / present_choices——这些工具的产出
+  /// 在回合结束前不向玩家展示（回合内容一次性展示），GM 发现写错时可调用
+  /// discard_output 撤回。AgentLoop 据此从本回合消息链中移除对应工具调用
+  /// （LLM 上下文 + 经 [DraftDiscardedEvent] 同步清理 session 的待定稿段）。
+  ///
+  /// 注意：只撤「未展示的草稿」——已执行的既成事实类工具
+  /// （update_game_state / roll_random_event / create_scene_image）不在此列，
+  /// 它们已落库/回填，撤回会造成状态与叙述不一致。
+  ///
+  /// 默认空集由 [AgentScenarioCleanupMixin] 提供，子类按需 override。
   @override
-  Set<String> get streamableToolNames => const {};
+  Set<String> get retractableToolNames => const {};
 
   /// [AgentScenario.terminalToolNames] 的默认实现：没有终止工具，
   /// AgentLoop 行为与引入该机制前完全一致。

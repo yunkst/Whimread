@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.2.0+163
+version: 3.2.1-preview.1+164
 
 repository: https://github.com/yunkst/Whimread
 homepage: https://github.com/yunkst/Whimread
@@ -75,7 +75,6 @@ dependencies:
   # 视频播放
 
   # 可见性检测
-  visibility_detector: ^0.4.0+2
 
   # Agent 图片画廊全屏查看（双指缩放 + PageView）
   photo_view: ^0.15.0

@@ -1502,12 +1502,20 @@ class ScenarioSession {
           }
         }
 
-      case ToolArgDeltaEvent():
-        // No-op：参数级流式（文字游戏 narrate/speak 剧情打字机）由游玩页
-        // 直接订阅 agentService.events 处理（自建 GameSegment 流式模型）。
-        // 通用聊天不渲染参数级流式，正文仍以 ToolCallStart/EndEvent 为准
-        // 进入 _pendingSegments / 消息链。
-        break;
+      case DraftDiscardedEvent e:
+        // 【后悔重置】：清掉被撤回的待定稿段——它们已被 loop 从消息链
+        // 移除，若不清，回合收尾 finalize 时会汇总写回 _agentMessages/DB，
+        // "撤回"失效（玩家会看到作废内容）。
+        if (_pendingSegments.isNotEmpty) {
+          final ids = e.toolCallIds.toSet();
+          _pendingSegments.removeWhere(
+            (s) => s is ToolCallSegment && ids.contains(s.call.id),
+          );
+          _state = _state.copyWith(
+            streamingSegments:
+                List<AgentChatSegment>.unmodifiable(_pendingSegments),
+          );
+        }
 
       case ReasoningDeltaEvent():
         // No-op：思维链仅服务文字游戏"GM 思考"开关（游玩页自订阅事件流），

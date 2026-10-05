@@ -44,13 +44,8 @@ AgentEvent _tagEventWithRunId(AgentEvent event, String runId) {
       ),
     ToolProgressEvent() =>
       ToolProgressEvent(event.toolCallId, event.generatedChars, runId: runId),
-    ToolArgDeltaEvent() => ToolArgDeltaEvent(
-        event.toolCallId,
-        event.name,
-        text: event.text,
-        character: event.character,
-        runId: runId,
-      ),
+    DraftDiscardedEvent() =>
+      DraftDiscardedEvent(event.toolCallIds, runId: runId),
     ReasoningDeltaEvent() =>
       ReasoningDeltaEvent(event.text, runId: runId),
     AgentDoneEvent() => AgentDoneEvent(runId: runId),

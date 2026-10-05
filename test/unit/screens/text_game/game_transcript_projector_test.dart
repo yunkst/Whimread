@@ -2,7 +2,7 @@
 ///
 /// 覆盖：协议到渲染段的完整映射 / 选项激活与已选标记 / 系统文本过滤 /
 /// 生图结果解析 / 概率判定段解析（分支/选中/失败/运行中）/ 空输入兜底 /
-/// 失败工具调用过滤（定稿侧 isFailedToolCall + 直播侧打字机剔除）。
+/// 失败工具调用过滤（定稿侧 isFailedToolCall）。
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -257,14 +257,18 @@ void main() {
       expect(segs.first, isA<GameNarration>());
     });
 
-    test('assistant 裸文本兜底为旁白；空文本跳过', () {
+    test('assistant 裸文本不渲染（正文必须经工具输出）；空文本同样跳过', () {
       final messages = [
         AgentChatMessage.assistant('夜幕降临。'),
         AgentChatMessage.assistant('   '),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('narrate', {'text': '经工具的正文'})),
+        ]),
       ];
       final segs = projectGameTranscript(messages, agentRunning: false);
+      // 只有工具产出的旁白入流；绕过工具的裸文本（含空文本）一律不渲染
       expect(segs, hasLength(1));
-      expect((segs.first as GameNarration).text, '夜幕降临。');
+      expect((segs.first as GameNarration).text, '经工具的正文');
     });
 
     test('system/marker 消息不渲染', () {
@@ -764,62 +768,4 @@ void main() {
     });
   });
 
-  group('打字机直播剔除失败块（dropFailedStoryStreamingPart）', () {
-    const parts = [
-      GameStreamingPart(toolCallId: 'n_ok', name: 'narrate', text: '屋外雨声。'),
-      GameStreamingPart(
-          toolCallId: 'call_1', name: 'speak', text: '这句没演成。', character: '虞欢'),
-    ];
-
-    test('失败的 narrate/speak → 按 toolCallId 剔除对应块', () {
-      final kept = dropFailedStoryStreamingPart(
-        parts,
-        const ToolCallEndEvent(
-            'narrate', 'n_ok', '{"error":"execution_failed"}',
-            success: false),
-      );
-      expect(kept.map((p) => p.toolCallId), ['call_1']);
-    });
-
-    test('真实 id 帧晚到（块仍在 call_N 占位上）→ 按同名占位剔除', () {
-      final kept = dropFailedStoryStreamingPart(
-        parts,
-        const ToolCallEndEvent(
-            'speak', 'call_9zzz', '{"error":"unknown_character"}',
-            success: false),
-      );
-      expect(kept.map((p) => p.toolCallId), ['n_ok']);
-    });
-
-    test('成功工具与非叙事工具失败 → 块原样保留', () {
-      final same = dropFailedStoryStreamingPart(
-        parts,
-        const ToolCallEndEvent('narrate', 'n_ok', '{"ok":true}'),
-      );
-      expect(identical(same, parts), isTrue, reason: '无变化返回原列表省一次重建');
-
-      final imageKept = dropFailedStoryStreamingPart(
-        parts,
-        const ToolCallEndEvent(
-            'create_scene_image', 'n_ok', '{"error":"quota"}',
-            success: false),
-      );
-      expect(imageKept.map((p) => p.toolCallId), ['n_ok', 'call_1']);
-    });
-
-    test('占位兜底不误删真实 id 的同名块', () {
-      const mixed = [
-        GameStreamingPart(
-            toolCallId: 'call_0', name: 'narrate', text: '失败版。'),
-        GameStreamingPart(
-            toolCallId: 'call_x8Kd2', name: 'narrate', text: '重调成功版。'),
-      ];
-      final kept = dropFailedStoryStreamingPart(
-        mixed,
-        const ToolCallEndEvent('narrate', 'call_k9Q1', '{"error":"x"}',
-            success: false),
-      );
-      expect(kept.map((p) => p.toolCallId), ['call_x8Kd2']);
-    });
-  });
 }

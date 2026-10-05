@@ -123,6 +123,10 @@ class NovelNavigationExecutor with ToolExecutorHelpers {
     }
 
     final repo = ref.read(novelRepositoryProvider);
+    // 封面 mediaId 写前校验（与角色头像同一 helper）：无效 id 落库后封面会
+    // 永远停在 MediaView 的 miss 占位。null = 清空封面（合法语义），放行。
+    final mediaNotFound = await mediaNotFoundError(mediaId);
+    if (mediaNotFound != null) return jsonEncode(mediaNotFound);
     final affected = await repo.updateCoverMediaIdById(currentNovelId, mediaId);
     if (affected == 0) {
       return jsonEncode(guidanceError(

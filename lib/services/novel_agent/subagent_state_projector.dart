@@ -49,19 +49,8 @@ class EventTagger {
         generatedChars: final generatedChars
       ) =>
         ToolProgressEvent(toolCallId, generatedChars, runId: runId),
-      ToolArgDeltaEvent(
-        toolCallId: final toolCallId,
-        name: final name,
-        text: final text,
-        character: final character,
-      ) =>
-        ToolArgDeltaEvent(
-          toolCallId,
-          name,
-          text: text,
-          character: character,
-          runId: runId,
-        ),
+      DraftDiscardedEvent(:final toolCallIds) =>
+        DraftDiscardedEvent(toolCallIds, runId: runId),
       ReasoningDeltaEvent(:final text) =>
         ReasoningDeltaEvent(text, runId: runId),
       AgentDoneEvent() => AgentDoneEvent(runId: runId),
@@ -154,9 +143,9 @@ class SubagentStateProjector {
         run.chatState = state.copyWith(streamingSegments: segments);
         return;
 
-      case ToolArgDeltaEvent():
-        // No-op：参数级流式只服务文字游戏剧情打字机（游玩页自订阅事件流
-        // 处理），子 Agent 聊天态不需要；正文仍以 ToolCallStart/End 为准。
+      case DraftDiscardedEvent():
+        // No-op：【后悔重置】仅主 Agent（文字游戏 GM）使用，子 Agent 聊天态
+        // 不需要处理。
         return;
 
       case ReasoningDeltaEvent():

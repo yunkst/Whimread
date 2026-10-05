@@ -234,7 +234,7 @@ void main() {
       final scenario = await buildScenario(gameId);
       expect(scenario, isA<TextGameScenario>());
       expect(scenario.id, ScenarioIds.textGame);
-      expect(scenario.streamableToolNames, {'narrate', 'speak'});
+      expect(scenario.retractableToolNames, {'narrate', 'speak', 'present_choices'});
 
       final block =
           scenario.buildDynamicContext(const AgentScenarioContext());
@@ -261,13 +261,14 @@ void main() {
   });
 
   group('工具面', () {
-    test('7 个回合工具（含生图/状态回写/游戏内建卡/概率判定）', () {
+    test('8 个回合工具（含后悔重置/生图/状态回写/游戏内建卡/概率判定）', () {
       final names =
           _scenario().tools.map((t) => t['function']['name'] as String).toSet();
       expect(names, {
         'narrate',
         'speak',
         'present_choices',
+        'discard_output',
         'create_scene_image',
         'update_game_state',
         'create_character',
@@ -281,6 +282,8 @@ void main() {
           .map((t) => t['function']['name'] as String)
           .toSet();
       expect(names, isNot(contains('create_scene_image')));
+      expect(names, contains('discard_output'),
+          reason: '后悔重置不受插图策略影响，恒在工具面');
       expect(names, contains('roll_random_event'));
     });
   });
@@ -296,11 +299,21 @@ void main() {
       expect(prompt, contains('游戏主持人'));
       expect(prompt, contains('核心体验'), reason: '静态协议声明核心体验为最高准则');
       expect(prompt, contains('以核心体验为准'));
-      expect(prompt, contains('300-600'), reason: '通用节奏保留为核心体验未设定时的兜底');
+      expect(prompt, contains('600-1200'), reason: '通用节奏兜底为完整场景单元（核心体验未设定时）');
       expect(prompt, contains('游戏当前状态'), reason: '指针：设定数据在动态块');
       expect(prompt, contains('narrate'));
       expect(prompt, contains('speak'));
       expect(prompt, contains('present_choices'));
+      expect(prompt, contains('分岔口'),
+          reason: '推进幅度规则：只在真正的分岔口停下来交给玩家');
+      expect(prompt, contains('完整的剧情单元'),
+          reason: '一回合推进一个完整剧情单元，不写一两段就问玩家');
+      expect(prompt, contains('细枝末节'),
+          reason: '关键抉择收尾：拒绝细枝末节式的选项');
+      expect(prompt, contains('discard_output'),
+          reason: '静态协议声明【后悔重置】：发现写错可撤回未展示草稿');
+      expect(prompt, contains('不会展示给玩家'),
+          reason: '一次性展示语义写进协议（撤回对玩家不可见的前提）');
       expect(prompt, contains('create_scene_image'));
       expect(prompt, contains('update_game_state'));
       expect(prompt, contains('create_character'), reason: '游戏内建新角色指引');
@@ -348,7 +361,8 @@ void main() {
       expect(block, contains('《流云志》'));
       expect(block, contains('主动调用 create_scene_image'));
       // 玩家卡不出现在可扮演角色列表
-      expect(block, contains('不要代其行动'));
+      expect(block, contains('重大抉择归玩家'),
+          reason: '过场小动作可由 GM 演绎，不事事停下来问');
       // 世界与剧情线小节
       expect(block, contains('世界与剧情线'));
       expect(block, contains('· 寻母线索指向北境雪城'));

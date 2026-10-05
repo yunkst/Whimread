@@ -11,6 +11,7 @@ import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'chapter_rewrite_entry_card.dart';
 import 'ask_user_card.dart';
 import 'media_gallery_card.dart';
+import 'text_game_entry_card.dart';
 import 'subagent_tool_card.dart';
 import '../../screens/subagent_detail_screen.dart';
 import '../media/media_view.dart';
@@ -505,6 +506,14 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: MediaGalleryCard(data: _mediaGallery!),
             ),
+          // create_text_game 成功时，渲染进入游戏跳转入口
+          if (call.name == 'create_text_game' &&
+              call.status == AgentToolStatus.completed &&
+              _textGameEntry != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: TextGameEntryCard(data: _textGameEntry!),
+            ),
         ],
       ),
     );
@@ -517,6 +526,10 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
   /// 解析工具结果中的媒体画廊数据（图片或视频，缓存）
   MediaGalleryData? get _mediaGallery =>
       parseMediaGallery(widget.call.result);
+
+  /// 解析工具结果中的游戏入口数据（create_text_game 成功时非空）
+  TextGameEntryData? get _textGameEntry =>
+      parseTextGameEntry(widget.call.result);
 
   /// 标题栏第一行文案：始终返回工具名（保持单行简洁，进度单独占第二行）。
   String _runningLabel(AgentToolCall call) {

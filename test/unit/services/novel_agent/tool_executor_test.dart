@@ -158,6 +158,23 @@ void main() {
     ));
   }
 
+  /// 插入一条已生成的媒体记录（media_items）。
+  ///
+  /// 模拟 create_images 生成的媒体已登记到库的状态——写媒体引用类工具
+  /// （update_character 头像 / set_novel_cover 封面）写前校验查的就是这张表。
+  Future<void> insertMediaItem(String mediaId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert('media_items', {
+      'mediaId': mediaId,
+      'kind': 'image',
+      'source': 'ai_generated',
+      'createdAt': now,
+      'lastAccessedAt': now,
+      'localBytes': 1024,
+      'localOnly': 0,
+    });
+  }
+
   /// 插入一条大纲
   Future<void> insertOutline({
     String novelUrl = defaultNovelUrl,
@@ -1220,9 +1237,11 @@ void main() {
       expect(json['suggested_tool'], 'list_characters');
     });
 
-    test('更新 avatarMediaId 写入并可读回', () async {
+    test('更新 avatarMediaId 写入并可读回（媒体记录须先存在）', () async {
       final novelId = await insertNovel();
       await insertCharacter(name: '李云');
+      // create_images 已生成过媒体：media_items 里有真实记录
+      await insertMediaItem('local_123_456');
       final ctx = _ctx(novelId);
 
       final result = await executor.execute(
@@ -1238,6 +1257,118 @@ void main() {
         '李云',
       );
       expect(updated!.avatarMediaId, 'local_123_456');
+    });
+
+    test('avatarMediaId 不存在 → avatar_media_not_found，角色卡不被改写', () async {
+      final novelId = await insertNovel();
+      await insertCharacter(name: '李云');
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'update_character',
+        {'name': '李云', 'avatarMediaId': '不存在_随便编的id'},
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['error'], 'media_not_found');
+      expect(json['message'], contains('create_images'));
+      expect(json['suggested_tool'], 'create_images');
+
+      // 校验失败不落库：角色卡保持无头像，其余字段也不被部分写入
+      final unchanged = await characterRepo.findCharacterByName(
+        defaultNovelUrl,
+        '李云',
+      );
+      expect(unchanged!.avatarMediaId, isNull);
+    });
+
+    test('avatarMediaId 为空串 = 不传（保持原值，不触发校验）', () async {
+      final novelId = await insertNovel();
+      await insertCharacter(name: '李云');
+      await insertMediaItem('local_seed_1');
+      final ctx = _ctx(novelId);
+
+      // 先写入一个真实存在的头像
+      final first = await executor.execute(
+        'update_character',
+        {'name': '李云', 'avatarMediaId': 'local_seed_1'},
+        scenarioContext: ctx,
+      );
+      expect(jsonDecode(first)['success'], true);
+
+      // 传空串（= 不传语义）不触发存在性校验，也不清掉已有头像
+      final second = await executor.execute(
+        'update_character',
+        {'name': '李云', 'avatarMediaId': '', 'description': '补充描述'},
+        scenarioContext: ctx,
+      );
+      expect(jsonDecode(second)['success'], true);
+      final updated = await characterRepo.findCharacterByName(
+        defaultNovelUrl,
+        '李云',
+      );
+      expect(updated!.avatarMediaId, 'local_seed_1');
+      // description 是 appearanceFeatures 的兜底入参（执行器映射）
+      expect(updated.appearanceFeatures, '补充描述');
+    });
+  });
+
+  // ========================================================================
+  // set_novel_cover（封面 mediaId 与头像同一套写前校验）
+  // ========================================================================
+  group('set_novel_cover', () {
+    test('mediaId 不存在 → media_not_found，封面不被改写', () async {
+      final novelId = await insertNovel();
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'set_novel_cover',
+        {'mediaId': '编一个不存在的id'},
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['error'], 'media_not_found');
+      expect(json['suggested_tool'], 'create_images');
+
+      final novel = await novelRepo.getNovelByUrl(defaultNovelUrl);
+      expect(novel!.coverMediaId, isNull);
+    });
+
+    test('mediaId 存在 → 成功写入封面', () async {
+      final novelId = await insertNovel();
+      await insertMediaItem('cover_001');
+      final ctx = _ctx(novelId);
+
+      final result = await executor.execute(
+        'set_novel_cover',
+        {'mediaId': 'cover_001'},
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['success'], true);
+      expect(json['coverMediaId'], 'cover_001');
+
+      final novel = await novelRepo.getNovelByUrl(defaultNovelUrl);
+      expect(novel!.coverMediaId, 'cover_001');
+    });
+
+    test('mediaId 缺省 → 清空封面（合法语义，不触发校验）', () async {
+      final novelId = await insertNovel();
+      await insertMediaItem('cover_002');
+      final ctx = _ctx(novelId);
+      await executor.execute('set_novel_cover', {'mediaId': 'cover_002'},
+          scenarioContext: ctx);
+
+      final result = await executor.execute(
+        'set_novel_cover',
+        const {},
+        scenarioContext: ctx,
+      );
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['success'], true);
+      expect(json['cleared'], true);
+      final novel = await novelRepo.getNovelByUrl(defaultNovelUrl);
+      expect(novel!.coverMediaId, isNull);
     });
   });
 

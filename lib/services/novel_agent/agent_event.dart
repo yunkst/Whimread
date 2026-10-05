@@ -100,33 +100,6 @@ class ToolProgressEvent extends AgentEvent {
   const ToolProgressEvent(this.toolCallId, this.generatedChars, {super.runId});
 }
 
-/// 工具参数流式增量（白名单工具）
-///
-/// 文字游戏场景的 narrate / speak 以参数承载剧情正文。为保留打字机体验，
-/// AgentLoop 在 LLM 流式输出工具参数的过程中，对场景声明的
-/// [AgentScenario.streamableToolNames] 命中的工具按节流 emit 本事件
-/// （参数聚合串经 ToolArgTextExtractor 宽容解出 text / character）。
-///
-/// [text] 是**累计**文本（非增量），UI 整段替换渲染；[character] 为
-/// speak 的角色名（可能尚未流完，null 表示未知）。
-/// 注意：参数仍在流式中途时 [toolCallId] 可能是 'call_N' 占位
-/// （真实 id 帧未到达，N 为流内 index），消费方以 ToolCallStart/EndEvent
-/// 的完整参数为准，本事件仅用于显示。
-class ToolArgDeltaEvent extends AgentEvent {
-  final String toolCallId;
-  final String name;
-  final String text;
-  final String? character;
-
-  const ToolArgDeltaEvent(
-    this.toolCallId,
-    this.name, {
-    required this.text,
-    this.character,
-    super.runId,
-  });
-}
-
 /// 思维链增量（仅 UI 展示用）
 ///
 /// 模型的 reasoning_content（DeepSeek thinking 等扩展）此前在 provider 层
@@ -225,6 +198,22 @@ class RetryEvent extends AgentEvent {
     required this.emittedChars,
     super.runId,
   });
+}
+
+/// 【后悔重置】草稿撤回事件
+///
+/// 文字游戏 GM 在回合中发现写错，调用 discard_output 撤回本回合尚未展示
+/// 给玩家的展示类工具调用（narrate/speak/present_choices）时由 AgentLoop
+/// emit。消费方职责：
+/// - ScenarioSession：从 _pendingSegments 中移除对应 ToolCallSegment——
+///   否则回合收尾（AgentDone → finalize）时这些已作废的调用会被汇总写回
+///   消息链落库，"撤回"失效。
+/// - 游玩页无感：回合内容本就等 AgentDone 一次性展示，撤回发生在展示前。
+class DraftDiscardedEvent extends AgentEvent {
+  /// 被撤回的展示类工具调用 id（时间序）
+  final List<String> toolCallIds;
+
+  const DraftDiscardedEvent(this.toolCallIds, {super.runId});
 }
 
 /// 上下文压缩事件

@@ -2,8 +2,9 @@
 ///
 /// 结构：
 /// - AppBar：游戏标题 + 查看设定 + 菜单（AI 配置 / 删除游戏）
-/// - 剧情流 ListView：定稿投影（transcript）+ 运行中段（pendingSegments）
-///   + 打字机内容（streamingParts），自动滚到底部
+/// - 剧情流 ListView：定稿投影（transcript）。**回合内容一次性展示**——
+///   运行中不出现半成品内容（GM 可用【后悔重置】撤回重写），收尾时整段
+///   进入列表并自动滚到底部
 /// - 选项组随剧情流内联：回合结束的定稿组紧跟在剧情之后，可点可回溯，
 ///   不常驻输入区上方（常驻会长期压掉阅读空间）
 /// - 底部：运行状态条（推进中/停止）→ 自由输入
@@ -44,7 +45,6 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
   final _focusNode = FocusNode();
 
   int _lastItemCount = 0;
-  int _lastStreamingLen = 0;
 
   /// 上一帧键盘高度（弹出时剧情流继续贴底）
   double _lastViewInset = 0;
@@ -93,17 +93,13 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
     super.dispose();
   }
 
-  /// 跟随底部：条目数增长（新剧情/新选项）或流式文字变长（打字机）
-  /// 都触发。打字机期间是"单条目内部文字增长"，只看 itemCount 会完全
-  /// 漏掉——输出越长玩家越看不到底。
-  void _maybeScrollToBottom(int itemCount, int streamingLen) {
-    if (itemCount == _lastItemCount && streamingLen == _lastStreamingLen) {
-      return;
-    }
-    final grew =
-        itemCount > _lastItemCount || streamingLen > _lastStreamingLen;
+  /// 跟随底部：条目数增长（新剧情/新选项/回合一次性展开）时触发。
+  /// 回合内容收尾时整段进入 transcript（itemCount 一次跳变），一次
+  /// 跟随即把整回合送到视野内；GM 思维链增长不驱动（避免频繁小抖动）。
+  void _maybeScrollToBottom(int itemCount) {
+    if (itemCount == _lastItemCount) return;
+    final grew = itemCount > _lastItemCount;
     _lastItemCount = itemCount;
-    _lastStreamingLen = streamingLen;
     if (!grew) return;
     _followBottom();
   }
@@ -141,20 +137,14 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
       );
     }
 
-    // 剧情条目：定稿 + 运行中段 + 打字机（Listenable builder 由整体重建驱动）
+    // 剧情条目：仅定稿投影。回合内容在收尾（AgentDone）时一次性进入
+    // transcript——运行期间这里没有半成品内容，进度感由 GM 幕后 +
+    // 底部「剧情推进中」状态条承担（Listenable builder 由整体重建驱动）
     final showGmThinking = ref.watch(gmThinkingVisibleProvider);
     _seedAnimationBookkeeping(state.transcript);
     final items = <Widget>[
       for (var i = 0; i < state.transcript.length; i++)
         _buildSegment(context, state.transcript[i], i),
-      for (final seg in state.pendingSegments)
-        _buildSegment(context, seg, -1),
-      if (state.streamingParts.isNotEmpty)
-        GameStreamingPartsView(
-          parts: state.streamingParts,
-          avatarByName: state.avatarByName,
-          showCaret: state.agentRunning,
-        ),
       if (showGmThinking &&
           (state.gmThinking.isNotEmpty || state.gmAction != null))
         _GmBehindTheScenesView(
@@ -163,13 +153,7 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
         ),
       const SizedBox(height: 8),
     ];
-    // 流式内容长度：打字机文字 + 思维链增长都应触发跟随
-    final streamingLen = state.streamingParts.fold<int>(
-          0,
-          (sum, p) => sum + p.text.length,
-        ) +
-        state.gmThinking.length;
-    _maybeScrollToBottom(items.length, streamingLen);
+    _maybeScrollToBottom(items.length);
 
     // 键盘弹出：Scaffold 收缩可视区，剧情流末条会被顶出屏幕。
     // 跟随状态下继续贴底（与内容增长同一路径），回看历史时不打断
@@ -539,7 +523,6 @@ class _TextGamePlayScreenState extends ConsumerState<TextGamePlayScreen> {
       _settledChoiceIds.clear();
       _seededTranscriptLen = -1;
       _lastItemCount = 0;
-      _lastStreamingLen = 0;
     });
     await ref
         .read(textGamePlayControllerProvider(widget.gameId).notifier)

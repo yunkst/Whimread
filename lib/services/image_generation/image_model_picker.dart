@@ -2,7 +2,7 @@
 ///
 /// 「显式 modelName → 默认模型 → 第一个启用模型」的三级回退逻辑，
 /// 原 media_executor.createImages 私有实现，文字游戏异步生图
-/// （TextGameImageService）需要同款行为，故抽取为共享函数。
+/// 文字游戏场景生图（create_scene_image）需要同款行为，故抽取为共享函数。
 /// 错误以可直接返回给 LLM 的 JSON Map 表达（与工具错误约定一致）。
 library;
 

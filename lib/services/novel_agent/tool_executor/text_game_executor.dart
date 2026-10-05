@@ -208,7 +208,8 @@ class TextGameExecutor {
       'gameTitle': title,
       'message': '游戏「$title」已创建（绑定小说「${novel.title}」，'
           '参战角色 ${characterIds.length} 名）。'
-          '请告知用户：到底部「文字游戏」页即可开始游玩。',
+          '请告知用户：点击下方「进入文字游戏」按钮即可直接开始游玩；'
+          '游戏也会出现在底部「文字游戏」页。',
     });
   }
 

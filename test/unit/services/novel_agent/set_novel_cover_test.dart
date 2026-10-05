@@ -52,7 +52,22 @@ void main() {
   Map<String, dynamic> decode(String raw) =>
       jsonDecode(raw) as Map<String, dynamic>;
 
-  test('成功设置封面 mediaId', () async {
+  /// 播种一条已生成的媒体记录（封面 mediaId 写前校验查 media_items 表）
+  Future<void> insertMediaItem(String mediaId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert('media_items', {
+      'mediaId': mediaId,
+      'kind': 'image',
+      'source': 'ai_generated',
+      'createdAt': now,
+      'lastAccessedAt': now,
+      'localBytes': 1024,
+      'localOnly': 0,
+    });
+  }
+
+  test('成功设置封面 mediaId（媒体记录须先存在）', () async {
+    await insertMediaItem('cover-1');
     final ctx = AgentScenarioContext(currentNovelId: novelId);
     final json = decode(await executor.execute(
       'set_novel_cover',
@@ -66,6 +81,19 @@ void main() {
 
     final novel = await novelRepo.getNovelById(novelId);
     expect(novel?.coverMediaId, 'cover-1');
+  });
+
+  test('mediaId 不存在 → media_not_found，封面不被改写', () async {
+    final ctx = AgentScenarioContext(currentNovelId: novelId);
+    final json = decode(await executor.execute(
+      'set_novel_cover',
+      {'mediaId': '不存在的封面id'},
+      scenarioContext: ctx,
+    ));
+
+    expect(json['error'], 'media_not_found');
+    final novel = await novelRepo.getNovelById(novelId);
+    expect(novel?.coverMediaId, isNull);
   });
 
   test('mediaId 传 null 清空封面', () async {

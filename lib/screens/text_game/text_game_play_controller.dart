@@ -1,8 +1,9 @@
 /// 文字游戏游玩页 — 状态与控制器
 ///
 /// 独立状态层（不依赖 AgentChatState 的段模型）：控制器把 ScenarioSession
-/// 的会话状态经游戏投影器重建为 [GameSegment] 剧情流，并把 ToolArgDeltaEvent
-/// 事件流（narrate/speak 参数打字机）维护为 [GameStreamingPart]。
+/// 的会话状态经游戏投影器重建为 [GameSegment] 剧情流。剧情**一次性展示**
+/// （回合收尾时消息链汇总才进入 transcript），运行中只维护 GM 幕后进度
+/// （思维链 + 工具动作标签）。
 ///
 /// 引擎对接（对 UI 不可见）：
 /// - 打开游戏 → switchSession(text_game, game.chatSessionId)（同刻只玩一局，
@@ -18,13 +19,11 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../models/agent_chat_message.dart';
 import '../../models/text_game.dart';
 import '../../services/novel_agent/agent_event.dart';
 import '../../services/novel_agent/agent_scenario.dart';
 import '../../services/novel_agent/scenarios/text_game_scenario.dart'
     show kGameProtocolNudge;
-import '../../core/providers/agent_chat_state.dart';
 import '../../core/providers/database_providers.dart'
     show
         characterRepositoryProvider,
@@ -42,20 +41,19 @@ class TextGamePlayState {
   /// 当前游戏（加载失败为 null + error 非空）
   final TextGame? game;
 
-  /// 定稿剧情流（消息链投影）
+  /// 剧情流（消息链投影）。
+  ///
+  /// 回合内容**一次性展示**：session 只在回合收尾（AgentDone）时把产出
+  /// 汇总进消息链，运行期间本列表不动——游玩页运行中只显示进度
+  /// （运行状态条 + GM 幕后），不出现半成品内容，也没有打字机双路径。
   final List<GameSegment> transcript;
-
-  /// 运行中回合的非流式段（生图占位 / 选项预览），拼在 transcript 尾部
-  final List<GameSegment> pendingSegments;
-
-  /// 打字机中的流式内容（narrate/speak 参数增量）
-  final List<GameStreamingPart> streamingParts;
 
   /// GM 思维链（当前轮，实时累积；"GM 思考"开关开启时渲染。
   /// 思维链不落库，回合结束/动作开始即清空）
   final String gmThinking;
 
-  /// GM 当前幕后动作（如"正在描写旁白…"，来自工具调用开始事件）
+  /// GM 当前幕后动作（如"正在描写旁白…"，来自工具调用开始事件）——
+  /// 运行中的进度感来源，让玩家知道剧情在正常推进而非卡死
   final String? gmAction;
 
   /// 角色名/别名 → 头像 mediaId（共享角色卡，进页加载一次；
@@ -69,8 +67,6 @@ class TextGamePlayState {
   const TextGamePlayState({
     this.game,
     this.transcript = const [],
-    this.pendingSegments = const [],
-    this.streamingParts = const [],
     this.gmThinking = '',
     this.gmAction,
     this.avatarByName = const {},
@@ -82,18 +78,13 @@ class TextGamePlayState {
   /// 是否为从未开始的新游戏（显示扉页/「开始游戏」入口）。
   /// 首回合失败后也保持扉页（错误横幅叠加显示，开始按钮兼作重试入口），
   /// 不能因 error 非空就掉进一片空白的剧情列表。
+  /// 运行中不算扉页（运行状态条/幕后在推进，首回合内容收尾后一并出现）。
   bool get isEmptyGame =>
-      !initializing &&
-      !agentRunning &&
-      transcript.isEmpty &&
-      pendingSegments.isEmpty &&
-      streamingParts.isEmpty;
+      !initializing && !agentRunning && transcript.isEmpty;
 
   TextGamePlayState copyWith({
     TextGame? game,
     List<GameSegment>? transcript,
-    List<GameSegment>? pendingSegments,
-    List<GameStreamingPart>? streamingParts,
     String? gmThinking,
     String? gmAction,
     bool clearGmAction = false,
@@ -106,8 +97,6 @@ class TextGamePlayState {
     return TextGamePlayState(
       game: game ?? this.game,
       transcript: transcript ?? this.transcript,
-      pendingSegments: pendingSegments ?? this.pendingSegments,
-      streamingParts: streamingParts ?? this.streamingParts,
       gmThinking: gmThinking ?? this.gmThinking,
       gmAction: clearGmAction ? null : (gmAction ?? this.gmAction),
       avatarByName: avatarByName ?? this.avatarByName,
@@ -175,7 +164,9 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
     if (_disposed) return;
     state = state.copyWith(avatarByName: avatars);
 
-    // 订阅打字机事件流（仅 ToolArgDeltaEvent；本局 runId 打标过滤）
+    // 订阅 GM 幕后事件（思维链 / 工具动作；本局 runId 打标过滤）。
+    // 剧情内容不走事件流——回合产出经消息链在回合收尾时一次性进入
+    // transcript（见 TextGamePlayState.transcript 文档）
     _eventSub = _ref
         .read(novelAgentServiceProvider)
         .events
@@ -209,14 +200,15 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
 
   // ===== 事件流 =====
 
+  /// GM 幕后事件（运行进度感）：思维链实时累积 + 工具动作标签。
+  /// 剧情正文不在此流里——回合内容一次性展示（见 state.transcript）。
   void _handleAgentEvent(AgentEvent event) {
     if (_disposed) return;
-    // 回合级网络重试：失败轮已流出的打字机内容整体作废（重试会重新输出
-    // 完整版）。新轮 toolCallId 与失败轮不同，不清空会拼接出重复剧情。
     if (event is RetryEvent) {
+      // 回合级网络重试：失败轮作废，思维链/动作标签一并清掉
+      // （重试后 GM 会从头重写本回合）
       if (_runId != null && event.runId == _runId) {
         state = state.copyWith(
-          streamingParts: const [],
           gmThinking: '',
           gmAction: null,
           clearGmAction: true,
@@ -242,51 +234,7 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
           gmAction: _actionLabelFor(event),
         );
       }
-      return;
     }
-    // 工具失败告终：narrate/speak 的打字机块立即剔除——台词在参数流式阶段
-    // 已经打出，而失败要等工具执行才知道；定稿投影（isFailedToolCall）要等
-    // 回合结束才接管，不剔的话玩家会看到失败台词先出现、结束时又消失
-    if (event is ToolCallEndEvent) {
-      if (_runId == null || event.runId != _runId) return;
-      final kept = dropFailedStoryStreamingPart(state.streamingParts, event);
-      if (!identical(kept, state.streamingParts)) {
-        state = state.copyWith(streamingParts: kept);
-      }
-      return;
-    }
-    if (event is! ToolArgDeltaEvent) return;
-    // 只认本局打标事件（游戏运行统一 runId=sessionId）
-    if (_runId == null || event.runId != _runId) return;
-
-    final parts = [...state.streamingParts];
-    var idx = parts.indexWhere((p) => p.toolCallId == event.toolCallId);
-    if (idx < 0) {
-      // 流式参数期间 toolCallId 可能从占位 call_N 切为真实 id（真实 id 帧
-      // 后到）：同名且累计文本延续的占位块是同一次调用，原位接管——否则
-      // 会留下"冻结的半截块 + 继续增长的新块"
-      for (var i = parts.length - 1; i >= 0; i--) {
-        final p = parts[i];
-        if (p.name == event.name &&
-            p.toolCallId.startsWith('call_') &&
-            event.text.startsWith(p.text)) {
-          idx = i;
-          break;
-        }
-      }
-    }
-    final part = GameStreamingPart(
-      toolCallId: event.toolCallId,
-      name: event.name,
-      text: event.text,
-      character: event.character,
-    );
-    if (idx >= 0) {
-      parts[idx] = part;
-    } else {
-      parts.add(part);
-    }
-    state = state.copyWith(streamingParts: parts);
   }
 
   /// 工具调用开始 → 幕后动作文案（null = 该工具不展示动作）
@@ -325,11 +273,9 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
       agentRunning: chatState.isLoading,
       avatarByName: state.avatarByName,
     );
-    final pending = _projectPendingSegments(chatState);
 
     state = state.copyWith(
       transcript: transcript,
-      pendingSegments: pending,
       agentRunning: chatState.isLoading,
       error: chatState.error,
       // error 传 null 是"会话无错误"，需清掉本地旧值（copyWith 的
@@ -337,13 +283,10 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
       clearError: chatState.error == null,
     );
 
-    // 回合结束：清空打字机内容与 GM 幕后（定稿链已包含全部内容）
+    // 回合结束：清空 GM 幕后（定稿链已包含全部内容）
     if (!chatState.isLoading &&
-        (state.streamingParts.isNotEmpty ||
-            state.gmThinking.isNotEmpty ||
-            state.gmAction != null)) {
+        (state.gmThinking.isNotEmpty || state.gmAction != null)) {
       state = state.copyWith(
-        streamingParts: const [],
         gmThinking: '',
         gmAction: null,
         clearGmAction: true,
@@ -404,52 +347,6 @@ class TextGamePlayController extends StateNotifier<TextGamePlayState> {
       return;
     }
     _reproject();
-  }
-
-  /// 运行中回合的非流式段：create_scene_image（生图占位）与已完成的
-  /// present_choices（选项预览）。narrate/speak 的工具段跳过——其内容
-  /// 经 ToolArgDeltaEvent 走 [GameStreamingPart] 打字机。
-  List<GameSegment> _projectPendingSegments(AgentChatState chatState) {
-    final result = <GameSegment>[];
-    for (final seg in chatState.streamingSegments) {
-      if (seg is! ToolCallSegment) continue;
-      final call = seg.call;
-      switch (call.name) {
-        case 'create_scene_image':
-          final completed = call.status != AgentToolStatus.running;
-          result.add(GameSceneImage(
-            toolCallId: call.id,
-            prompt: call.arguments['prompt']?.toString() ?? '',
-            toolResultJson: completed ? call.result : null,
-            toolCompleted: completed,
-          ));
-        case 'present_choices':
-          if (call.status == AgentToolStatus.completed) {
-            final choices = parseGameChoices(call.arguments['choices']);
-            if (choices.isNotEmpty) {
-              result.add(GameChoices(
-                choices: choices,
-                active: false, // 回合结束后由定稿投影接管激活
-                toolCallId: call.id,
-              ));
-            }
-          }
-        case 'roll_random_event':
-          // live=true：结果一出即播揭晓动画（不等回合结束）；未出结果时
-          // 呈轮转等待态。回合 finalize 后由定稿投影接管（live=false）
-          final completed = call.status != AgentToolStatus.running;
-          result.add(rollDiceRollSegment(
-            call.id,
-            call.arguments,
-            completed: completed,
-            resultJson: call.result,
-            live: true,
-          ));
-        default:
-          break;
-      }
-    }
-    return result;
   }
 
   // ===== 玩家操作 =====

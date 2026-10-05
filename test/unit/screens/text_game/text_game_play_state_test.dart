@@ -41,16 +41,6 @@ void main() {
         isFalse,
         reason: '已有定稿剧情',
       );
-      expect(
-        const TextGamePlayState(
-          initializing: false,
-          pendingSegments: [
-            GameSceneImage(toolCallId: 'tc1', prompt: '城门口'),
-          ],
-        ).isEmptyGame,
-        isFalse,
-        reason: '运行中生图占位也算内容',
-      );
     });
   });
 }

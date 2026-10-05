@@ -2,7 +2,7 @@
 ///
 /// 全新独立组件（不 import widgets/agent_chat/）：旁白（阅读器风格段落）、
 /// 台词（角色名 + 对白排版）、场景插图（MediaView/占位/错误）、选项按钮、
-/// 玩家输入、打字机流式内容。视觉走 Theme.colorScheme，跟随应用主题。
+/// 玩家输入。视觉走 Theme.colorScheme，跟随应用主题。
 library;
 
 import 'dart:math' as math;
@@ -17,10 +17,7 @@ import '../media/media_view.dart';
 class GameNarrationView extends StatelessWidget {
   final String text;
 
-  /// 末尾是否带打字机光标（仅流式输出的最后一段）
-  final bool showCaret;
-
-  const GameNarrationView({super.key, required this.text, this.showCaret = false});
+  const GameNarrationView({super.key, required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -35,13 +32,6 @@ class GameNarrationView extends StatelessWidget {
         TextSpan(
           text: text,
           style: style,
-          children: [
-            if (showCaret)
-              WidgetSpan(
-                alignment: PlaceholderAlignment.middle,
-                child: _TypewriterCaret(color: theme.colorScheme.primary),
-              ),
-          ],
         ),
       ),
     );
@@ -60,15 +50,11 @@ class GameDialogueView extends StatelessWidget {
   /// 角色头像 mediaId（null = 无头像，只渲染彩色名标签）
   final String? avatarMediaId;
 
-  /// 末尾是否带打字机光标（仅流式输出的最后一段）
-  final bool showCaret;
-
   const GameDialogueView({
     super.key,
     required this.character,
     required this.text,
     this.avatarMediaId,
-    this.showCaret = false,
   });
 
   Color _nameColor(BuildContext context) {
@@ -148,62 +134,11 @@ class GameDialogueView extends StatelessWidget {
                     height: 1.6,
                     color: theme.colorScheme.onSurface,
                   ),
-                  children: [
-                    if (showCaret)
-                      WidgetSpan(
-                        alignment: PlaceholderAlignment.middle,
-                        child:
-                            _TypewriterCaret(color: theme.colorScheme.primary),
-                      ),
-                  ],
                 ),
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// 打字机光标（流式输出末尾的闪烁竖块，"GM 正在落笔"的临场感）
-class _TypewriterCaret extends StatefulWidget {
-  final Color color;
-
-  const _TypewriterCaret({required this.color});
-
-  @override
-  State<_TypewriterCaret> createState() => _TypewriterCaretState();
-}
-
-class _TypewriterCaretState extends State<_TypewriterCaret>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1000),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      // 硬闪烁（前半个周期亮、后半个周期灭），比渐隐更像终端光标
-      opacity: Tween<double>(begin: 1, end: 0).animate(
-        CurvedAnimation(parent: _ctrl, curve: const Interval(0, 0.5)),
-      ),
-      child: Container(
-        width: 2.5,
-        height: 15,
-        margin: const EdgeInsets.only(left: 3),
-        decoration: BoxDecoration(
-          color: widget.color,
-          borderRadius: BorderRadius.circular(1),
-        ),
       ),
     );
   }
@@ -1043,51 +978,6 @@ class _GameDiceRollViewState extends State<GameDiceRollView>
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 打字机流式内容（运行中：旁白/台词按已到达文本渲染，淡入）
-///
-/// [showCaret] 时在最后一段末尾带闪烁光标（GM 落笔中的临场感）；
-/// 前序已完成段不带。
-class GameStreamingPartsView extends StatelessWidget {
-  final List<GameStreamingPart> parts;
-
-  /// 角色名/别名 → 头像 mediaId（台词流式段与定稿段一致带头像）
-  final Map<String, String> avatarByName;
-
-  /// 最后一段末尾是否带打字机光标
-  final bool showCaret;
-
-  const GameStreamingPartsView({
-    super.key,
-    required this.parts,
-    this.avatarByName = const {},
-    this.showCaret = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final (i, p) in parts.indexed)
-          // 角色名尚未流到（speak 的 character 参数在 text 之后或更晚到达）
-          // 时先按旁白渲染，避免出现只有空名字签的台词行
-          if (p.name == 'speak' && (p.character?.trim().isNotEmpty ?? false))
-            GameDialogueView(
-              character: p.character!.trim(),
-              text: p.text,
-              avatarMediaId: avatarByName[p.character!.trim()],
-              showCaret: showCaret && i == parts.length - 1,
-            )
-          else
-            GameNarrationView(
-              text: p.text,
-              showCaret: showCaret && i == parts.length - 1,
-            ),
-      ],
     );
   }
 }

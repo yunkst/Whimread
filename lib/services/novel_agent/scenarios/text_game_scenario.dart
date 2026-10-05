@@ -27,8 +27,9 @@
 ///   （[terminalToolNames]），调用成功 AgentLoop 即结束本回合，不逼 GM 续写
 /// - 剧情内容禁止裸文本输出；onNoToolCalls 注入一次协议提醒
 ///
-/// narrate/speak 在 [streamableToolNames] 白名单中：AgentLoop 把参数流式
-/// 过程透传为 ToolArgDeltaEvent，游玩页据此做打字机渲染。
+/// 回合内容**一次性展示**：GM 写作期间玩家只看到进度（运行状态条 + GM
+/// 幕后），本回合产出在回合收尾时才进入消息链进入剧情流——因此 GM 写错可
+/// 用【后悔重置】（discard_output，loop 层拦截）撤回未展示的草稿重来。
 library;
 
 import 'dart:convert';
@@ -211,20 +212,26 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
   @override
   String get displayName => '文字游戏';
 
-  @override
-  Set<String> get streamableToolNames => const {'narrate', 'speak'};
-
   /// present_choices 是交付型终止工具：选项提交给玩家即回合结束。
   /// 不终止的话 AgentLoop 会继续请求下一轮，onNoToolCalls 的协议提醒会
   /// 逼着 GM 把剧情重演一遍（玩家端看到重复内容 + 第二组选项）。
   @override
   Set<String> get terminalToolNames => const {'present_choices'};
 
+  /// 【后悔重置】可撤回的展示类工具：旁白/台词/选项。
+  /// 回合内容等 AgentDone 才一次性展示，GM 发现自己写错时可用
+  /// discard_output 撤回这些草稿重来——玩家从未看到过。状态类工具
+  /// （update_game_state / roll_random_event / create_scene_image）已落库/
+  /// 回填，不在可撤集合（撤叙述不撤账本会造成不一致）。
+  @override
+  Set<String> get retractableToolNames => const {'narrate', 'speak', 'present_choices'};
+
   @override
   List<Map<String, dynamic>> get tools => [
         narrateToolDefinition,
         speakToolDefinition,
         presentChoicesToolDefinition,
+        discardOutputToolDefinition,
         // manual 策略不注入生图工具（工具面硬约束，agent 无法主动调用）；
         // 玩家手动生成走游玩页输入指令。auto 时工具面含 create_scene_image。
         if (game.settings.rules.imagePolicy == GameImagePolicy.auto)
@@ -264,17 +271,27 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         'narrate(text=...)；角色台词用 speak(character=..., text=...)，'
         'text 只写角色说的话本身（含必要的语气词/称呼），不要把动作神态'
         '塞进台词。禁止不调用工具直接输出正文。');
-    buf.writeln('2. text 参数放在所有参数的最后输出（利于玩家端流式渲染）。');
-    buf.writeln('3. 每段旁白、每句台词单独调用一次工具；一回合可连续调用多次。');
-    buf.writeln('4. 单回合节奏与篇幅以「游戏当前状态」块中的核心体验为准'
+    buf.writeln('2. 每段旁白、每句台词单独调用一次工具；一回合可连续调用多次。');
+    buf.writeln('3. 推进幅度：一个回合要把一个**完整的剧情单元**写完再收尾——'
+        '一个场景从铺垫到收束（NPC 交锋的若干轮对话、动作、局势变化），'
+        '不要写一两段就停下来问玩家。NPC 之间的交流、环境的演变，以及玩家'
+        '角色**不影响走向的过场动作与简短应答**（"你随手接过茶盏"这类），'
+        '由你在旁白里合理带过——不必事事等玩家点头。只有剧情到达真正的'
+        '**分岔口**（不同选择会导向明显不同的走向、代价或关系变化），'
+        '才是玩家该做主的地方。');
+    buf.writeln('4. 单回合篇幅以「游戏当前状态」块中的核心体验为准'
         '（快节奏就短平快直给，慢热沉浸就把铺陈写足，人称视角同样服从它）；'
-        '未设定核心体验时按通用节奏：1-3 段旁白 + 适量台词，总长 300-600 字，'
-        '不要拖沓。');
-    buf.writeln('5. 回合收尾：内容输出完后，必须调用 '
+        '未设定核心体验时按通用节奏：写完一个完整场景单元再停（通常 3-6 段'
+        '旁白/台词交替，总长 600-1200 字），在该场景的收束处停，不要半途把'
+        '玩家叫停。');
+    buf.writeln('5. 关键抉择收尾：内容输出完后，必须调用 '
         'present_choices(choices=[{label, hint}...]) 提交选项，然后立即停止，'
-        '等待玩家选择或自由输入。选项数量以「游戏当前状态」块中的规则为准；'
-        '选项的形态贴合核心体验（战斗向给行动抉择，角色互动向可以是'
-        '「说什么/怎么回应」，解谜向给推理路线）。');
+        '等待玩家选择或自由输入。给选项前自检一遍：每个选项都要导向**明显'
+        '不同的走向 / 不可逆的代价 / 关系质变**；若只是"说哪句话""挑哪个'
+        '无关痛痒的小动作"这类细枝末节，或几个选项结果大同小异，就**继续'
+        '推进剧情**到真正的分岔口，不要硬凑一组选项。选项数量以「游戏当前'
+        '状态」块中的规则为准；选项的形态贴合核心体验（战斗向给行动抉择，'
+        '解谜向给推理路线，角色互动向给立场/关系抉择）。');
     buf.writeln('6. 状态记录：当角色/玩家发生**重大且持久**的变化（致残、'
         '突破等级、获得或失去关键物品、立场关系质变），或世界出现新任务/'
         '势力动向/重要悬念时，调用 update_game_state：变化用 add_facts 新增'
@@ -295,6 +312,14 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
         '全部分支（含失败/意外分支）与相对权重，随机结果返回后即为既定事实——'
         '必须照此推进剧情，不得改写或重复判定，然后用 narrate/speak 演出结果。'
         '确定性剧情不要滥用判定。');
+    buf.writeln('10. 【后悔重置】你本回合写的内容在回合结束前**不会展示给玩家**'
+        '（回合收尾时一次性展示），所以写作过程中发现自己写错了——把角色名'
+        '写错、与已确立事实矛盾、剧情走偏、台词不像该角色——就调用 '
+        'discard_output 撤回重来（可传 count 只撤最近几条，不传=本回合全撤），'
+        '你会"忘掉"被撤内容，撤回后重新创作本回合并照常以 present_choices '
+        '收尾。已提交的 update_game_state / roll_random_event / '
+        'create_scene_image 是既成事实，不随撤回撤销。谨慎使用：频繁撤回'
+        '会浪费额度并可能反复。');
 
     return buf.toString();
   }
@@ -339,7 +364,8 @@ class TextGameScenario with AgentScenarioCleanupMixin implements AgentScenario {
       }
     }
 
-    buf.writeln('### 玩家角色（用户扮演，不要代其行动/说话）');
+    buf.writeln('### 玩家角色（用户扮演：重大抉择归玩家；不影响走向的过场'
+        '小动作与简短应答由你在叙述中合理带过，不要事事停下来问）');
     final player = _playerCard;
     if (player == null) {
       buf.writeln('（未设置玩家角色卡）');
@@ -991,7 +1017,9 @@ const Map<String, dynamic> presentChoicesToolDefinition = {
   'function': {
     'name': 'present_choices',
     'description':
-        '结束本回合：给玩家提交 2-4 个剧情走向/行动选项。'
+        '结束本回合：给玩家提交 2-4 个**关键抉择**选项。每个选项都应导向'
+        '明显不同的走向 / 不可逆的代价 / 关系质变；细枝末节（说哪句话、'
+        '无关痛痒的小动作）不要拿来问玩家——先继续推进剧情到真正的分岔口。'
         '必须在输出完旁白与台词之后、作为本回合最后一个工具调用；'
         '调用后不要再输出任何内容，等待玩家选择或自由输入。',
     'parameters': {
@@ -1017,6 +1045,42 @@ const Map<String, dynamic> presentChoicesToolDefinition = {
         },
       },
       'required': ['choices'],
+    },
+  },
+};
+
+/// 【后悔重置】撤回本回合尚未展示给玩家的草稿
+///
+/// 回合内容等回合结束才一次性展示给玩家——GM 在本回合写作过程中发现
+/// 写错（人名写串、与已确立事实矛盾、剧情走偏）时调用它把已写的
+/// 旁白/台词/选项撤回，从干净状态重新创作。玩家从未看到过被撤内容，
+/// 撤回对体验无损。
+const Map<String, dynamic> discardOutputToolDefinition = {
+  'type': 'function',
+  'function': {
+    'name': 'discard_output',
+    'description':
+        '【后悔重置】撤回你**本回合已经写出、但玩家尚未看到**的内容：'
+        '旁白（narrate）、台词（speak）、选项（present_choices）。'
+        '回合内容在本回合结束时才一次性展示，所以此刻撤回玩家完全无感。\n'
+        '使用场景：写作过程中发现自己写错了——把角色名写错、与已确立的'
+        '设定/前文事实矛盾、剧情走偏、台词不符合角色性格。\n'
+        '规则：\n'
+        '- 撤回后你会"忘掉"这些内容，请重新创作本回合并照常以 '
+        'present_choices 收尾；\n'
+        '- 已提交的 update_game_state / roll_random_event / '
+        'create_scene_image 不受影响（它们是既成事实，不在可撤回范围）；\n'
+        '- 仅在确实写错时使用——频繁撤回会浪费额度且可能反复。',
+    'parameters': {
+      'type': 'object',
+      'properties': {
+        'count': {
+          'type': 'integer',
+          'description':
+              '撤回最近几条内容（可选）：不传 = 撤回本回合全部已写内容。'
+              '只想推翻最后一段旁白/一句台词时传 1。',
+        },
+      },
     },
   },
 };

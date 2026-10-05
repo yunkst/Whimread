@@ -51,10 +51,20 @@
 
 规则：
 1. **剧情内容禁止裸文本输出**——所有内容经工具，保证 UI 可渲染（旁白段落、
-   台词气泡、选项按钮）。`onNoToolCalls` 钩子注入一次协议提醒兜底
-   （前缀 `【协议提醒】`，游玩页投影器过滤不渲染）。
-2. **每回合必以 present_choices 收尾**；玩家始终可自由输入补充行动。
-   两层代码兜底：
+   台词气泡、选项按钮）。双侧强制：① 投影器侧 assistant 裸文本**一律不渲染**
+   （只有 narrate/speak/present_choices/create_scene_image/roll_random_event
+   等工具产出入剧情流——绕过工具写的正文玩家看不到）；② `onNoToolCalls` 钩子
+   注入一次协议提醒（前缀 `【协议提醒】`，同样过滤不渲染）要求 GM 用工具重写，
+   提醒轮的内容经工具输出后在同一回合内呈现。
+2. **推进幅度 = 完整剧情单元**：一回合把一个场景从铺垫写到收束（若干轮
+   NPC 对话、动作、局势变化），不要写一两段就停下来问玩家。NPC 交流、环境
+   演变、以及玩家角色**不影响走向的过场动作/简短应答**由 GM 在叙述中合理
+   带过；只在真正的**分岔口**（不同选择导向明显不同的走向/代价/关系变化）
+   停下来交给玩家——"主角任何一句话都要玩家选"是节奏慢的主因（用户反馈）。
+3. **关键抉择收尾**：每回合仍必以 present_choices 收尾，但只给**关键抉择**：
+   每个选项导向明显不同的走向/不可逆代价/关系质变；细枝末节（说哪句话、
+   无关痛痒的小动作）不拿来问玩家，结果大同小异的"伪分岔"不硬凑。玩家
+   始终可自由输入补充行动。代码兜底不变：
    - **终止工具**（`AgentScenario.terminalToolNames` = {`present_choices`}）：
      该工具成功即回合终点，AgentLoop 跑完本轮工具、入链后立即
      `AgentDoneEvent`，不再请求下一轮（工具返回 error 时不终止，交给 LLM
@@ -64,16 +74,16 @@
      旁白/台词/插图/判定/重复选项一律不渲染——历史脏数据重放时同样自愈。
    - 另有「自动补选」：`diagnoseTurnEnding` + `shouldAutoNudgeChoices`
      守卫（失败回合不补、玩家按过「停止」绝不重启、每条玩家输入至多补 1 次）。
-3. **台词与描写分离**：`speak.text` 只放角色说的话本身（含语气词/称呼），
+4. **台词与描写分离**：`speak.text` 只放角色说的话本身（含语气词/称呼），
    角色的动作/神态/心理一律走 `narrate`——两者渲染样式不同（台词=带头像与
    底色气泡，旁白=无装饰阅读段落），混写会让玩家分不清谁在说话。
-4. **状态账本**：角色/玩家的重大持久变化（致残/突破/关键物品得失/立场质变）
+5. **状态账本**：角色/玩家的重大持久变化（致残/突破/关键物品得失/立场质变）
    与世界线动向（任务/势力/悬念）以**条目**记录——`add_facts` 新增、
    `remove_facts` 划掉不再成立的旧条目（引用动态块原文），加事实不丢旧事实、
    过期状态显式退场；近况/世界逐条进每轮动态上下文抗遗忘。角色卡变化落
    版本历史（source=text_game + reason）。基底设定（性格/来历/说话风格）
    GM 不可写——近况条目覆盖演出，基底只在手动编辑/写作助手改动（过版本）。
-5. **概率判定**：剧情分岔的随机性（战斗胜负/行动成败/机关触发/随机遭遇）
+6. **概率判定**：剧情分岔的随机性（战斗胜负/行动成败/机关触发/随机遭遇）
    交给 `roll_random_event`——GM 提交全部分支（含失败分支）与相对权重，
    系统抽取一个作为既定事实回填；GM 必须照结果演出，不得改写或重复判定
    （防"掷骰作弊"）。
@@ -87,7 +97,7 @@
 
 GM 协议侧的让位（防体验偏差）：静态协议身份段声明「核心体验是演出的最高
 准则，与其它设定或通用规则冲突时以它为准」；原硬编码的回合节奏默认值
-（1-3 段旁白 + 300-600 字）退为**未设定核心体验时**的兜底；动态块把
+（完整场景单元，3-6 段、600-1200 字）退为**未设定核心体验时**的兜底；动态块把
 「核心体验」小节**置顶渲染**（排在世界观之前），GM 每轮最先读到。
 无工具纠偏通道——体验诉求的修改只走设定编辑页 / update_text_game。
 
@@ -106,38 +116,57 @@ GM 协议侧的让位（防体验偏差）：静态协议身份段声明「核�
   update_game_state 或手动编辑频繁变更时只影响尾部新 token，不使缓存失效
 - 设定每轮从数据库新鲜读取：AI 回写或用户手动编辑后**下一轮即生效**
 
-## 打字机流式（ToolArgDeltaEvent）
+## 回合一次性展示（无流式）
 
-工具参数默认不流式（流结束后整块出现）。为保留剧情的打字机体验：
+GM 回合内容**不在写作过程中流出**：运行期间玩家只看到进度——底部「剧情
+推进中」状态条（转圈 + 停止按钮）与 GM 幕后（思维链实时累积 + 动作标签
+"正在描写旁白…"，可在 AppBar 开关）；回合收尾（AgentDone → session
+finalize 汇总消息链）时，本回合全部产出（旁白/台词/插图/判定/选项）一次性
+进入剧情流并自动滚到底部。
 
-- `AgentScenario.streamableToolNames` 白名单（text_game = narrate/speak；
-  其它场景默认空集，行为零变化）。
-- `AgentLoop` 在 tool_call delta 流式累积过程中，对白名单工具按宽容提取器
-  （`tool_arg_text_extractor.dart`：从半截 JSON 解 text/character 增量文本，
-  容错未闭合引号/转义）节流 emit `ToolArgDeltaEvent`（累计文本，≥12 字符增量）。
-- **流结束收尾补发**（`flushStreamableToolArgs`）：节流只在 delta chunk 里发，
-  流结束后原本没有补发，最后一块（不足 12 字符的一截）永远发不出去；而
-  工具执行后到回合结束之间没有任何机制用完整参数回填直播画面（pending 段
-  按设计跳过 narrate/speak），尾字只能等 AgentDone 的定稿投影才补上——用户
-  可见的「吞字，要等本轮 loop 结束」。因此在**工具执行前**按完整参数补发
-  一次（仅在确有缺口时），并记 `流式参数收尾: <工具>, 流式期间已发 X 字,
-  完整 Y 字` 日志（`tag: arg_stream_flush`）供现场反馈佐证。
-- 游玩页控制器直接订阅事件流（过滤本局 runId 打标），维护 `GameStreamingPart`；
-  定稿后以 ToolCallStart/End 的完整参数为准重新投影。
-- **text_game 的所有运行统一 runId=sessionId 打标**（`ScenarioSession._launchAgentRun`
-  场景门控），游玩页据此精确过滤本局事件，防止与其它场景并发运行互相污染。
+- **实现**：session 只在 finalize 时把 `_pendingSegments` 汇总为消息链，所以
+  transcript 运行期间天然不动——游玩页不需要"扣住内容"的任何逻辑，也不再有
+  打字机/定稿双渲染路径（`ToolArgDeltaEvent`/`streamableToolNames`/
+  `GameStreamingPart` 等机制已整体移除，preview.14 的"打字机吞字"修复随之
+  作废删除——那类 bug 的根源就是双路径）。
+- runId 打标保留：text_game 所有运行统一 runId=sessionId（`ScenarioSession._
+  launchAgentRun` 场景门控），GM 幕后事件据此过滤本局。
 
-## 异步场景生图（TextGameImageService）
+## 【后悔重置】（discard_output，loop 层拦截）
 
-- 工具执行 = 校验 + 共享选取器选模型（`image_model_picker.dart`，与
-  create_images 同款三级回退）+ 入队，**立即返回** `submitted:true`。
-- 后台串行 Future 链执行 `backend.submit`（端侧 NPU 不支持并行）；完成后
-  `updateMessageContent` 把消息链里对应 tool 消息改写为与 create_images
-  同构的结果 JSON（含 mediaIds）→ `onChanged` 广播。
-- 游玩页渲染优先级：运行中任务态（按 toolCallId 查服务）> 消息链 tool
-  result（重启后 hydrate 恢复）；失败显示错误占位（v1 无重试按钮）。
-- 控制器监听 onChanged 后调 `session.updateToolMessageContent` 同步内存链
-  （防后续 compaction 以内存为基准重写时覆盖回「已提交」态）。
+GM 在回合中发现写错（角色名写错/与既定事实矛盾/剧情走偏）时调用，撤回
+**本回合尚未展示**的展示类调用——一次性展示保证了"未展示"这个前提，撤回
+对玩家完全无感。
+
+- 工具面恒在（不受插图策略影响）；可撤集合由 `AgentScenario.
+  retractableToolNames` 声明（text_game = narrate/speak/present_choices）。
+  既成事实类工具（update_game_state / roll_random_event / create_scene_image）
+  已落库/回填，**不撤**——撤叙述不撤账本会造成状态与剧情不一致。
+- `count` 可选：不传 = 本回合全撤；传 N = 只撤最近 N 条。
+- **双处清理**：① `AgentLoop` 在本地 `messages`（下一轮 LLM 上下文）原位
+  截断（`truncateRetractableToolCalls` 纯函数，单测覆盖）——GM 下一轮即
+  "忘掉"作废草稿，不会锚着错误版重写；② emit `DraftDiscardedEvent`，
+  `ScenarioSession` 据此从 `_pendingSegments` 移除对应段——否则回合收尾
+  finalize 时作废内容会被汇总写回消息链落库，撤回失效。
+- discard 调用本身照常入链留痕（工具卡/消息链），工具结果带精确撤回条数
+  与"重新创作"指引；撤空后若 GM 直接停手，回合收尾的协议兜底
+  （自动补 present_choices 提醒）照常生效。
+- 防滥用写进协议与工具描述：仅在确实写错时使用（频繁撤回浪费额度且可能
+  反复）。
+
+## 场景生图（同步执行）
+
+- `create_scene_image` 与 `create_images` **共用同一门面**
+  `ImageGenerationService.generate`（模型三级回退、负向词、比例校验、
+  错误码归一只有一份实现），无独立的场景生图服务。
+- **同步语义**：工具执行内 `await` 到出图完成（端侧引擎数十秒），返回
+  JSON 内含 mediaIds；GM 协议明确告知「调用后阻塞到出图完成，不要重复
+  调用」。生成结果已同步落 MediaStore/media_items，游玩页渲染直接
+  resolve 本地文件。
+- 游玩页渲染：消息链 tool result 里的 mediaIds → `GameSceneImageView`；
+  出图失败展示错误卡（工具返回 error 时调用状态为 error）。
+- 回合被取消时若 create_scene_image 仍在跑，该调用以 running 状态入链，
+  插图位展示占位 shimmer（等结果永不来的少数情况）。
 - `imagePolicy`：auto = agent 判断关键场景主动调用；manual = 仅玩家点
   「生成插图」（发一条固定语义消息，agent 调工具，不推进剧情）。
 
@@ -151,29 +180,23 @@ GM 协议侧的让位（防体验偏差）：静态协议身份段声明「核�
   区分度）；create_scene_image → 插图卡；present_choices → 选项
   按钮组（只有最后一条可点；玩家输入精确命中 label 标记 ✓）；
   roll_random_event → 命运骰子卡。
-- **失败调用不进剧情流（定稿 + 直播两侧同一语义）**：`isFailedToolCall`（读
-  持久化状态 `AgentToolStatus.error/rejected`，即 AgentLoop `!result.containsKey('error')`
+- **失败调用不进剧情流**：`isFailedToolCall`（读持久化状态
+  `AgentToolStatus.error/rejected`，即 AgentLoop `!result.containsKey('error')`
   落库的同一标志，不二次解析结果 JSON）判定 narrate/speak 失败
   （`unknown_character` / `missing_character` / 工具异常）。失败尝试视为
   "没演成"，GM 会按纠错提示重调，只渲染重调成功的那次——否则同一句台词
   会以"失败版 + 重调版"显示两遍（现场日志：speak 失败 → create_character →
-  同文重调成功）。直播打字机侧由 `dropFailedStoryStreamingPart` 在
-  ToolCallEndEvent(success=false) 时立即剔除对应块（真实 id 帧晚到时按
-  同名 `call_N` 占位兜底），不等回合结束才自愈。插图与骰子例外：失败态
-  本身是信息（错误卡/判定失败），照常渲染。运行中（结果未产出）按未失败
-  处理。
+  同文重调成功）。插图与骰子例外：失败态本身是信息（错误卡/判定失败），
+  照常渲染。运行中（结果未产出）按未失败处理。
 - **动画纪律：只为"本次到访新增的内容"播一次，历史永不重播**。游玩页在
   首次见到非空定稿链时播种（`_seedAnimationBookkeeping`）：链内已有的
   判定/选项 toolCallId 记为已播、记录链长度；回溯使链缩短时以当前长度
   重新起算。ListView 滚动重建/页面重入时按记账直接静态展示。
-- **入场动画**（配合打字机的临场感补充）：
-  - 选项组错峰入场（GameChoicesView，460ms）：回合结束的定稿组随剧情流
+- **入场动画**（配合 GM 幕后进度感的补充）：
+  - 选项组错峰入场（GameChoicesView，460ms）：回合收尾时定稿组随剧情流
     内联渲染（不常驻输入区上方，免得长期压掉阅读空间），逐个上滑淡入
     （每项错峰 0.16、单项占 0.66 区间），按 toolCallId 记账只播一次；
-    历史选项组静态置灰。运行中的预览组（pendingSegments 里的未激活组）
-    不渲染——它只是投影副产物，闪现后紧接着重播入场不如等定稿一次性入场。
-  - 打字机光标（流式输出最后一段末尾的闪烁竖块，"GM 落笔中"）；定稿段
-    无光标（避免流式→定稿切换的二次动画）。
+    历史选项组静态置灰。
   - 玩家输入气泡上滑淡入（260ms）：仅播种长度之后新增的输入。
   - 场景插图：生成中占位 shimmer 流光 + 转圈；出图后淡入+缩放登场
     （AnimatedSwitcher 按 mediaId 记账，同图重建不重播）。
@@ -306,7 +329,7 @@ update_game_state·create_character）在**成功修改后**追加一条改后�
 游玩页台词段渲染小圆头像：控制器进页时按参战名单加载
 名字/别名 → avatarMediaId 映射（`avatarByName`），投影器把映射写进台词段
 （`GameDialogue.avatarMediaId`），经 `AvatarMedia` 渲染（媒体缺失回退姓名
-首字占位，无映射回退纯彩色名）。运行中打字机台词与定稿段同规则。
+首字占位，无映射回退纯彩色名）。
 
 ## 创建入口（小说写作助手）
 
@@ -318,8 +341,10 @@ player_character_name 玩家卡（按角色名引用，全经归属校验）；�
 coreExperience，传空串 = 清空、GM 回退通用节奏）。系统提示词「文字游戏」
 流程：确定绑定小说（书架小说 id，或 create_novel 建轻量壳）→ 逐项探讨确认
 （**核心体验必问**：用 ask_user 给候选方向 + 节奏/人称/挫败感确认）→
-create_character 落全部角色卡（含玩家卡）→ create_text_game 传角色名引用 →
-提示前往「文字游戏」页。
+create_character 落全部角色卡（含玩家卡）→ create_text_game 传角色名引用。
+创建成功后聊天窗口的工具卡下方渲染「进入文字游戏」跳转入口
+（`TextGameEntryCard`，解析结果里的 gameId 直达游玩页），与章节写作的
+「查看新创建的章节」同一模式；游戏同时出现在底部管理页。
 
 ## UI 入口
 
@@ -373,10 +398,8 @@ rules[narrativeStyle, contentBoundary, choicesCount(2-4), imagePolicy(auto|manua
 - 生图任务表无上限：长会话多次生图缓慢累积内存（单任务很小，可后续加
   已完成任务清扫）。
 - create_text_game 双行落库非事务：极小概率游戏行失败留下孤儿会话。
-- 工具参数宽容提取器每个 delta 从头重扫（O(n²)），参数为 KB 级实际可忽略。
-- 个别网关 tool_call id 帧迟到时，同一调用的流式段可能以占位 id 与真实 id
-  各出现一次（定稿后自愈）。
-- 打字机期间不自动滚屏（以条目数变化为信号，段落定稿时跳底）。
+- 【后悔重置】截断的是 loop 内存消息链与会话待定稿段，已落库的历史回合
+  不受影响；撤回不计费不限次，重写的 token 消耗是既有取舍。
 - 回溯重选不回滚设定演化：删掉的是消息链剧情，此前 update_game_state 已
   写入的角色近况/玩家状态保留（视为已确立的世界观事实）。
 - text_game 场景工具不支持单工具重试（`retryToolCall` 已显式拒绝）。

@@ -18,7 +18,6 @@ import '../dsl_engine/retry_signals.dart';
 import 'agent_event.dart';
 import 'agent_scenario.dart';
 import 'context_compactor.dart';
-import 'tool_arg_text_extractor.dart';
 import 'tool_result_formatter.dart';
 
 /// Agent 循环取消行为
@@ -40,6 +39,87 @@ enum AgentLoopCancelBehavior {
 /// 层数混乱，最终把字面 `\n` / `\"` 写入正文（反馈 id=4「json 混入原文」的
 /// 根因）。此类工具的 rawResult 直接作为 tool message.content 送达 LLM。
 const Set<String> _kPlainTextToolNames = {'read_chapter_content'};
+
+/// 【后悔重置】工具名（AgentLoop 层拦截，不走场景 executor）
+const String kDiscardOutputToolName = 'discard_output';
+
+/// 【后悔重置】核心：从消息链中撤回本回合尚未展示的展示类工具调用。
+///
+/// 语义（与玩家确认过）：
+/// - 只撤**本回合**（最后一条 user 消息之后）且命中 [retractableToolNames]
+///   的调用——回合内容等 AgentDone 才一次性展示，被撤的草稿玩家从未见过；
+/// - [count] 非空且 >0 时只撤最近 [count] 条，null/<=0 = 本回合全部撤回；
+/// - 既成事实类工具（update_game_state / roll_random_event /
+///   create_scene_image）不在可撤集合——它们已落库/回填，撤回叙述会造成
+///   状态与剧情不一致。
+///
+/// [messages] 原位变更（保持同一 List 对象——loop 内闭包捕获了它）：
+/// 从 assistant 消息的 toolCalls 中剔除被撤调用（连带删其 tool 结果消息），
+/// 剔空且无正文的 assistant 消息整条移除。LLM 下一轮即"忘掉"作废草稿。
+///
+/// 返回被撤回的 toolCallId（时间序）。
+List<String> truncateRetractableToolCalls(
+  List<ChatMessage> messages,
+  Set<String> retractableToolNames, {
+  int? count,
+}) {
+  if (retractableToolNames.isEmpty) return const [];
+  // 本回合起点：最后一条 user 消息之后
+  var turnStart = -1;
+  for (var i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role == 'user') {
+      turnStart = i;
+      break;
+    }
+  }
+  if (turnStart < 0) return const [];
+
+  // 自最新向旧收集待撤调用（按 [count] 截停）
+  final removed = <String>[];
+  outer:
+  for (var i = messages.length - 1; i > turnStart; i--) {
+    final calls = messages[i].toolCalls;
+    if (calls == null) continue;
+    for (final c in calls.reversed) {
+      if (!retractableToolNames.contains(c.name)) continue;
+      removed.add(c.id);
+      if (count != null && count > 0 && removed.length >= count) {
+        break outer;
+      }
+    }
+  }
+  if (removed.isEmpty) return const [];
+  final removedIds = removed.toSet();
+
+  // 原位重建回合区段：assistant 过滤 toolCalls，tool 结果按 id 剔除
+  final regionStart = turnStart + 1;
+  final rebuilt = <ChatMessage>[];
+  for (var i = regionStart; i < messages.length; i++) {
+    final m = messages[i];
+    if (m.role == 'assistant' && m.toolCalls != null) {
+      final keptCalls =
+          m.toolCalls!.where((c) => !removedIds.contains(c.id)).toList();
+      final hasContent = m.content != null && m.content!.isNotEmpty;
+      if (keptCalls.isEmpty && !hasContent) continue; // 整条移除
+      rebuilt.add(ChatMessage(
+        role: 'assistant',
+        content: m.content,
+        toolCalls: keptCalls,
+      ));
+      continue;
+    }
+    if (m.role == 'tool' &&
+        m.toolCallId != null &&
+        removedIds.contains(m.toolCallId)) {
+      continue; // 被撤调用的结果一并移除（保持 assistant↔tool 配对合法）
+    }
+    rebuilt.add(m);
+  }
+  messages.removeRange(regionStart, messages.length);
+  messages.addAll(rebuilt);
+
+  return removed.reversed.toList(); // 收集是自新向旧，翻回时间序
+}
 
 /// Agent 循环配置
 class AgentLoopConfig {
@@ -205,82 +285,6 @@ class AgentLoop {
       String? streamFinishReason;
       int contentChunkCount = 0;
 
-      // 白名单工具参数流式转发状态（每轮重置）：按流内 index 记录上次
-      // emit 的累计文本长度与角色名，用于 ≥12 字符增量节流。
-      final streamedArgState =
-          <int, ({int textLen, String? character})>{};
-
-      // 白名单工具（_scenario.streamableToolNames，文字游戏 narrate/speak）
-      // 的参数流式转发：参数聚合串经宽容提取器解出 text/character 累计文本，
-      // 首个非空必发，之后每增 12 字符或角色名变化才 emit 一次。
-      // 工具正式执行仍以流结束后的完整参数为准，本机制只影响显示。
-      void emitStreamableToolArgDeltas() {
-        final streamable = _scenario.streamableToolNames;
-        if (streamable.isEmpty) return;
-        for (final call in streamingResult.toolCallStates()) {
-          final name = call.name;
-          if (name == null || !streamable.contains(name)) continue;
-          final extracted =
-              ToolArgTextExtractor.extract(call.argumentsSoFar);
-          final text = extracted.text;
-          final character = extracted.character;
-          final prev = streamedArgState[call.index];
-          final isFirst = prev == null && text.isNotEmpty;
-          final charChanged = prev != null &&
-              character != null &&
-              character != (prev.character ?? '');
-          final grewEnough =
-              prev != null && text.length - prev.textLen >= 12;
-          if (!isFirst && !charChanged && !grewEnough) continue;
-          streamedArgState[call.index] =
-              (textLen: text.length, character: character);
-          emit(ToolArgDeltaEvent(
-            call.callId,
-            name,
-            text: text,
-            character: character,
-          ));
-        }
-      }
-
-      // 流结束收尾：把节流期间被扣住的尾字一次补齐。
-      //
-      // 必要性：上面的节流按「≥12 字符增量」发事件，且只在 toolCallDeltas
-      // chunk 里被调用——流结束后没有补发，于是最后一块参数（不足 12 字符
-      // 的那一截）永远发不出去。而工具执行完成后到回合结束之间没有任何
-      // 机制用完整参数回填直播画面（pending 段按设计跳过 narrate/speak），
-      // 缺失的尾字只能等 AgentDone 的定稿投影才补上——用户可见的「吞字，
-      // 要等本轮 loop 结束才正常」。这里在工具执行前补发最后一次，打字机
-      // 即时完整。仅在确有缺口时 emit（prev.textLen >= 全长则跳过），并留
-      // 一条日志供现场反馈佐证这类问题。
-      void flushStreamableToolArgs() {
-        final streamable = _scenario.streamableToolNames;
-        if (streamable.isEmpty) return;
-        for (final call in streamingResult.toolCallStates()) {
-          final name = call.name;
-          if (name == null || !streamable.contains(name)) continue;
-          final extracted =
-              ToolArgTextExtractor.extract(call.argumentsSoFar);
-          final text = extracted.text;
-          final prev = streamedArgState[call.index];
-          if (prev != null && prev.textLen >= text.length) continue;
-          streamedArgState[call.index] =
-              (textLen: text.length, character: extracted.character);
-          LoggerService.instance.i(
-            '流式参数收尾: $name, 流式期间已发 ${prev?.textLen ?? 0} 字, '
-            '完整 ${text.length} 字 (scenario=${_scenario.id})',
-            category: LogCategory.ai,
-            tags: ['agent', 'loop', 'arg_stream_flush', name, _scenario.id],
-          );
-          emit(ToolArgDeltaEvent(
-            call.callId,
-            name,
-            text: text,
-            character: extracted.character,
-          ));
-        }
-      }
-
       try {
         LoggerService.instance.d('Agent 循环第 $round 轮 (${_scenario.id})',
             category: LogCategory.ai, tags: ['agent', 'loop', _scenario.id]);
@@ -405,7 +409,6 @@ class AgentLoop {
             // 累积 tool_calls delta
             if (chunk.isToolCallDelta) {
               streamingResult.toolCallDeltas.addAll(chunk.toolCallDeltas);
-              emitStreamableToolArgDeltas();
             }
             // 记录 finish_reason
             if (chunk.isFinished) {
@@ -570,10 +573,6 @@ class AgentLoop {
           toolCalls: toolCalls,
         ));
 
-        // 4b. 打字机尾字收尾（必须在工具执行前：pending 段按设计不渲染
-        // narrate/speak，工具执行后到回合结束之间没有回填时机）
-        if (toolCalls.isNotEmpty) flushStreamableToolArgs();
-
         // 5. 执行工具调用
         //
         // 任务 7：拆分「普通工具串行 + dispatch_subagent 并行」
@@ -597,6 +596,19 @@ class AgentLoop {
 
           if (call.name == 'dispatch_subagent') {
             subagentCalls.add(call);
+            continue;
+          }
+
+          // 【后悔重置】：loop 层拦截（不走场景 executor——它需要动本函数
+          // 局部的 messages 列表）。撤回本回合尚未展示给玩家的展示类调用，
+          // 让 GM 从干净状态重新创作；撤回对玩家不可见（回合内容一次性展示）。
+          if (call.name == kDiscardOutputToolName) {
+            final (toolMessage, removedIds) =
+                _handleDiscardOutput(call, messages, emit);
+            messages.add(toolMessage);
+            if (removedIds.isNotEmpty) {
+              emit(DraftDiscardedEvent(removedIds));
+            }
             continue;
           }
 
@@ -843,6 +855,65 @@ class AgentLoop {
   /// 任务 7：从原「第 5 步 for 循环体」抽出，使普通串行与 dispatch_subagent 并行
   /// 共用同一段逻辑。**保持与原循环体 100% 一致行为**（含 onProgress 节流、
   /// JSON 解析容错、截断日志、toolSuccess 判断）。
+  /// 【后悔重置】（[kDiscardOutputToolName]）的 loop 层处理。
+  ///
+  /// 不走 [_executeSingleTool]：撤回要动本函数外局部捕获的 messages 列表，
+  /// 场景 executor 拿不到。做三件事：
+  /// 1. 照常 emit ToolCallStart/End（通用聊天的工具卡、session 待定稿段
+  ///    与普通工具同构，回合收尾时 discard 调用本身会正常入链留痕）；
+  /// 2. 截断 messages（[truncateRetractableToolCalls]）——LLM 下一轮即
+  ///    "忘掉"被撤的作废草稿；
+  /// 3. 返回带精确撤回条数的 tool 结果消息（给 LLM 的反馈，含继续创作的指引）。
+  ///
+  /// 返回 (tool 消息, 被撤回的 toolCallId 时间序)。被撤 id 非空时由调用方
+  /// emit [DraftDiscardedEvent]，session 据此同步清待定稿段。
+  (ChatMessage, List<String>) _handleDiscardOutput(
+    ToolCall call,
+    List<ChatMessage> messages,
+    void Function(AgentEvent) emit,
+  ) {
+    emit(ToolCallStartEvent(call.name, call.arguments, call.id));
+
+    final rawCount = call.arguments['count'];
+    final count = rawCount is num
+        ? rawCount.toInt()
+        : rawCount is String
+            ? int.tryParse(rawCount)
+            : null;
+    final removed = truncateRetractableToolCalls(
+      messages,
+      _scenario.retractableToolNames,
+      count: count,
+    );
+
+    final content = jsonEncode(<String, dynamic>{
+      'ok': true,
+      'discarded': removed.length,
+      'message': removed.isEmpty
+          ? '本回合没有可撤回的内容（可撤回的只有尚未展示的旁白/台词/选项）'
+          : '已撤回本回合最近 ${removed.length} 条内容（玩家从未看到）。'
+              '请基于当前设定重新创作，避免重复同样的问题；完成后照常调用 '
+              'present_choices 收尾。',
+    });
+    emit(ToolCallEndEvent(
+      call.name,
+      call.id,
+      content,
+      fullResult: content,
+      success: true,
+    ));
+    LoggerService.instance.w(
+      '后悔重置: 撤回本回合 ${removed.length} 条展示类调用 '
+      '(scenario=${_scenario.id}, ids=${removed.join(',')})',
+      category: LogCategory.ai,
+      tags: ['agent', 'loop', 'discard_output', _scenario.id],
+    );
+    return (
+      ChatMessage(role: 'tool', content: content, toolCallId: call.id),
+      removed,
+    );
+  }
+
   ///
   /// 执行单个工具并返回 (tool 消息, 是否成功)。
   ///

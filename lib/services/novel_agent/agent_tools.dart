@@ -483,7 +483,10 @@ class AgentTools {
           },
           'avatarMediaId': {
             'type': 'string',
-            'description': '头像媒体资源ID（图像），由 create_images 返回的 mediaId',
+            'description': '头像媒体资源ID（图像），必须是 create_images 返回的 '
+                'mediaId。写入前会校验存在性：无效 id 会被拒绝'
+                '（media_not_found），此时先为角色生成肖像再重试，'
+                '或省略该参数保持原头像不变。',
           },
           'reason': {
             'type': 'string',
@@ -976,7 +979,9 @@ class AgentTools {
           '有充分理解；② 该小说的主要人物与玩家角色已有完整角色卡（缺的先 '
           'create_character 创建，信息尽量填全）。参战角色**按角色名引用**，'
           '你无需关心其内部 id。调用前核心体验、世界观、玩家角色、规则已与'
-          '用户逐项探讨并复述确认。创建成功后提示用户到「文字游戏」页开始游玩。',
+          '用户逐项探讨并复述确认。创建成功后聊天窗口会出现「进入文字游戏」'
+          '跳转按钮，提示用户点击即可直接开始游玩（游戏也会出现在底部'
+          '「文字游戏」页）。',
       'parameters': <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{

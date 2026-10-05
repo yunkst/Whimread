@@ -242,7 +242,7 @@ void main() {
           '会立刻在 ListView+Column 场景触发白屏+卡死 bug。',
     );
 
-    // 主动卸载 → MediaView.dispose；再推进 600ms 把 visibility_detector 在
+    // 主动卸载 → MediaView.dispose；再推进 600ms 把延迟回调在
     // paint 期排的 500ms 一次性 timer（FakeAsync 区跟踪）无害跑完，
     // teardown 不会报 "A Timer is still pending"
     await tester.pumpWidget(const SizedBox.shrink());
