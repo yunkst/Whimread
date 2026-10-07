@@ -81,12 +81,12 @@ abstract final class WebViewExtractOcrValidator {
     return text.runes.any(isPua);
   }
 
-  /// 从 jsResult 提取 OCR 模式需要扫描 PUA 的目标文本。
+  /// 从 jsResult 提取 OCR 目标文本（保存期 PUA 自动检测的扫描范围）。
   ///
   /// - chapter_content: 直接取 content
   /// - chapter_list: 拼接 title + 所有 chapters[].title（小说名 + 章名里也可能含 PUA）
-  /// - bookshelf: 无 PUA 需求，返回空串（bookshelf 在 save_script 已强制 ocr=false，
-  ///   此处仅为防御兜底：万一有人手动构造调用时返回空字符串，闸会拒落库）
+  /// - bookshelf: 返回空串（书架无运行时还原路径，恒不触发 OCR 验证；
+  ///   防御兜底：手动构造调用时也安全）
   static String extractOcrTargetText(dynamic jsResult, String scriptType) {
     if (jsResult is! Map) return '';
     if (scriptType == 'chapter_content') {

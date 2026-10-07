@@ -1,11 +1,11 @@
 /// buildSystemPrompt 内容验证测试
 ///
-/// 验证 WebViewExtractScenario 的 system prompt 包含 OCR 提取器相关的工作原则：
+/// 验证 WebViewExtractScenario 的 system prompt 包含提取器相关的工作原则：
 /// - "提取器创建流程"段落（强制两次 save_script + 落库前验证）
-/// - "字体反爬检测（ocr 判定）"段落
-/// - 新 save_script schema 引用（run_id + script_type + test_url + ocr）
+/// - "字体反爬（PUA）说明"段落（自动检测，agent 无需判定）
+/// - 新 save_script schema 引用（run_id + script_type + test_url，无 ocr）
 ///
-/// 这些字串在 prompt 中必须存在，否则 LLM Agent 不会按新流程创建 OCR 提取器。
+/// 这些字串在 prompt 中必须存在，否则 LLM Agent 不会按新流程创建提取器。
 library;
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -48,8 +48,9 @@ void main() {
     expect(prompt, contains('提取器创建流程'));
     expect(prompt, contains('save_script(domain, run_id, script_type="chapter_list"'));
     expect(prompt, contains('save_script(domain, run_id, script_type="chapter_content"'));
-    expect(prompt, contains('ocr=<true|false>'));
-    expect(prompt, contains('U+E000-F8FF')); // PUA 检测指引
+    // v48：OCR 触发为 PUA 自动检测，prompt 不再出现 ocr 传值指引
+    expect(prompt, isNot(contains('ocr=')));
+    expect(prompt, contains('U+E000-F8FF')); // PUA 说明
     expect(prompt, contains('font_family'));
   });
 
@@ -65,16 +66,16 @@ void main() {
     expect(prompt, contains('落库前强制试运行验证'));
   });
 
-  test('prompt run_id 机制段已使用新 schema', () {
+  test('prompt run_id 机制段已使用新 schema（无 ocr 参数）', () {
     final scenario = buildScenario();
     final prompt = scenario.buildSystemPrompt(testContext());
 
     // 旧版保存示例必须已被替换
     expect(prompt, isNot(contains('save_script(domain, list_run_id=')));
     expect(prompt, isNot(contains('content_run_id=<id>')));
-    // 新版保存示例（display_name 仅首次保存时传；其它字段每次都传）
+    // 新版保存示例（display_name 仅首次保存时传；v48 起无 ocr 参数）
     expect(prompt,
-        contains('save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=..., display_name='));
+        contains('save_script(domain, run_id=<id>, script_type=..., test_url=..., display_name='));
   });
 
   test('prompt 书架脚本契约含封面槽位（cover_url）说明', () {

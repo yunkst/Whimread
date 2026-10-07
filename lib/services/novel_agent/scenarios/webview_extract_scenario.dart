@@ -136,18 +136,19 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
 
     buf.writeln('## run_id 机制');
     buf.writeln('- 不要在上下文保留完整脚本 → 用 run_id 句柄引用');
-    buf.writeln('- 重跑: execute_js(run_id=<id>) → 保存: save_script(domain, run_id=<id>, script_type=..., test_url=..., ocr=..., display_name=<网站自身的名字，如「起点中文网」，仅在第一次传一次>)');
+    buf.writeln('- 重跑: execute_js(run_id=<id>) → 保存: save_script(domain, run_id=<id>, script_type=..., test_url=..., display_name=<网站自身的名字，如「起点中文网」，仅在第一次传一次>)');
     buf.writeln();
 
     buf.writeln('## JS 脚本规范');
     buf.writeln('- 脚本是 async IIFE: (async function() { ... return JSON.stringify(result); })()');
     buf.writeln('- 首行必须声明 `const PAGE_URL = \'{{URL}}\';`，禁止 window.location.href');
     buf.writeln('- 安全边界（违反会被拒绝执行）：禁止 document.cookie / localStorage / sessionStorage / indexedDB；禁止 sendBeacon / WebSocket / EventSource / window.open / import()；fetch 与 XMLHttpRequest 仅允许请求与 PAGE_URL 同源的地址（执行时已注入同源守卫，跨域会抛 WHIMREAD_SANDBOX 错误）。提取只需读 DOM 并 return 结果');
-    buf.writeln('- 目录返回: { "title": "...", "cover_url": "...", "chapters": [{ "title": "...", "url": "..." }] }');
+    buf.writeln('- 目录返回: { "title": "...", "cover_url": "...", "font_family": "...", "chapters": [{ "title": "...", "url": "..." }] }');
     buf.writeln('- chapters 必须按章节顺序从小到大排列（第一章 → 最新章），不要倒序');
     buf.writeln('- cover_url（必填字段，缺失会拒绝落库）：优先 <meta property="og:image" content="...">，其次目录页书籍封面 <img> 的 src / data-src；取绝对 URL（相对路径用 new URL(src, PAGE_URL).href 补全）；确实无封面时返回空串 ""');
-    buf.writeln('- 内容返回: { "title": "...", "content": "..." }，content 中段落之间必须用 \\n 分隔');
-    buf.writeln('- 书架脚本（可选，仅在「我的书架/收藏」页运行；用户要求生成时才做）返回: { "novels": [{ "title": "...", "url": "...", "cover_url": "..." }] }。url 应为该站小说目录页绝对路径，便于应用跳转后复用 chapter_list_js。cover_url 为每本书的封面槽位：取书架条目内 <img> 的 src / data-src / data-original（懒加载优先取 data-* 属性），相对路径用 new URL(src, PAGE_URL).href 补全为绝对 URL，确实无封面时返回空串 ""。保存用 save_script(script_type="bookshelf", test_url=<书架页>, ocr=false)。');
+    buf.writeln('- font_family（chapter_list / chapter_content 必填，缺失会拒绝落库）：用 getComputedStyle(标题/正文元素).fontFamily 取当前字体族。部分站点对标题/正文做字体反爬（PUA 乱码方块），运行时靠该字体族自动还原，无需你判断站点是否有反爬');
+    buf.writeln('- 内容返回: { "title": "...", "content": "...", "font_family": "..." }，content 中段落之间必须用 \\n 分隔');
+    buf.writeln('- 书架脚本（可选，仅在「我的书架/收藏」页运行；用户要求生成时才做）返回: { "novels": [{ "title": "...", "url": "...", "cover_url": "..." }] }。url 应为该站小说目录页绝对路径，便于应用跳转后复用 chapter_list_js。cover_url 为每本书的封面槽位：取书架条目内 <img> 的 src / data-src / data-original（懒加载优先取 data-* 属性），相对路径用 new URL(src, PAGE_URL).href 补全为绝对 URL，确实无封面时返回空串 ""。保存用 save_script(script_type="bookshelf", test_url=<书架页>)。');
     buf.writeln('- 翻页: 检测下一页 → 点击 → await new Promise(r => setTimeout(r, 1000)) → 继续');
     buf.writeln('- 只使用标准 DOM API（querySelector, innerText），不依赖 jQuery/Vue/React');
     buf.writeln('- 跳过广告段落（含本章未完、一秒记住等）');
@@ -159,9 +160,9 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln();
     buf.writeln('### 阶段一：目录提取（落库后才能进阶段二）');
     buf.writeln('1. 当前已在目录页（chapter_list）：get_page_info 确认页面类型');
-    buf.writeln('2. execute_js(script=...) 反复调试，确认返回 {title, cover_url, chapters:[{title,url}]} 且 chapters 非空、cover_url 字段存在（允许空串）');
+    buf.writeln('2. execute_js(script=...) 反复调试，确认返回 {title, cover_url, font_family, chapters:[{title,url}]} 且 chapters 非空、cover_url/font_family 字段存在');
     buf.writeln('3. 拿到 __meta.run_id 后立刻调用：');
-    buf.writeln('   save_script(domain, run_id, script_type="chapter_list", test_url=<目录页>, ocr=<true|false>, display_name=<站点自身的名字>)');
+    buf.writeln('   save_script(domain, run_id, script_type="chapter_list", test_url=<目录页>, display_name=<站点自身的名字>)');
     buf.writeln('4. save_script 返回 success=true 才能进入阶段二；返回 success=false 则按 diagnostic/suggestion 修 JS，重新 execute_js，再 save_script');
     buf.writeln();
     buf.writeln('### 阶段二：内容提取');
@@ -169,21 +170,14 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     buf.writeln('2. navigate_to(url=<该章节URL>) 跳转到内容页，等待加载完成');
     buf.writeln('3. execute_js(script=...) 反复调试 chapter_content 脚本，确认返回 {title, content, font_family}');
     buf.writeln('4. 拿到 __meta.run_id 后立刻调用：');
-    buf.writeln('   save_script(domain, run_id, script_type="chapter_content", test_url=<该章节URL>, ocr=<独立判定：正文页 content 有 PUA 才传 true>)');
+    buf.writeln('   save_script(domain, run_id, script_type="chapter_content", test_url=<该章节URL>)');
     buf.writeln('5. save_script 返回 success=false 仍按诊断修 JS 重试，直到成功');
     buf.writeln();
-    buf.writeln('### 字体反爬检测（ocr 判定）');
-    buf.writeln('若 DOM 文本含大量 PUA 私用区码点（U+E000-F8FF，表现为不可读的乱码方块），');
-    buf.writeln('且页面通过 @font-face 加载自定义字体绑定到正文/标题元素（典型如番茄小说），');
-    buf.writeln('这是字体反爬，ocr 应传 true。');
-    buf.writeln();
-    buf.writeln('OCR 模式下：');
-    buf.writeln('- chapter_content_js 必须额外返回 font_family（用 getComputedStyle(正文元素).fontFamily）');
-    buf.writeln('- content 保留原始 PUA 文本（不要在 JS 里尝试解码）');
-    buf.writeln('- chapter_list 与 chapter_content 的 ocr 各自独立判定，按各自页面是否真有 PUA 传值，不必一致');
-    buf.writeln('  （典型如番茄小说：目录页 title/chapter.title 是正常汉字传 false，正文页 content 有 PUA 传 true）');
-    buf.writeln();
-    buf.writeln('不要在 JS 里做 PUA 到真字的替换（你拿不到字体映射），交给运行时 OCR。');
+    buf.writeln('### 字体反爬（PUA）说明');
+    buf.writeln('部分站点的标题/正文用自定义字体把文字映射到 PUA 私用区码点（U+E000-F8FF，表现为不可读的乱码方块，典型如番茄小说正文）。');
+    buf.writeln('这是站点设计，不是脚本缺陷，你不需要判断、也无需传任何开关：');
+    buf.writeln('- 文本里保留原始 PUA 字符原样返回（运行时会用 font_family 渲染单字并自动 OCR 还原）');
+    buf.writeln('- 绝对不要在 JS 里做 PUA 到真字的替换（你拿不到字体映射），也不要因乱码换选择器');
     buf.writeln();
 
     buf.writeln('## 错误处理');
@@ -1084,8 +1078,8 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
             ? '该域名无缓存脚本，需要新生成提取脚本'
             : '该域名 $scriptType 脚本缺失',
         'suggestion': scriptType == null
-            ? '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=chapter_list, test_url=..., ocr=...) 和 save_script(..., script_type=chapter_content, ...) 分两次落库'
-            : '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=$scriptType, test_url=..., ocr=...) 保存',
+            ? '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=chapter_list, test_url=...) 和 save_script(..., script_type=chapter_content, ...) 分两次落库'
+            : '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=$scriptType, test_url=...) 保存',
       });
     }
 
@@ -1125,7 +1119,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         'missing': <String>[scriptType],
         'message': '该域名 $scriptType 脚本缺失',
         'suggestion':
-            '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=$scriptType, test_url=..., ocr=...) 保存',
+            '请用 execute_js(script=...) 测试新脚本，测试通过后用 save_script(domain, run_id, script_type=$scriptType, test_url=...) 保存',
       });
     }
 
@@ -1207,7 +1201,7 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     } else {
       final missingSaveHint = missing
           .map((t) =>
-              'save_script(domain, run_id, script_type=$t, test_url=..., ocr=...)')
+              'save_script(domain, run_id, script_type=$t, test_url=...)')
           .join(' 和 ');
       message =
           '已加载 ${present.join('+')} 脚本到 RunStore（${hintParts.join('，')}）。'
@@ -1269,16 +1263,20 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   ///
   /// 旧逻辑：直接读 RunStore 脚本 → 校验 → 一次 upsertByDomain 写两段。
   /// 新逻辑：分次保存（scheme/agent 协议决定），每次 save_script 只存**一种**
-  /// script_type，且**必须**先在 test_url 上跑通验证脚本（含 OCR 验证 if ocr=true），
-  /// 再调用 `updateScriptPart` 落库。
+  /// script_type，且**必须**先在 test_url 上跑通验证脚本，再调用
+  /// `updateScriptPart` 落库。
+  ///
+  /// OCR 触发为自动检测（v48）：agent 不传 ocr 参数，校验器扫描脚本返回
+  /// 文本中的 PUA 码点，检测到才走 OCR 验证，并把检测结果写入对应 ocr 列
+  /// （保存时实测记录，运行时不读）。
   ///
   /// 业务流程拆解：
   /// 1. agent 用 `execute_js(script=...)` 测试 → 返回 `__meta.run_id`
-  /// 2. agent 用 `save_script(domain, run_id, script_type=chapter_list, test_url, ocr)`
-  ///    → 后端加载 test_url → 跑脚本 → 结构校验 → （ocr=true 时）OCR 验证 →
+  /// 2. agent 用 `save_script(domain, run_id, script_type=chapter_list, test_url)`
+  ///    → 后端加载 test_url → 跑脚本 → 结构校验 → （检测到 PUA 时）OCR 验证 →
   ///    `updateScriptPart(domain, script_type=chapter_list, ...)` 落库
   /// 3. 同理 chapter_content 走第二步
-  /// 4. list 与 content 的 ocr 各自独立判定，落库到 site_scripts 对应列
+  /// 4. list 与 content 的 ocr 各自按返回文本实测，落到 site_scripts 对应列
   ///    （chapter_list_ocr / chapter_content_ocr），互不覆盖
   ///
   /// ## 测试入口
@@ -1290,12 +1288,12 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   ///
   /// ## 执行流程（拆分为阶段方法）
   ///
-  /// 1. 解析参数（domain/run_id/script_type/test_url/ocr）
+  /// 1. 解析参数（domain/run_id/script_type/test_url）
   /// 2. RunStore.get(run_id) 取脚本
   /// 3. 复用场景 _webviewController → loadPage(test_url) → callAsyncJavaScript(script)
   ///    （不重新 pool.acquire，否则与场景已持有的锁互锁，详见方法内注释）
   /// 4. 结构校验（按 script_type）
-  /// 5. ocr=true → OcrRestoreService 验证（verifyFontFamily + restorePuaInText + readableRatio）
+  /// 5. 检测到 PUA → OcrRestoreService 验证（verifyFontFamily + restorePuaInText + readableRatio）
   /// 6. 全通过 → updateScriptPart 落库；失败返回诊断 JSON
   ///
   /// 核心校验逻辑在 [validateAndPersistScript]（静态，可单测）；
@@ -1311,10 +1309,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
         );
     if (validationError != null) return validationError;
 
-    // bookshelf（网站书架脚本）不适用 OCR：书架页提取的是标题+链接，
-    // 无字体反爬还原需求。强制按 ocr=false 走验证与落库。
-    final effectiveOcr = parsed.scriptType == 'bookshelf' ? false : parsed.ocr;
-
     // ── 阶段二：RunStore 取脚本 ──
     final entry = _runStore.get(parsed.runId);
     if (entry == null) return _runIdNotFoundJson(parsed.runId);
@@ -1327,25 +1321,27 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     // 注意也不在此处调 pool.release()——释放由场景 cleanup 钩子统一负责
     // （见 AgentScenarioFactory.build），否则会把场景已持有的锁错误释放。
     final controller = _webviewController;
+    // 构造是零成本的（只存 ref + 渲染回调，OCR 模型在校验器检测到 PUA
+    // 后才惰性加载），因此无条件注入，由校验器按 PUA 实测决定是否使用。
+    final restoreService = _buildRestoreService(controller);
     try {
       // ── 阶段三：加载 test_url 试运行脚本（loadUrl + 轮询等待 + 执行）──
       final run = await _runScriptOnTestUrl(controller, scriptJs, parsed.testUrl);
       if (run.error != null) return run.error!;
 
-      // ── 阶段四：结构校验 + OCR 验证 + 落库（委托可单测的静态方法）──
+      // ── 阶段四：结构校验 + PUA 自动检测 + OCR 验证 + 落库（委托可单测的静态方法）──
       LoggerService.instance.i(
-        'save_script: 开始 validateAndPersistScript domain=${parsed.domain} scriptType=${parsed.scriptType} ocr=$effectiveOcr',
+        'save_script: 开始 validateAndPersistScript domain=${parsed.domain} scriptType=${parsed.scriptType} ocr=auto',
         category: LogCategory.ai,
         tags: ['agent', 'webview-extract', 'save_script', 'validate-begin'],
       );
       final outcome = await validateAndPersistScript(
         domain: parsed.domain,
         scriptType: parsed.scriptType,
-        ocr: effectiveOcr,
         scriptJs: scriptJs,
         jsResult: run.jsResult,
         repo: _ref.read(siteScriptRepositoryProvider),
-        restoreService: _buildRestoreService(controller, effectiveOcr),
+        restoreService: restoreService,
         testUrl: parsed.testUrl, // 记录验证页 URL（bookshelf 刷新同步用它定位书架页）
         displayName: parsed.displayName,
         preferredMode:
@@ -1384,13 +1380,14 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// save_script 参数解析（阶段一）
   ///
   /// [error] 非 null 表示参数错误（错误 JSON 已构造好，其余字段无意义）。
+  /// v48 起不再接收 ocr：OCR 触发由校验器按 PUA 实测自动判断；agent 若仍传
+  /// ocr（旧习惯）会被 ToolArgParser 忽略，不报错。
   ({
     String? error,
     String domain,
     String runId,
     String scriptType,
     String testUrl,
-    bool ocr,
     String? displayName,
   }) _parseSaveScriptArgs(Map<String, dynamic> args) {
     final parser = ToolArgParser(args);
@@ -1398,11 +1395,10 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     final (runId, e2) = parser.requireString('run_id');
     final (scriptType, e3) = parser.requireString('script_type');
     final (testUrl, e4) = parser.requireString('test_url');
-    final (ocr, e5) = parser.requireBool('ocr');
     // 可选：站点显示名（书架 Tab 优先显示，空/缺省回退 host）
     final (displayName, _) = parser.optionalString('display_name');
 
-    for (final err in [e1, e2, e3, e4, e5]) {
+    for (final err in [e1, e2, e3, e4]) {
       if (err != null) {
         return (
           error: err, // 参数错误直接返回（错误 JSON 已构造好）
@@ -1410,7 +1406,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
           runId: '',
           scriptType: '',
           testUrl: '',
-          ocr: false,
           displayName: null,
         );
       }
@@ -1424,7 +1419,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
       runId: runId,
       scriptType: scriptType,
       testUrl: testUrl,
-      ocr: ocr,
       displayName: displayName,
     );
   }
@@ -1498,13 +1492,11 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     });
   }
 
-  /// 构造 OCR 还原服务（ocr=true 时通过 controller 渲染 PUA；
-  /// bookshelf 已强制 effectiveOcr=false，不构造）。
-  OcrRestoreService? _buildRestoreService(
-    InAppWebViewController controller,
-    bool effectiveOcr,
-  ) {
-    if (!effectiveOcr) return null;
+  /// 构造 OCR 还原服务（校验器检测到 PUA 时通过 controller 渲染 PUA）。
+  ///
+  /// 构造零成本（只存 ref + 渲染回调，模型惰性加载），因此无条件构造，
+  /// 是否使用由校验器的 PUA 自动检测决定。
+  OcrRestoreService _buildRestoreService(InAppWebViewController controller) {
     return OcrRestoreService(
       _ref,
       (cp, ff) => _renderPuaViaController(controller, cp, ff),
@@ -1693,13 +1685,13 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
   /// 验证脚本结果并落库（可单测，绕开 WebView 平台依赖）。
   ///
   /// 静态转发入口：实现已抽到 [WebViewExtractScriptValidator.validateAndPersistScript]
-  /// （结构校验 → OCR 验证 → 落库编排，见 webview_extract_script_validator.dart）。
-  /// 保留原签名，单测（save_script_tool_test.dart）与既有调用方零改动。
+  /// （结构校验 → PUA 自动检测 + OCR 验证 → 落库编排，见
+  /// webview_extract_script_validator.dart）。v48 起无 ocr 参数：OCR 触发由
+  /// 校验器按返回文本中的 PUA 实测决定。
   @visibleForTesting
   static Future<Map<String, dynamic>> validateAndPersistScript({
     required String domain,
     required String scriptType,
-    required bool ocr,
     required String scriptJs,
     required dynamic jsResult,
     required SiteScriptRepository repo,
@@ -1711,7 +1703,6 @@ class WebViewExtractScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMix
     return WebViewExtractScriptValidator.validateAndPersistScript(
       domain: domain,
       scriptType: scriptType,
-      ocr: ocr,
       scriptJs: scriptJs,
       jsResult: jsResult,
       repo: repo,

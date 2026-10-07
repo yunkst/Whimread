@@ -950,46 +950,48 @@ class _ScriptCard extends ConsumerWidget {
 
     if (!context.mounted) return;
 
-    // OCR 判断与还原（与正式提取路径一致）
-    final needsOcr = scriptType == 'chapter_list_js'
-        ? script.chapterListOcr
-        : script.chapterContentOcr;
+    // OCR 判断与还原（v48 起与正式提取路径一致：按返回文本 PUA 实测触发，
+    // 不读落库的 ocr 标志——标志降级为保存时的实测记录，可能过时）
     String? ocrRestoredText;
     double? readableRatio;
     double? decodedRatio;
     String? ocrError;
+    var needsOcr = false;
 
-    if (needsOcr && resultStr != null && errorMsg == null) {
+    if (resultStr != null && errorMsg == null) {
       try {
         final jsResult = jsonDecode(resultStr);
-        final fontFamily = _extractFontFamily(jsResult);
-        if (fontFamily.isEmpty) {
-          ocrError = '脚本标记为 OCR，但返回结果中缺少 font_family 字段';
-        } else {
-          final restoreService = OcrRestoreService.forTesting(
-            renderPua: (cp, ff) =>
-                _renderPuaViaController(controller, cp, ff),
-            recognizeImageFn: (b64) async {
-              final predictor = await ref.read(ocrPredictorProvider.future);
-              return predictor.recognizeImage(b64);
-            },
-          );
-          // 验证字体有效性
-          final fontValid = await restoreService.verifyFontFamily(fontFamily);
-          if (!fontValid) {
-            ocrError = '字体家族 "$fontFamily" 验证失败（PUA 渲染无差异）';
+        final targetText = _extractOcrTargetText(jsResult, scriptType);
+        needsOcr = targetText.runes.any(isPua);
+        if (needsOcr) {
+          final fontFamily = _extractFontFamily(jsResult);
+          if (fontFamily.isEmpty) {
+            ocrError = '检测到 PUA 反爬文本，但返回结果中缺少 font_family 字段（旧版脚本，建议重新生成）';
           } else {
-            // 提取目标文本并还原
-            final targetText = _extractOcrTargetText(jsResult, scriptType);
-            final restored = await restoreService.restorePuaInText(
-              targetText,
-              fontFamily,
+            final restoreService = OcrRestoreService.forTesting(
+              renderPua: (cp, ff) =>
+                  _renderPuaViaController(controller, cp, ff),
+              recognizeImageFn: (b64) async {
+                final predictor = await ref.read(ocrPredictorProvider.future);
+                return predictor.recognizeImage(b64);
+              },
             );
-            ocrRestoredText = restored.text;
-            readableRatio = restoreService.readableRatio(restored.text);
-            decodedRatio = restored.decodedRatio;
-            if (restored.totalPuaCount == 0) {
-              ocrError = '脚本标记为 OCR，但返回文本中未检测到 PUA 码点';
+            // 验证字体有效性
+            final fontValid = await restoreService.verifyFontFamily(fontFamily);
+            if (!fontValid) {
+              ocrError = '字体家族 "$fontFamily" 验证失败（PUA 渲染无差异）';
+            } else {
+              // 提取目标文本并还原
+              final restored = await restoreService.restorePuaInText(
+                targetText,
+                fontFamily,
+              );
+              ocrRestoredText = restored.text;
+              readableRatio = restoreService.readableRatio(restored.text);
+              decodedRatio = restored.decodedRatio;
+              if (restored.totalPuaCount == 0) {
+                ocrError = '未检测到 PUA 码点（无需 OCR）';
+              }
             }
           }
         }

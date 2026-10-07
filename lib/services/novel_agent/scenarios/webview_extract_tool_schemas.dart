@@ -101,7 +101,7 @@ abstract final class WebViewExtractToolSchemas {
       'name': 'save_script',
       'description': '保存提取脚本到本地数据库（按脚本类型分次保存，落库前强制试运行验证）。'
           '工作流程：headless WebView 打开 test_url -> 运行 run_id 指向的 JS -> '
-          '校验结果结构 -> 若 ocr=true 走 OCR 还原 -> 全部通过才落库。'
+          '校验结果结构 -> 检测到字体反爬（PUA）时自动做 OCR 还原验证 -> 全部通过才落库。'
           '验证失败时返回诊断信息指导你修改 JS，不落库。'
           '完整提取器需调用两次：一次 script_type=chapter_list，一次 script_type=chapter_content。',
       'parameters': {
@@ -120,30 +120,17 @@ abstract final class WebViewExtractToolSchemas {
           'script_type': {
             'type': 'string',
             'enum': ['chapter_list', 'chapter_content', 'bookshelf'],
-            'description': '保存的脚本类型。chapter_list 返回 {title, cover_url, chapters:[{title,url}]}'
-              '（cover_url 字段必填，缺失会被拒绝落库；允许空串表示确实无封面）；'
-              'chapter_content 返回 {title, content, font_family}（OCR 模式需 font_family）；'
+            'description': '保存的脚本类型。chapter_list 返回 {title, cover_url, font_family, chapters:[{title,url}]}'
+              '（cover_url / font_family 字段必填，缺失会被拒绝落库；cover_url 允许空串表示确实无封面）；'
+              'chapter_content 返回 {title, content, font_family}；'
               'bookshelf 返回 {novels:[{title,url,cover_url}]}（cover_url 必填，允许空串），'
               '提取「我的书架/收藏」页的小说列表，'
-              'url 为该站小说目录页绝对路径（bookshelf 不适用 OCR，ocr 固定传 false）。',
+              'url 为该站小说目录页绝对路径。',
           },
           'test_url': {
             'type': 'string',
             'description': '验证用页面 URL。chapter_list 用目录页 URL，'
                 'chapter_content 用章节内容页 URL。save_script 会真实加载该 URL 跑 JS 做验证。',
-          },
-          'ocr': {
-            'type': 'boolean',
-            'description': '该站点是否需要 OCR 后处理（字体反爬）的硬性开关。\n'
-                '传 true 的充要条件：脚本返回的文本中出现 PUA 私用区码点（U+E000–F8FF，页面表现是乱码方块）。\n'
-                '若页面文本正常可读，必须传 false。\n'
-                '传 true 时，save_script 会先扫描文本中是否存在 PUA 码点；若无则直接拒绝落库并返回 reason=ocr_no_pua。\n'
-                '判定方法：在脚本探测阶段留意 execute_js 返回值里是否含 PUA 或乱码方块；可用 JS 码点扫描 console.log([...text].some(c => c >= 0xE000 && c <= 0xF8FF))。\n'
-'对 chapter_content：还原 content 里的 PUA；'
-              '对 chapter_list：还原 title 字段里的 PUA（小说名 + 章名）。'
-              'chapter_list 与 chapter_content 的 ocr 各自独立判定，按各自页面是否真有 PUA 传值，'
-              '不必一致（典型如番茄小说：目录页 title/chapter.title 是正常汉字传 false，正文页 content 有 PUA 才传 true）。'
-              '落库后分别存为该 script_type 的 ocr 标记，互不覆盖。',
           },
           'display_name': {
             'type': 'string',
@@ -153,7 +140,7 @@ abstract final class WebViewExtractToolSchemas {
                 '仅在第一次调用时传本参数（后续分次调用会保留该值不覆盖）。',
           },
         },
-        'required': ['domain', 'run_id', 'script_type', 'test_url', 'ocr'],
+        'required': ['domain', 'run_id', 'script_type', 'test_url'],
       },
     },
   };

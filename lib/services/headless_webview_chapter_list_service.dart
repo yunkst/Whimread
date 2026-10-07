@@ -139,28 +139,38 @@ class HeadlessWebViewChapterListService {
       List<Chapter> chapters = result.chapters;
       final coverUrl = result.coverUrl;
 
-      // 5. OCR 还原（目录脚本标记 chapter_list_ocr 时对 PUA 反爬文本走 PP-OCRv6）
-      if (script.chapterListOcr) {
-        try {
-          final restored = await restoreChapterListIfNeeded(
-            needsOcr: true,
-            title: title,
-            chapters: chapters,
-            fontFamily: fontFamily,
-            // 产品路径 _ref 非 null；provider 注入保证（见 network_service_providers）
-            restoreService: OcrRestoreService(_ref!, _renderPua),
-          );
-          title = restored.title;
-          chapters = restored.chapters;
-        } catch (e, stackTrace) {
-          // restoreChapterListIfNeeded 已 try-catch，此处为防御兜底
-          LoggerService.instance.w(
-            'HeadlessWebViewChapterList: OCR 还原异常未降级（理论上不可达）',
-            stackTrace: stackTrace.toString(),
-            category: LogCategory.crawler,
-            tags: ['headless-webview', 'chapter-list', 'ocr', 'unexpected'],
-          );
-        }
+      // 5. OCR 还原（v48 起按 PUA 实测自动触发，不再读落库的 chapter_list_ocr
+      //    标志——扫描范围 title + 全部章名；管道对无 PUA 文本一次 rune 扫描
+      //    即返回，开销可忽略）
+      final detectedPua = result.title.runes.any(isPua) ||
+          chapters.any((c) => c.title.runes.any(isPua));
+      if (detectedPua != script.chapterListOcr) {
+        LoggerService.instance.i(
+          'OCR 落库标志与实测不一致（以实测为准）: domain=$logDomain '
+          'flag=${script.chapterListOcr} detectedPua=$detectedPua',
+          category: LogCategory.crawler,
+          tags: ['headless-webview', 'chapter-list', 'ocr', 'flag-mismatch'],
+        );
+      }
+      try {
+        final restored = await restoreChapterListIfNeeded(
+          needsOcr: detectedPua,
+          title: title,
+          chapters: chapters,
+          fontFamily: fontFamily,
+          // 产品路径 _ref 非 null；provider 注入保证（见 network_service_providers）
+          restoreService: OcrRestoreService(_ref!, _renderPua),
+        );
+        title = restored.title;
+        chapters = restored.chapters;
+      } catch (e, stackTrace) {
+        // restoreChapterListIfNeeded 已 try-catch，此处为防御兜底
+        LoggerService.instance.w(
+          'HeadlessWebViewChapterList: OCR 还原异常未降级（理论上不可达）',
+          stackTrace: stackTrace.toString(),
+          category: LogCategory.crawler,
+          tags: ['headless-webview', 'chapter-list', 'ocr', 'unexpected'],
+        );
       }
 
       // 6. 校验结果

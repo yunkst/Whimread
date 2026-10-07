@@ -1,7 +1,12 @@
 /// WebView 提取场景的脚本静态校验 + 落库编排
 ///
 /// 从 `WebViewExtractScenario` 抽出的独立职责：接收「已执行的 JS 结果」，
-/// 完成结构校验 → （ocr=true 时）OCR 验证 → 落库三步，返回结构化诊断。
+/// 完成结构校验 → （检测到 PUA 时）OCR 验证 → 落库三步，返回结构化诊断。
+///
+/// OCR 触发为**自动检测**（v48）：扫描脚本返回文本中的 PUA 私用区码点，
+/// 有则走 OCR 验证并把该 script_type 的 ocr 标志落库为 1。agent 不再传
+/// ocr 参数，也不需要判断站点是否有字体反爬；ocr 列降级为「保存时实测
+/// 记录」（展示/诊断用），运行时同样按 PUA 实测触发还原，不读此列。
 ///
 /// 核心入口 [WebViewExtractScriptValidator.validateAndPersistScript] 为纯静态
 /// 函数，repo/restoreService 均注入，可脱离 WebView 平台依赖做单测
@@ -21,17 +26,18 @@ abstract final class WebViewExtractScriptValidator {
   ///
   /// 接收"已执行的 JS 结果"（jsResult，由 executor 通过 callAsyncJavaScript
   /// 调用并 jsonDecode 后传入），完成：
-  /// 1. 结构校验（[_validateScriptResult]）
-  /// 2. ocr=true → OCR 验证（[WebViewExtractOcrValidator.validate]）
+  /// 1. 结构校验（[_validateScriptResult]，含 font_family 无条件必填）
+  /// 2. 自动检测 PUA → 有则 OCR 验证（[WebViewExtractOcrValidator.validate]）
   /// 3. 全通过 → [SiteScriptRepository.updateScriptPart] 落库
+  ///    （ocr 列写检测结果，作为保存时实测记录）
   ///
   /// 返回值（始终为 Map，executor 再 jsonEncode）：
   /// - 失败：`{success: false, reason, diagnostic, suggestion, ...}`
   /// - 成功：`{success: true, domain, script_type, ocr, [ocr_applied], ...}`
+  ///   其中 ocr=自动检测到的 PUA 有无。
   static Future<Map<String, dynamic>> validateAndPersistScript({
     required String domain,
     required String scriptType,
-    required bool ocr,
     required String scriptJs,
     required dynamic jsResult,
     required SiteScriptRepository repo,
@@ -41,7 +47,7 @@ abstract final class WebViewExtractScriptValidator {
     int? preferredMode,
   }) async {
     // 1. 结构校验
-    final structErr = _validateScriptResult(jsResult, scriptType, ocr);
+    final structErr = _validateScriptResult(jsResult, scriptType);
     if (structErr != null) {
       return {
         'success': false,
@@ -50,28 +56,17 @@ abstract final class WebViewExtractScriptValidator {
       };
     }
 
-    // 2. OCR 验证（ocr=true 时强制走）
-    if (ocr) {
-      // 2.0 前置闸：ocr=true 必须见到 PUA 码点，否则直接拒绝（避免 agent 误传 true 走无谓 OCR 流程）
-      final ocrTargetText = WebViewExtractOcrValidator.extractOcrTargetText(jsResult, scriptType);
-      if (!WebViewExtractOcrValidator.containsPrivateUseArea(ocrTargetText)) {
-        return {
-          'success': false,
-          'reason': 'ocr_no_pua',
-          // TODO(ocr_applied 语义): 此字段在拒绝路径上返回 true 但 OCR 实际未执行（闸先于 OCR 运行）。
-          // 与本文件 font_family_missing 不返回 ocr_applied 的惯例不一致；无消费方从失败路径读取，待后续统一语义。
-          'ocr_applied': true,
-          'diagnostic': 'ocr=true 但脚本返回文本中未检测到 PUA 码点（U+E000-F8FF），不符合字体反爬判定条件',
-          'suggestion': '请重新确认该站点是否真的有字体反爬。若确认无 PUA，调用 save_script 时传 ocr=false；'
-              '若应该有 PUA 但检测失败，请检查脚本是否正确返回了带 PUA 的原始文本（不要在 JS 里替换）',
-        };
-      }
-
+    // 2. OCR 验证（自动检测到 PUA 时走；bookshelf 的目标文本恒为空串，
+    //    天然不会触发——书架无运行时还原路径）
+    final detectedPua = WebViewExtractOcrValidator.containsPrivateUseArea(
+      WebViewExtractOcrValidator.extractOcrTargetText(jsResult, scriptType),
+    );
+    if (detectedPua) {
       if (restoreService == null) {
         return {
           'success': false,
           'reason': 'restore_service_missing',
-          'diagnostic': 'ocr=true 但 restoreService 未注入（实现错误）',
+          'diagnostic': '检测到 PUA 但 restoreService 未注入（实现错误）',
         };
       }
       final fontFamily = _extractFontFamily(jsResult);
@@ -99,12 +94,12 @@ abstract final class WebViewExtractScriptValidator {
       }
     }
 
-    // 3. 落库
+    // 3. 落库（ocr 列写保存时实测的 PUA 检测结果，仅作展示/诊断元数据）
     final saveResult = await repo.updateScriptPart(
       domain: domain,
       scriptType: scriptType,
       scriptJs: scriptJs,
-      ocr: ocr,
+      ocr: detectedPua,
       testUrl: testUrl,
       displayName: displayName,
       preferredMode: preferredMode,
@@ -125,9 +120,9 @@ abstract final class WebViewExtractScriptValidator {
       'success': true,
       'domain': domain,
       'script_type': scriptType,
-      'ocr': ocr,
+      'ocr': detectedPua,
       'id': saveResult.id,
-      if (ocr) 'ocr_applied': true,
+      if (detectedPua) 'ocr_applied': true,
     };
   }
 
@@ -136,12 +131,15 @@ abstract final class WebViewExtractScriptValidator {
   /// chapter_list 校验：`chapters` 必须是非空 List，每项 title/url 非空；
   /// `cover_url`（或 coverUrl）字段必须存在（String，允许空串），缺失视为
   /// 脚本未按要求提供封面图，拒绝落库（reason=cover_url_missing）。
-  /// chapter_content 校验：`content` 长度 >= 50；ocr=true 时 `font_family` 非空。
-  /// bookshelf 校验：`novels` 必须是非空 List，每项 title/url 非空。OCR 不适用。
+  /// chapter_content 校验：`content` 长度 >= 50。
+  /// 两者均要求 `font_family` 非空（v48 起无条件必填）：运行时 OCR 触发改由
+  /// PUA 实测决定，字体反爬可能在保存样本之外出现（站点中途加反爬/部分章节
+  /// 混合反爬），脚本必须每次带回字体族供还原管道使用，成本仅一次
+  /// getComputedStyle。bookshelf 校验：`novels` 必须是非空 List，每项
+  /// title/url 非空。OCR/font_family 不适用（无运行时还原路径）。
   static Map<String, dynamic>? _validateScriptResult(
     dynamic data,
     String scriptType,
-    bool ocr,
   ) {
     if (data is! Map) {
       return {
@@ -187,6 +185,17 @@ abstract final class WebViewExtractScriptValidator {
               'const cover = og?.content || document.querySelector(\'.book-img, #bookImg, .cover img\')?.src || \'\'; '
               'const coverUrl = cover ? new URL(cover, PAGE_URL).href : \'\'; '
               '返回 {title, cover_url: coverUrl, chapters:[...]}',
+        };
+      }
+      // font_family 无条件必填（v48）：运行时 OCR 按 PUA 实测触发，脚本必须
+      // 每次带回目录页字体族，否则站点日后新增反爬时无法还原。
+      final ff = _extractFontFamily(data);
+      if (ff.isEmpty) {
+        return {
+          'reason': 'font_family_missing',
+          'diagnostic': 'chapter_list 脚本必须返回 font_family（目录页标题元素的字体族）',
+          'suggestion': '在脚本里加 const ff = getComputedStyle(章节标题元素).fontFamily; '
+              '返回 {title, cover_url, font_family: ff, chapters:[...]}',
         };
       }
       return null;
@@ -241,16 +250,16 @@ abstract final class WebViewExtractScriptValidator {
         'suggestion': '检查正文选择器，或等待页面加载完成再提取',
       };
     }
-    if (ocr) {
-      final ff = _extractFontFamily(data);
-      if (ff.isEmpty) {
-        return {
-          'reason': 'font_family_missing',
-          'diagnostic': 'OCR 模式下 chapter_content 脚本必须返回 font_family',
-          'suggestion': '在脚本里加 const ff = getComputedStyle(正文元素).fontFamily; '
-              '返回 {title, content, font_family: ff}',
-        };
-      }
+    // font_family 无条件必填（v48）：同 chapter_list，正文页字体族供运行时
+    // PUA 实测触发还原使用。
+    final ff = _extractFontFamily(data);
+    if (ff.isEmpty) {
+      return {
+        'reason': 'font_family_missing',
+        'diagnostic': 'chapter_content 脚本必须返回 font_family（正文元素的字体族）',
+        'suggestion': '在脚本里加 const ff = getComputedStyle(正文元素).fontFamily; '
+            '返回 {title, content, font_family: ff}',
+      };
     }
     return null;
   }

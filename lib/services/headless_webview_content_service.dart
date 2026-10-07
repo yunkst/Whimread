@@ -250,18 +250,27 @@ class HeadlessWebViewContentService {
         tags: ['headless-webview', 'success'],
       );
 
-      // 7. OCR 还原（正文脚本标记 chapter_content_ocr 时对 PUA 反爬文本走 PP-OCRv6）
+      // 7. OCR 还原（v48 起按 PUA 实测自动触发，不再读落库的 chapter_content_ocr
+      //    标志——标志可能过时（站点中途增删反爬）或误设（agent 误判），实测
+      //    每页准确；还原管道对无 PUA 文本只做一次 rune 扫描即返回，开销可忽略）
       String finalContent = result.content;
       final fontFamily = result.fontFamily;
-      if (script.chapterContentOcr) {
-        finalContent = await restoreContentIfNeeded(
-          needsOcr: true,
-          content: finalContent,
-          fontFamily: fontFamily,
-          // 产品路径 _ref 非 null；provider 注入保证（见 network_service_providers）
-          restoreService: OcrRestoreService(_ref!, _renderPua),
+      final detectedPua = result.content.runes.any(isPua);
+      if (detectedPua != script.chapterContentOcr) {
+        LoggerService.instance.i(
+          'OCR 落库标志与实测不一致（以实测为准）: domain=$logDomain '
+          'flag=${script.chapterContentOcr} detectedPua=$detectedPua',
+          category: LogCategory.crawler,
+          tags: ['headless-webview', 'ocr', 'flag-mismatch'],
         );
       }
+      finalContent = await restoreContentIfNeeded(
+        needsOcr: detectedPua,
+        content: finalContent,
+        fontFamily: fontFamily,
+        // 产品路径 _ref 非 null；provider 注入保证（见 network_service_providers）
+        restoreService: OcrRestoreService(_ref!, _renderPua),
+      );
 
       return FetchContentResult.success(
         ChapterContentResult(

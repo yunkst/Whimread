@@ -35,17 +35,21 @@ class SiteScript {
   final int useCount;
   final int verified;
 
-  /// 目录提取脚本是否需要 OCR 后处理（字体反爬）。
+  /// 目录脚本「保存时实测到字体反爬（PUA）」的记录（v39 拆列；v48 降级为元数据）。
   ///
-  /// v39 拆列后独立标记——典型如番茄小说，目录页 title/chapter.title 是正常汉字
-  /// （无 PUA），所以此字段为 false；正文页有 PUA，chapterContentOcr 才为 true。
-  /// 两者互不覆盖。
+  /// 典型如番茄小说，目录页 title/chapter.title 是正常汉字（无 PUA），
+  /// 此字段为 false；正文页有 PUA，chapterContentOcr 才为 true。
+  ///
+  /// v48 起 agent 不再传 ocr，值由 save_script 校验器扫描返回文本自动写入；
+  /// **运行时 OCR 触发不读此列**——headless 服务按每页文本的 PUA 实测决定，
+  /// 本列仅用于脚本面板展示/诊断（标志与实测不符会打 flag-mismatch 日志）。
   final bool chapterListOcr;
 
-  /// 正文提取脚本是否需要 OCR 后处理（字体反爬）。
+  /// 正文脚本「保存时实测到字体反爬（PUA）」的记录（v39 拆列；v48 降级为元数据）。
   ///
-  /// v39 拆列后独立标记。多数普通目录点两列均为 false；字体反爬站点（如番茄）
-  /// 一般 content_ocr=true、list_ocr=false。
+  /// 多数普通目录点两列均为 false；字体反爬站点（如番茄）一般
+  /// content_ocr=true、list_ocr=false。语义同 [chapterListOcr]：保存时实测
+  /// 记录，运行时按 PUA 实测触发，不读此列。
   final bool chapterContentOcr;
 
   /// 网站书架提取脚本（v40 起）。

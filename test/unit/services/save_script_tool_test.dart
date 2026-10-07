@@ -5,13 +5,19 @@
 /// + callAsyncJavaScript），纯 Dart 测试无法构造。把核心验证逻辑抽成 static
 /// `validateAndPersistScript` 后，可注入 jsResult/repo/restoreService 完成单测覆盖。
 ///
+/// v48 起 OCR 触发为 PUA 自动检测：调用方不再传 ocr 参数；返回文本含 PUA
+/// → 走 OCR 验证并落库 ocr=true，否则跳过 OCR 直接落库 ocr=false。
+/// font_family 对 chapter_list / chapter_content 无条件必填（运行时还原依赖）。
+///
 /// 覆盖：
 /// - 结构校验失败（content 太短）→ reason=content_too_short，不落库
-/// - ocr=true 字体无效 → reason=font_family_invalid，不落库
-/// - ocr=true readable_ratio 不达标 → reason=readable_ratio_below_threshold
+/// - font_family 无条件必填（chapter_list / chapter_content）
+/// - 含 PUA 且字体无效 → reason=font_family_invalid，不落库
+/// - 含 PUA readable_ratio 不达标 → reason=readable_ratio_below_threshold
 /// - 全部验证通过 → success=true，repo.updateScriptPart 调一次（参数正确）
-/// - ocr=false 结构通过 → success=true，ocr=false 直接落库，restoreService 不被调
-/// - 结构校验：chapters_empty / chapter_missing_field / font_family_missing / invalid_structure
+/// - 无 PUA → 不走 OCR 验证直接落库（ocr=false），restoreService 不被调
+/// - 含 PUA 但未注入 restoreService → restore_service_missing
+/// - 结构校验：chapters_empty / chapter_missing_field / invalid_structure
 /// - 落库：repo 返回失败 reason → 透传失败返回，不抛
 library;
 
@@ -30,16 +36,18 @@ import 'save_script_tool_test.mocks.dart';
 void main() {
   // ─── 工具函数 ───
 
-  /// 73 字正文（远超 50 下限），末尾追加 1 个 PUA 码点（U+E000）。
+  /// 72 字纯正常正文（无 PUA，远超 50 下限）。
   ///
-  /// PUA 后缀为后续 OCR 路径新增的"含 PUA 才允许走 OCR"前置闸服务：
-  /// 默认 contentResult() 必须能穿过该闸，不影响其它既有用例。
+  /// v48 起默认夹具不含 PUA：无 PUA = 不触发 OCR 验证，对应大多数站点的
+  /// 主路径。OCR 路径的用例用 [puaContent] 显式构造。
   const longContent = '正常正文文字正常正文文字正常正文文字正常正文文字'
       '正常正文文字正常正文文字正常正文文字正常正文文字'
-      '正常正文文字正常正文文字正常正文文字正常正文文字'
-      '\u{E000}';
+      '正常正文文字正常正文文字正常正文文字正常正文文字';
 
-  /// 构造一个 chapter_content 用的合法 jsResult（含 content + font_family）
+  /// [longContent] 末尾追加 1 个 PUA 码点（U+E000），用于触发自动 OCR 验证。
+  const puaContent = '$longContent\u{E000}';
+
+  /// 构造一个 chapter_content 用的合法 jsResult（含 content + font_family 必填字段）
   Map<String, dynamic> contentResult({
     String content = longContent,
     String fontFamily = 'GoodFont',
@@ -51,10 +59,11 @@ void main() {
         'font_family': fontFamily,
       };
 
-  /// 构造一个 chapter_list 用的合法 jsResult（含 cover_url 必填字段）
+  /// 构造一个 chapter_list 用的合法 jsResult（含 cover_url / font_family 必填字段）
   Map<String, dynamic> listResult({String title = '书名'}) => {
         'title': title,
         'cover_url': 'https://a.com/cover.jpg',
+        'font_family': 'ListFont',
         'chapters': [
           {'title': '第一章 起始', 'url': 'https://a.com/c1'},
           {'title': '第二章 发展', 'url': 'https://a.com/c2'},
@@ -85,7 +94,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: false,
         scriptJs: '(async function(){...})()',
         jsResult: contentResult(content: '太短啦'),
         repo: repo,
@@ -106,7 +114,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {'title': '无章节字段'},
         repo: repo,
@@ -120,7 +127,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'title': '书',
@@ -140,7 +146,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'title': '书',
@@ -175,11 +180,11 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'title': '书',
           'coverUrl': 'https://a.com/cover.jpg', // camelCase 兜底
+          'font_family': 'ListFont',
           'chapters': [
             {'title': '第一章', 'url': 'https://a.com/c1'},
           ],
@@ -201,11 +206,11 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'title': '书',
           'cover_url': '', // 空串：确实无封面
+          'font_family': 'ListFont',
           'chapters': [
             {'title': '第一章', 'url': 'https://a.com/c1'},
           ],
@@ -227,7 +232,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'bookshelf',
-        ocr: false, // bookshelf 强制 ocr=false
         scriptJs: 'js',
         jsResult: {
           'novels': [
@@ -248,7 +252,7 @@ void main() {
       expect(result['success'], true);
       expect(result['domain'], 'a.com');
       expect(result['script_type'], 'bookshelf');
-      expect(result['ocr'], false);
+      expect(result['ocr'], false); // bookshelf 无运行时还原路径，恒不触发
       verify(repo.updateScriptPart(
         domain: 'a.com',
         scriptType: 'bookshelf',
@@ -262,7 +266,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'bookshelf',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'novels': [
@@ -281,7 +284,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'bookshelf',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {'title': '无 novels 字段'},
         repo: repo,
@@ -301,7 +303,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'bookshelf',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {'novels': []},
         repo: repo,
@@ -315,7 +316,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'bookshelf',
-        ocr: false,
         scriptJs: 'js',
         jsResult: {
           'novels': [
@@ -334,7 +334,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: false,
         scriptJs: 'js',
         jsResult: 'not_a_map',
         repo: repo,
@@ -343,14 +342,12 @@ void main() {
       expect(result['reason'], 'invalid_structure');
     });
 
-    test('chapter_content ocr=true 缺 font_family → font_family_missing', () async {
+    test('chapter_content 缺 font_family → font_family_missing（v48 起无条件必填）', () async {
       final repo = MockSiteScriptRepository();
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        // 不传 fontFamily，默认为 'GoodFont'；下方覆盖为空
         jsResult: {
           'content': longContent,
           'title': '第一章',
@@ -361,10 +358,30 @@ void main() {
       expect(result['success'], false);
       expect(result['reason'], 'font_family_missing');
     });
+
+    test('chapter_list 缺 font_family → font_family_missing（v48 起无条件必填）', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'chapter_list',
+        scriptJs: 'js',
+        jsResult: {
+          'title': '书',
+          'cover_url': 'https://a.com/cover.jpg',
+          'chapters': [
+            {'title': '第一章', 'url': 'https://a.com/c1'},
+          ],
+          // 故意不写 font_family
+        },
+        repo: repo,
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'font_family_missing');
+    });
   });
 
-  group('validateAndPersistScript - OCR 验证', () {
-    test('ocr=true 字体无效 → font_family_invalid，不落库', () async {
+  group('validateAndPersistScript - OCR 自动检测与验证', () {
+    test('含 PUA 且字体无效 → font_family_invalid，不落库', () async {
       final repo = MockSiteScriptRepository();
       final svc = MockOcrRestoreService();
       when(svc.verifyFontFamily(any)).thenAnswer((_) async => false);
@@ -372,9 +389,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: svc,
       );
@@ -388,7 +404,7 @@ void main() {
       ));
     });
 
-    test('ocr=true readable_ratio<阈值(0.75) → readable_ratio_below_threshold', () async {
+    test('含 PUA 且 readable_ratio<阈值(0.75) → readable_ratio_below_threshold', () async {
       final repo = MockSiteScriptRepository();
       final svc = MockOcrRestoreService();
       when(svc.verifyFontFamily(any)).thenAnswer((_) async => true);
@@ -400,9 +416,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: svc,
       );
@@ -416,30 +431,52 @@ void main() {
       ));
     });
 
-    test('ocr=true chapter_content 文本无 PUA → ocr_no_pua，不调 verifyFontFamily 也不落库', () async {
+    test('文本无 PUA → 不走 OCR 验证直接落库（ocr=false），restoreService 不被调', () async {
       final repo = MockSiteScriptRepository();
+      when(repo.updateScriptPart(
+        domain: anyNamed('domain'),
+        scriptType: anyNamed('scriptType'),
+        scriptJs: anyNamed('scriptJs'),
+        ocr: anyNamed('ocr'),
+      )).thenAnswer((_) async => (success: true, id: 'site_nopua', reason: null));
       final svc = MockOcrRestoreService();
+      // 即便字体无效也不该被问到：无 PUA 就不该走 OCR 验证
       when(svc.verifyFontFamily(any)).thenAnswer((_) async => false);
 
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        // 64+ 字无 PUA 纯正常正文（>=50 下限以满足结构校验）
-        jsResult: contentResult(
-          content: '没有PUA的纯正常正文没有PUA的纯正常正文'
-              '没有PUA的纯正常正文没有PUA的纯正常正文'
-              '没有PUA的纯正常正文没有PUA的纯正常正文'
-              '没有PUA的纯正常正文没有PUA的纯正常正文',
-        ),
+        // 72 字无 PUA 纯正常正文（>=50 下限以满足结构校验）
+        jsResult: contentResult(),
         repo: repo,
         restoreService: svc,
       );
 
-      expect(result['success'], false);
-      expect(result['reason'], 'ocr_no_pua');
+      expect(result['success'], true);
+      expect(result['ocr'], false);
+      expect(result.containsKey('ocr_applied'), isFalse);
       verifyNever(svc.verifyFontFamily(any));
+      verify(repo.updateScriptPart(
+        domain: 'a.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'js',
+        ocr: false,
+      )).called(1);
+    });
+
+    test('含 PUA 但未注入 restoreService → restore_service_missing，不落库', () async {
+      final repo = MockSiteScriptRepository();
+      final result = await WebViewExtractScenario.validateAndPersistScript(
+        domain: 'a.com',
+        scriptType: 'chapter_content',
+        scriptJs: 'js',
+        jsResult: contentResult(content: puaContent),
+        repo: repo,
+        // restoreService 缺省为 null
+      );
+      expect(result['success'], false);
+      expect(result['reason'], 'restore_service_missing');
       verifyNever(repo.updateScriptPart(
         domain: anyNamed('domain'),
         scriptType: anyNamed('scriptType'),
@@ -448,30 +485,7 @@ void main() {
       ));
     });
 
-    test('ocr=true chapter_list 所有 title 无 PUA → ocr_no_pua', () async {
-      final repo = MockSiteScriptRepository();
-      final result = await WebViewExtractScenario.validateAndPersistScript(
-        domain: 'a.com',
-        scriptType: 'chapter_list',
-        ocr: true,
-        scriptJs: 'js',
-        jsResult: {
-          'title': '书名',
-          'cover_url': 'https://a.com/cover.jpg',
-          'chapters': [
-            {'title': '第一章 起始', 'url': 'https://a.com/c1'},
-            {'title': '第二章 发展', 'url': 'https://a.com/c2'},
-          ],
-        },
-        repo: repo,
-        restoreService: MockOcrRestoreService(),
-      );
-
-      expect(result['success'], false);
-      expect(result['reason'], 'ocr_no_pua');
-    });
-
-    test('ocr=true chapter_list 标题含 1 个 PUA → 通过闸（不返回 ocr_no_pua）', () async {
+    test('chapter_list 标题含 1 个 PUA → 触发 OCR 验证并落库 ocr=true', () async {
       final repo = MockSiteScriptRepository();
       when(repo.updateScriptPart(
         domain: anyNamed('domain'),
@@ -483,11 +497,11 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: true,
         scriptJs: 'js',
         jsResult: {
           'title': '书名\u{E001}',
           'cover_url': 'https://a.com/cover.jpg',
+          'font_family': 'ListFont',
           'chapters': [
             {'title': '第一章 起始', 'url': 'https://a.com/c1'},
           ],
@@ -497,12 +511,13 @@ void main() {
       );
 
       expect(result['success'], true);
-      expect(result['reason'], isNot('ocr_no_pua'));
+      expect(result['ocr'], true);
+      expect(result['ocr_applied'], true);
     });
 
-    // PUA-B (U+F0000-FFFFD) 也视为 PUA，不被 ocr_no_pua 闸误杀。
-    // 验证 F4 修复：_containsPrivateUseArea → isPua（覆盖全部 3 段 PUA 范围）。
-    test('ocr=true chapter_list 标题含 PUA-B (U+0xF0000) → 通过闸（不返回 ocr_no_pua）', () async {
+    // PUA-B (U+F0000-FFFFD) 也视为 PUA，自动检测不漏判。
+    // 延续 F4 修复：isPua 覆盖全部 3 段 PUA 范围。
+    test('chapter_list 标题含 PUA-B (U+0xF0000) → 触发 OCR 验证并落库', () async {
       final repo = MockSiteScriptRepository();
       when(repo.updateScriptPart(
         domain: anyNamed('domain'),
@@ -514,11 +529,11 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: true,
         scriptJs: 'js',
         jsResult: {
           'title': '书名${String.fromCharCode(0xF0000)}',
           'cover_url': 'https://a.com/cover.jpg',
+          'font_family': 'ListFont',
           'chapters': [
             {'title': '第一\u{D800}章', 'url': 'https://a.com/c1'},
           ],
@@ -528,7 +543,7 @@ void main() {
       );
 
       expect(result['success'], true);
-      expect(result['reason'], isNot('ocr_no_pua'));
+      expect(result['ocr'], true);
     });
   });
 
@@ -545,9 +560,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: svc,
       );
@@ -575,9 +589,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: svc,
       );
@@ -607,9 +620,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'js',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: svc,
       );
@@ -621,7 +633,7 @@ void main() {
   });
 
   group('validateAndPersistScript - 落库', () {
-    test('全部验证通过 → 落库成功，updateScriptPart 调用一次（参数正确）', () async {
+    test('含 PUA 全部验证通过 → 落库成功，ocr=true（保存时实测记录）', () async {
       final repo = MockSiteScriptRepository();
       when(repo.updateScriptPart(
         domain: anyNamed('domain'),
@@ -633,9 +645,8 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_content',
-        ocr: true,
         scriptJs: 'script_js_content',
-        jsResult: contentResult(),
+        jsResult: contentResult(content: puaContent),
         repo: repo,
         restoreService: goodRestore(),
       );
@@ -657,7 +668,7 @@ void main() {
       expect(captured[3], true);
     });
 
-    test('ocr=false chapter_list 结构通过 → 直接落库（不调 restoreService）', () async {
+    test('无 PUA 的 chapter_list 结构通过 → 直接落库（不调 restoreService）', () async {
       final repo = MockSiteScriptRepository();
       when(repo.updateScriptPart(
         domain: anyNamed('domain'),
@@ -669,7 +680,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'a.com',
         scriptType: 'chapter_list',
-        ocr: false,
         scriptJs: 'script_js_list',
         jsResult: listResult(),
         repo: repo,
@@ -705,7 +715,6 @@ void main() {
       final result = await WebViewExtractScenario.validateAndPersistScript(
         domain: 'not.exist',
         scriptType: 'chapter_content',
-        ocr: false,
         scriptJs: 'js',
         jsResult: contentResult(),
         repo: repo,
