@@ -62,8 +62,9 @@ jobs:
         run: |
           rm -rf .dart_tool/sqflite_common_ffi 2>/dev/null || true
           # 传目录即可：flutter test 自动只挑 *_test.dart。
-          # （SKIP_LIST 文件清单机制随 subagent_detail_screen_test.dart 删除一并移除）
-          flutter test --no-pub test/unit/ test/bug/ test/verification/ test/widgets/ test/widget/ test/screens/
+          # （SKIP_LIST 文件清单机制随 subagent_detail_screen_test.dart 删除一并移除；
+          #   test/verification/ 随一次性验证测试清理已整目录删除，不再列入）
+          flutter test --no-pub test/unit/ test/bug/ test/widgets/ test/widget/ test/screens/
 
   build-and-release:
     needs: quality

@@ -6,7 +6,7 @@ Novel App 发布脚本
 
 阶段 1 — 预检（模拟 CI）:
   1.1 flutter analyze --no-fatal-infos
-  1.2 flutter test --no-pub test/{unit,bug,verification,widgets,widget,screens}
+  1.2 flutter test --no-pub test/{unit,bug,widgets,widget,screens}
   1.3 flutter build apk --release
 
 阶段 2 — 版本识别:
@@ -137,7 +137,7 @@ def run_preflight(project_root: Path) -> bool:
 
     运行与 GitHub Actions 完全一致的检查：
     1. flutter analyze --no-fatal-infos
-    2. flutter test --no-pub test/unit/ test/bug/ test/verification/
+    2. flutter test --no-pub test/unit/ test/bug/ test/widgets/ test/widget/ test/screens/
     3. flutter build apk --release
 
     Returns:
@@ -168,12 +168,13 @@ def run_preflight(project_root: Path) -> bool:
         return False
     print("  ✅ flutter analyze 通过")
 
-    # 1.2 flutter test —— 与 CI 同范围：6 个目录，flutter test 自动只挑
+    # 1.2 flutter test —— 与 CI 同范围：5 个目录，flutter test 自动只挑
     # *_test.dart。传目录而非文件清单，避免 Windows cmd.exe 8191 字符
     # 命令行上限（shell=True 下 195 个文件路径必超长）。
     # （旧版 -j 1 是为绕开 backup 测试共享 novel_reader.db 撞库，
-    #  test_bootstrap.useIsolatedDatabaseDir 修复根因后已与 CI 一并放开）
-    test_dirs = ["test/unit", "test/bug", "test/verification",
+    #  test_bootstrap.useIsolatedDatabaseDir 修复根因后已与 CI 一并放开；
+    #  test/verification 随一次性验证测试清理已整目录删除，不再列入）
+    test_dirs = ["test/unit", "test/bug",
                  "test/widgets", "test/widget", "test/screens"]
     print("\n  [1.2/3] flutter test --no-pub " + " ".join(test_dirs))
     print("  " + "-" * 40)
