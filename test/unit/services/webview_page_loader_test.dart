@@ -27,7 +27,7 @@ void main() {
 
   /// 构造一个"自动触发 onLoadStop"的 triggerLoad。
   /// 调用后下一事件循环触发 loader 的 onLoadStop 回调，模拟 WebView 加载完成。
-  Future<void> Function(String) _autoLoadStopTrigger(
+  Future<void> Function(String) autoLoadStopTrigger(
     WebViewPageLoader loader,
   ) {
     return (url) async {
@@ -47,7 +47,7 @@ void main() {
         controller: null,
         url: 'https://example.com',
         domStabilizeDelay: Duration.zero,
-        triggerLoad: _autoLoadStopTrigger(loader),
+        triggerLoad: autoLoadStopTrigger(loader),
       );
 
       expect(outcome, PageLoadOutcome.loaded);

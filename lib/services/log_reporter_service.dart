@@ -193,8 +193,14 @@ class LogReporterService {
         final batch = _buffer.take(maxPerBatch).toList();
         final success = await _upload(batch);
         if (success) {
-          // 移除已上报成功的条目
-          _buffer.removeRange(0, batch.length);
+          // 移除已上报成功的条目。上传期间 setEnabled(false) 会清空缓冲区
+          // （条目随之丢弃），此时 removeRange 会越界抛 RangeError——按长度
+          // 守卫，缓冲区已被清空就无需再移除。
+          if (_buffer.length >= batch.length) {
+            _buffer.removeRange(0, batch.length);
+          } else {
+            _buffer.clear();
+          }
         } else {
           // 上报失败，保留缓冲区等待下次重试
           break;
@@ -219,16 +225,6 @@ class LogReporterService {
     } else if (_initialized) {
       _startTimer();
     }
-  }
-
-  /// 设置最低上报级别
-  Future<void> setMinLevel(LogLevel level) async {
-    _minLevelIndex = level.index;
-    await PreferencesService.instance.setInt(_keyMinLevel, level.index);
-    _notifyListeners();
-
-    // 清除缓冲区中级别不够的条目
-    _buffer.removeWhere((e) => e.level.index < _minLevelIndex);
   }
 
   /// 销毁服务

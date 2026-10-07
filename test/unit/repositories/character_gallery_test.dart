@@ -83,15 +83,4 @@ void main() {
     expect(rows, isEmpty);
   });
 
-  test('deleteAllCharacters：清理该小说全部角色的图集行', () async {
-    final id1 = await insertCharacter('甲');
-    final id2 = await insertCharacter('乙');
-    await repo.addCharacterImage(id1, 'local_a');
-    await repo.addCharacterImage(id2, 'local_b');
-
-    await repo.deleteAllCharacters('custom://gallery-test');
-
-    final rows = await db.query('character_images');
-    expect(rows, isEmpty);
-  });
 }

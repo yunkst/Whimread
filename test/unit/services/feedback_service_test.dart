@@ -15,7 +15,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:novel_app/services/feedback_service.dart';
-import 'package:novel_app/services/llm_logger/llm_call_record.dart';
 import 'package:novel_app/services/llm_logger/llm_logger.dart';
 import 'package:novel_app/services/logger_service.dart';
 
@@ -227,34 +226,6 @@ void main() {
   });
 
   group('collectRecentLlmLogs - 截断 / 预算', () {
-    LlmCallRecord _record({
-      required String id,
-      required String response,
-      bool isStreaming = true,
-      bool isSuccess = true,
-      int durationMs = 1000,
-      int? promptTokens = 1000,
-      int? completionTokens = 200,
-      int? totalTokens = 1200,
-    }) {
-      return LlmCallRecord(
-        id: id,
-        timestamp: DateTime.utc(2026, 9, 12, 21, 19, 4),
-        endpoint: 'https://llm-proxy.example.com/chat/completions',
-        model: 'deepseek-ai/DeepSeek-V4-Flash',
-        isStreaming: isStreaming,
-        // 已脱敏摘要(由 LlmLogger.logRequest 写入)
-        requestBody:
-            '{"_redacted":"请求正文不落盘（含用户内容）","model":"deepseek-ai/DeepSeek-V4-Flash","messages":7,"bytes":12345}',
-        responseBody: response,
-        durationMs: durationMs,
-        isSuccess: isSuccess,
-        promptTokens: promptTokens,
-        completionTokens: completionTokens,
-        totalTokens: totalTokens,
-      );
-    }
-
     setUp(() {
       // 重新初始化单例空队列 + 空 LLM 日志缓存,避免测试间污染
       LlmLogger.resetForTesting();

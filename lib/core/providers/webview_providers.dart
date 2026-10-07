@@ -124,11 +124,6 @@ class WebViewControllerNotifier extends StateNotifier<InAppWebViewController?> {
     }
   }
 
-  /// 重置 Controller（页面销毁时调用）
-  void resetController() {
-    state = null;
-  }
-
   /// 页面开始加载
   void handleLoadStart(WebUri? url) {
     _ref.read(webviewCurrentUrlProvider.notifier).state = url?.toString() ?? '';
@@ -549,26 +544,6 @@ class SiteScriptListNotifier
     }
   }
 
-  /// 删除域名的所有脚本
-  Future<void> deleteScriptByDomain(String domain) async {
-    try {
-      final repository = _ref.read(siteScriptRepositoryProvider);
-      await repository.deleteByDomain(domain);
-      await _loadScripts();
-      LoggerService.instance.i(
-        '删除域名脚本: domain=$domain',
-        category: LogCategory.database,
-        tags: ['site_script', 'delete', 'domain'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        '删除域名脚本失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.database,
-        tags: ['site_script', 'delete', 'domain', 'error'],
-      );
-    }
-  }
 
   /// 标记脚本已验证
   Future<void> verifyScript(String id) async {

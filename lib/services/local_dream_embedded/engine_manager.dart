@@ -94,9 +94,6 @@ class LocalDreamEngineManager {
   final StreamController<LocalDreamEngineStatus> _statusChanges =
       StreamController<LocalDreamEngineStatus>.broadcast();
 
-  /// 引擎运行状态流（UI 响应式订阅；初始快照用同步 getter [status]）
-  Stream<LocalDreamEngineStatus> get statusStream => _statusChanges.stream;
-
   /// 释放资源（关闭状态流；容器销毁时调用）
   void dispose() {
     _statusChanges.close();

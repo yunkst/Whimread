@@ -39,8 +39,6 @@ abstract class IChapterRepository {
   // ========== 预加载状态管理 ==========
   // 注意：预加载状态由 PreloadService 内部维护，不属于 Repository 职责。
 
-  /// 清理内存状态
-  void clearMemoryState();
 
   // ========== 章节内容查询 ==========
 
@@ -60,22 +58,9 @@ abstract class IChapterRepository {
 
   // ========== 用户自定义章节判定 ==========
 
-  /// 判断是否为本地章节
-  ///
-  /// [chapterUrl] 章节的URL
-  /// 返回是否为本地章节
-  static bool isLocalChapter(String chapterUrl) {
-    return chapterUrl.startsWith('custom://') ||
-        chapterUrl.startsWith('user_chapter_');
-  }
 
   // ========== 阅读状态查询 ==========
 
-  /// 获取已缓存的章节数量（实际有内容的章节）
-  ///
-  /// [novelUrl] 小说的URL
-  /// 返回 chapter_cache 表中已缓存的章节数量
-  Future<int> getCachedChaptersCount(String novelUrl);
 
   /// 获取小说的总章节数
   ///

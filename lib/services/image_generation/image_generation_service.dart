@@ -17,6 +17,25 @@ import 'image_generation_backend.dart';
 import 'image_generation_providers.dart';
 import 'image_model_picker.dart';
 
+/// 出图参数覆盖（**仅模型测试面板使用**；业务路径走模型预设）
+///
+/// 收敛进一个对象后，业务调用方（create_images / create_scene_image）的
+/// 签名只留业务参数，出图调参不再混进主签名——测试面板的可调项以后增减也
+/// 不影响业务面。null 字段 = 沿用模型预设。
+class GenerationOverrides {
+  final int? steps;
+  final double? cfg;
+  final int? seed;
+  final String? negativePrompt;
+
+  const GenerationOverrides({
+    this.steps,
+    this.cfg,
+    this.seed,
+    this.negativePrompt,
+  });
+}
+
 /// 一次生成尝试的结果
 class ImageGenerationOutcome {
   /// 成功时非空（mediaIds 已登记，可直接渲染）
@@ -56,11 +75,8 @@ class ImageGenerationService {
     String? aspectRatio,
     void Function(int step, int total)? onProgress,
 
-    /// 手动覆盖出图参数（测试面板用）；null = 沿用模型预设
-    int? steps,
-    double? cfg,
-    int? seed,
-    String? negativePrompt,
+    /// 出图参数覆盖（仅模型测试面板传；null = 沿用模型预设）
+    GenerationOverrides? overrides,
   }) async {
     final trimmed = prompt.trim();
     if (trimmed.isEmpty) {
@@ -102,14 +118,14 @@ class ImageGenerationService {
       final result = await backend.submit(ImageGenerationRequest(
         model: model,
         prompt: trimmed,
-        // 负向提示词：调用方显式覆盖 → 模型预设（用户配置）
-        negativePrompt: negativePrompt ??
+        // 负向提示词：覆盖（测试面板）→ 模型预设（用户配置）
+        negativePrompt: overrides?.negativePrompt ??
             (model.negativePrompt.isEmpty ? null : model.negativePrompt),
         count: count.clamp(1, 4),
         aspectRatio: ratio,
-        steps: steps,
-        cfg: cfg,
-        seed: seed,
+        steps: overrides?.steps,
+        cfg: overrides?.cfg,
+        seed: overrides?.seed,
       ));
       return ImageGenerationOutcome.success(result);
     } on LocalEngineNotReadyException catch (e) {

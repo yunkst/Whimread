@@ -22,12 +22,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart' show ByteData, FontLoader;
 import 'package:path_provider/path_provider.dart';
 
 import 'logger_service.dart';
+import 'verified_downloader.dart';
 
 // ============================================================
 // manifest 模型
@@ -253,7 +253,7 @@ class AppResourceManager {
     for (final f in spec.files) {
       final file = File('${dir.path}/${f.name}');
       if (!await file.exists()) return null;
-      if (await _sha256Of(file) != f.sha256) return null;
+      if (await sha256OfFile(file) != f.sha256) return null;
       paths[f.name] = file.path;
     }
     return paths;
@@ -337,37 +337,14 @@ class AppResourceManager {
     String expectSha256,
     File dest,
     void Function(int received, int total)? onProgress,
-  ) async {
-    final tmp = File('${dest.path}.tmp');
-    if (await tmp.exists()) await tmp.delete();
-
-    final resp = await _dio.get<ResponseBody>(
-      url,
-      options: Options(responseType: ResponseType.stream),
+  ) {
+    return downloadVerified(
+      dio: _dio,
+      url: url,
+      expectSha256: expectSha256,
+      dest: dest,
+      onProgress: onProgress,
     );
-    final total = int.tryParse(
-            resp.headers.value(HttpHeaders.contentLengthHeader) ?? '') ??
-        -1;
-    var received = 0;
-    final sink = tmp.openWrite();
-    try {
-      await for (final chunk in resp.data!.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, total);
-      }
-    } finally {
-      await sink.close();
-    }
-
-    final actual = await _sha256Of(tmp);
-    if (actual != expectSha256) {
-      await tmp.delete();
-      throw StateError('SHA256 不一致: 期望 $expectSha256, 实际 $actual ($url)');
-    }
-
-    if (await dest.exists()) await dest.delete();
-    await tmp.rename(dest.path);
   }
 
   // ---- local_dream_qnn 专用 ----
@@ -419,10 +396,4 @@ class AppResourceManager {
   }
 
   static final Set<String> _registeredFamilies = {};
-
-  // ---- 工具 ----
-  Future<String> _sha256Of(File f) async {
-    final bytes = await f.readAsBytes();
-    return sha256.convert(bytes).toString();
-  }
 }

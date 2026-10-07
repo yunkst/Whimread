@@ -12,6 +12,7 @@
 /// 依赖：MediaStore（文件层）、DatabaseConnection（media_items 表）。
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -69,12 +70,21 @@ class MediaProxy {
     return MediaItem.fromMap(rows.first);
   }
 
-  /// 用户上传：生成 mediaId，存本地，写 media_items(localOnly=1)。
+  /// 用户上传 / 生图落盘：生成 mediaId，存本地，写 media_items，
   /// 返回 mediaId。
+  ///
+  /// [modelName] / [genParams] 是**生图留痕**（用户上传时都不传）：记录出图
+  /// 时的模型与生效参数（`{steps, cfg, negativePrompt, aspectRatio}`，
+  /// JSON 序列化），配合 [MediaItem.prompt] / `modelName` 构成「这张图怎么
+  /// 生成的」完整快照——模型预设之后被改或删，也能按原参数重新生成。
+  /// 刻意不记 seed：用户要的是「换一��」而不是复现同一张。
   Future<String> upload(
     Uint8List bytes,
     MediaKind kind, {
     String? prompt,
+    String? modelName,
+    Map<String, dynamic>? genParams,
+    MediaSource source = MediaSource.localUpload,
   }) async {
     final mediaId = _generateLocalId();
     final file = await _store.saveBytes(mediaId, kind, bytes);
@@ -86,8 +96,11 @@ class MediaProxy {
       {
         'mediaId': mediaId,
         'kind': kind.dbName,
-        'source': MediaSource.localUpload.dbName,
+        'source': source.dbName,
         if (prompt != null) 'prompt': prompt,
+        if (modelName != null) 'modelName': modelName,
+        if (genParams != null && genParams.isNotEmpty)
+          'genParams': jsonEncode(genParams),
         'createdAt': now,
         'lastAccessedAt': now,
         'localBytes': size,

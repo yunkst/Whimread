@@ -32,13 +32,6 @@ final localDreamEmbeddedEngineManagerProvider =
   return manager;
 });
 
-/// 引擎运行状态（响应式；引擎页 watch 本 provider 替代手动快照轮询）
-final localDreamEngineStateProvider =
-    StreamProvider<LocalDreamEngineStatus>((ref) {
-  final manager = ref.watch(localDreamEmbeddedEngineManagerProvider);
-  return manager.statusStream;
-});
-
 /// 引擎自检（引擎二进制 / QNN 运行库就绪情况；模型管理页提示条用）
 final localDreamReadinessProvider =
     FutureProvider<({bool binary, bool qnn})>((ref) async {

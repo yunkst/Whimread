@@ -29,9 +29,8 @@ import 'package:novel_app/services/logger_service.dart';
 
 /// 记录型 fake:拦截 submit,可配置成功/失败。
 class _FakeFeedbackService extends FeedbackService {
-  _FakeFeedbackService({this.result, this.error}) : super.forTest();
+  _FakeFeedbackService({this.error}) : super.forTest();
 
-  final FeedbackSubmitResult? result;
   final FeedbackSubmitException? error;
 
   int submitCalls = 0;
@@ -60,8 +59,7 @@ class _FakeFeedbackService extends FeedbackService {
       'kind': kind,
     };
     if (error != null) throw error!;
-    return result ??
-        const FeedbackSubmitResult(reportId: 42, logCount: 0);
+    return const FeedbackSubmitResult(reportId: 42, logCount: 0);
   }
 }
 

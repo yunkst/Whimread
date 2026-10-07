@@ -14,16 +14,7 @@ abstract class ICharacterRelationRepository {
   /// source/target 双向去重。冲突时抛异常(唯一约束或显式检查)。
   Future<int> createRelationship(CharacterRelationship relationship);
 
-  /// 更新关系(必须含 id)。
-  Future<int> updateRelationship(CharacterRelationship relationship);
-
-  /// 删除关系。
-  Future<int> deleteRelationship(int relationshipId);
-
   /// 取小说在指定章节的关系图快照:已登场人物 + 当前生效关系。
   Future<RelationshipGraphSnapshot> getGraphSnapshot(
       String novelUrl, int chapter);
-
-  /// 取小说的全部关系(全部章节,用于编辑/管理)。
-  Future<List<CharacterRelationship>> getAllRelationships(String novelUrl);
 }

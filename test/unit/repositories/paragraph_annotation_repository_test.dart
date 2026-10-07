@@ -60,40 +60,6 @@ void main() {
     expect(list.first.id, isNotNull);
   });
 
-  test('upsert 同段落覆盖更新，保留创建时间', () async {
-    final first = annotation(1, content: '第一版');
-    final firstId = await repo.upsert(first);
-
-    final saved = await repo.getForParagraph(chapterUrl, 1);
-    expect(saved, isNotNull);
-    expect(saved!.content, '第一版');
-
-    // 同段落再写：更新为新内容，createdAt 不变
-    final edited = ParagraphAnnotation(
-      novelUrl: novelUrl,
-      chapterUrl: chapterUrl,
-      paragraphIndex: 1,
-      paragraphPreview: first.paragraphPreview,
-      content: '第二版',
-      createdAt: first.createdAt,
-      updatedAt: first.updatedAt + 1000,
-    );
-    final secondId = await repo.upsert(edited);
-
-    final list = await repo.getForChapter(chapterUrl);
-    expect(list, hasLength(1));
-    expect(list.first.content, '第二版');
-    expect(list.first.createdAt, first.createdAt);
-    expect(list.first.updatedAt, first.updatedAt + 1000);
-    // 冲突替换 = 删旧行插新行，id 重新分配
-    expect(secondId, isNot(firstId));
-  });
-
-  test('getForParagraph 无标注时返回 null', () async {
-    final result = await repo.getForParagraph(chapterUrl, 99);
-    expect(result, isNull);
-  });
-
   test('delete 删除指定标注', () async {
     final id = await repo.upsert(annotation(0));
 
@@ -167,12 +133,6 @@ class _NoopVersionRepo implements IChapterVersionRepository {
 
   @override
   Future<List<ChapterVersion>> getVersions(String chapterUrl) async => [];
-
-  @override
-  Future<int> getVersionCount(String chapterUrl) async => 0;
-
-  @override
-  Future<ChapterVersion?> getVersionById(int id) async => null;
 
   @override
   Future<int> deleteVersion(int id) async => 0;

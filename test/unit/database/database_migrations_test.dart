@@ -14,7 +14,6 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite_common/sqflite.dart';
 import 'package:novel_app/core/database/database_migrations.dart';
 
 void main() {
@@ -747,6 +746,101 @@ void main() {
         final cnt = await db.rawQuery(
             "SELECT COUNT(*) AS c FROM sqlite_master WHERE type='index' AND name='idx_chat_messages_session_order'");
         expect((cnt.first['c'] as int?) ?? 0, 1);
+        await db.close();
+      });
+    });
+
+    group('v57 — 媒体来源恢复双值', () {
+      Future<Database> seedAndUpgrade() async {
+        final db = await createEmptyDb();
+        await DatabaseMigrations.createV1Tables(db);
+        await DatabaseMigrations.upgrade(db, 1, 56);
+        // 三种存量：AI 图（genParams 有值但被 v51 归一为 local_upload）、
+        // 已是 ai_generated 的行、无 genParams 的用户上传行
+        for (final e in [
+          {'mediaId': 'ai_old', 'gen': 1, 'src': 'local_upload'},
+          {'mediaId': 'ai_new', 'gen': 1, 'src': 'ai_generated'},
+          {'mediaId': 'upload_1', 'gen': 0, 'src': 'local_upload'},
+        ]) {
+          await db.insert('media_items', {
+            'mediaId': e['mediaId'] as String,
+            'kind': 'image',
+            'source': e['src'] as String,
+            'prompt': 'p',
+            'createdAt': 1,
+            'lastAccessedAt': 1,
+            'localBytes': 0,
+            'localOnly': 1,
+            if (e['gen'] == 1) 'genParams': '{"steps":28,"cfg":7.5}',
+          });
+        }
+        await DatabaseMigrations.upgrade(db, 56, 57);
+        return db;
+      }
+
+      test('带 genParams 的 local_upload 行 → 归回 ai_generated', () async {
+        final db = await seedAndUpgrade();
+        final r = await db.query('media_items',
+            where: 'mediaId = ?', whereArgs: ['ai_old']);
+        expect(r.first['source'], 'ai_generated');
+        await db.close();
+      });
+
+      test('已是 ai_generated 的行不动；无 genParams 的上传行保持', () async {
+        final db = await seedAndUpgrade();
+        final aiNew = await db.query('media_items',
+            where: 'mediaId = ?', whereArgs: ['ai_new']);
+        expect(aiNew.first['source'], 'ai_generated');
+        final upload = await db.query('media_items',
+            where: 'mediaId = ?', whereArgs: ['upload_1']);
+        expect(upload.first['source'], 'local_upload');
+        await db.close();
+      });
+    });
+
+    group('v56 — 生图参数留痕', () {
+      test('upgrade 后 media_items 有 genParams 列', () async {
+        final db = await createEmptyDb();
+        await DatabaseMigrations.createV1Tables(db);
+        await DatabaseMigrations.upgrade(
+            db, 1, DatabaseMigrations.currentVersion);
+        final cols = await db.rawQuery("PRAGMA table_info('media_items')");
+        final names = cols.map((c) => c['name'] as String).toSet();
+        expect(names, contains('genParams'));
+        await db.close();
+      });
+
+      test('存量库升级（无 genParams 列）→ 补列且旧数据保留', () async {
+        final db = await createEmptyDb();
+        await db.execute('''
+        CREATE TABLE media_items (
+          mediaId TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          source TEXT NOT NULL,
+          prompt TEXT,
+          modelName TEXT,
+          createdAt INTEGER NOT NULL,
+          lastAccessedAt INTEGER NOT NULL,
+          localBytes INTEGER NOT NULL DEFAULT 0,
+          localOnly INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+        await db.insert('media_items', {
+          'mediaId': 'old_1',
+          'kind': 'image',
+          'source': 'ai_generated',
+          'createdAt': 1,
+          'lastAccessedAt': 1,
+          'localBytes': 0,
+          'localOnly': 1,
+        });
+        await DatabaseMigrations.upgrade(
+            db, 55, DatabaseMigrations.currentVersion);
+
+        final rows = await db.query('media_items',
+            where: 'mediaId = ?', whereArgs: ['old_1']);
+        expect(rows, hasLength(1), reason: '升级不丢存量行');
+        expect(rows.first['genParams'], isNull, reason: '存量行 genParams 为空，读取方回退预设推导');
         await db.close();
       });
     });

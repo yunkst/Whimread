@@ -864,7 +864,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(slowSession.isRunning, isTrue, reason: '前置：慢发送应正在运行');
 
-      final result = await slowSession.rollbackToMessage(
+      await slowSession.rollbackToMessage(
         0,
         contentCallback: (_) {},
       );

@@ -39,9 +39,9 @@ class OcrPredictor {
   ///
   /// ⚠️ 调试路径(不传文件路径)需要 asset 存在——2026-09-08 起 assets/models/
   /// 已移除(模型挪到 CloudBase Storage),默认 asset 路径会抛 Asset not found。
-  /// 如需在开发机上跑 PoC 入口(main_ppocr_demo.dart),先跑一次生产版 App 让
-  /// OcrModelDownloader 把模型下载到本地,然后把 modelPath/dictPath 指过去,
-  /// 或把模型文件手动放回 assets/models/ 并在 pubspec.yaml 里临时声明。
+  /// 如需在开发机上跑推理,先跑一次生产版 App 让 OcrModelDownloader 把模型
+  /// 下载到本地,然后把 modelPath/dictPath 指过去;或把模型文件手动放回
+  /// assets/models/ 并在 pubspec.yaml 里临时声明。
   Future<void> load({
     String? modelPath,
     String? dictPath,

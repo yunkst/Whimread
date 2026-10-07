@@ -482,30 +482,6 @@ final bookshelfNovelsProvider = AutoDisposeFutureProvider<List<Novel>>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BookshelfNovelsRef = AutoDisposeFutureProviderRef<List<Novel>>;
-String _$bookshelfCacheStatsHash() =>
-    r'70f473de725a38cca5d28728c333ac2cd1c80650';
-
-/// 书架小说列表缓存统计（当前书架的快捷视图 · 兼容层）
-///
-/// 委托到 [shelfCacheStatsProvider(currentBookshelf)]。
-///
-/// Copied from [bookshelfCacheStats].
-@ProviderFor(bookshelfCacheStats)
-final bookshelfCacheStatsProvider =
-    AutoDisposeFutureProvider<Map<String, CacheStats>>.internal(
-  bookshelfCacheStats,
-  name: r'bookshelfCacheStatsProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$bookshelfCacheStatsHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef BookshelfCacheStatsRef
-    = AutoDisposeFutureProviderRef<Map<String, CacheStats>>;
 String _$currentBookshelfHash() => r'4304bf70eec03c7f3f0bd0856c06bbcfb7d2677b';
 
 /// 当前选中的书架

@@ -29,7 +29,7 @@ List<Map<String, String>> _makeChapters(int count) {
 void main() {
   group('AddNovelPreviewSheet - 渲染', () {
     /// 打开预览弹窗的辅助方法
-    Future<void> _openSheet(WidgetTester tester,
+    Future<void> openSheet(WidgetTester tester,
         {String title = '星辰变',
         int chapterCount = 5,
         String sourceUrl = 'https://www.alicesw.com/book/123'}) async {
@@ -59,7 +59,7 @@ void main() {
     }
 
     testWidgets('显示小说标题和章节数标签', (tester) async {
-      await _openSheet(tester, title: '星辰变', chapterCount: 5);
+      await openSheet(tester, title: '星辰变', chapterCount: 5);
 
       expect(find.text('星辰变'), findsOneWidget);
       expect(find.text('预览小说信息'), findsOneWidget);
@@ -67,7 +67,7 @@ void main() {
     });
 
     testWidgets('显示来源 URL', (tester) async {
-      await _openSheet(
+      await openSheet(
         tester,
         sourceUrl: 'https://www.alicesw.com/book/123',
       );
@@ -76,13 +76,13 @@ void main() {
     });
 
     testWidgets('章节数标签动态更新', (tester) async {
-      await _openSheet(tester, chapterCount: 42);
+      await openSheet(tester, chapterCount: 42);
 
       expect(find.text('共 42 章'), findsOneWidget);
     });
 
     testWidgets('少于 10 章 → 全部显示，无省略提示', (tester) async {
-      await _openSheet(tester, chapterCount: 3);
+      await openSheet(tester, chapterCount: 3);
 
       // 3 章全部显示（在可见区域内）
       expect(find.text('第1章 测试章节标题'), findsOneWidget);
@@ -93,7 +93,7 @@ void main() {
     });
 
     testWidgets('等于 10 章 → 无省略提示', (tester) async {
-      await _openSheet(tester, chapterCount: 10);
+      await openSheet(tester, chapterCount: 10);
 
       // 省略提示不应出现
       expect(find.textContaining('未显示'), findsNothing);
@@ -125,14 +125,14 @@ void main() {
     });
 
     testWidgets('超过 10 章 → 第 11 章不显示', (tester) async {
-      await _openSheet(tester, chapterCount: 25);
+      await openSheet(tester, chapterCount: 25);
 
       // 第 11 章不应在页面中
       expect(find.text('第11章 测试章节标题'), findsNothing);
     });
 
     testWidgets('显示拖拽手柄', (tester) async {
-      await _openSheet(tester);
+      await openSheet(tester);
 
       // 验证有 Container（手柄），通过高度为 4 的 Container 检查
       // 简单验证：确认底部的「添加到书架」和「取消」按钮存在
@@ -204,7 +204,7 @@ void main() {
 
   group('AddNovelPreviewSheet - 交互', () {
     /// 打开弹窗并返回 pop 结果的辅助方法
-    Future<Map<String, dynamic>?> _openAndGetResult(
+    Future<Map<String, dynamic>?> openAndGetResult(
       WidgetTester tester, {
       String title = '星辰变',
       int chapterCount = 3,
@@ -244,7 +244,7 @@ void main() {
 
     testWidgets('确认 → pop 返回 {confirmed: true, title: ...}', (tester) async {
       // 用 Completer 来等待异步结果
-      await _openAndGetResult(tester, title: '星辰变', chapterCount: 5);
+      await openAndGetResult(tester, title: '星辰变', chapterCount: 5);
 
       // 点击确认按钮
       await tester.tap(find.text('添加到书架'));

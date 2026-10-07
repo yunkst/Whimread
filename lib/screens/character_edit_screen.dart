@@ -14,7 +14,7 @@ import '../utils/toast_utils.dart';
 ///
 /// - [existing] 为 null 表示新建，非空表示编辑现有角色。
 /// - 保存成功后 `Navigator.pop(true)`，调用方可据此刷新列表/详情。
-/// - 编辑时通过 [Character.copyWith] 保留 id / novelUrl / createdAt / cachedImageUrl，
+/// - 编辑时通过 [Character.copyWith] 保留 id / novelUrl / createdAt，
 ///   因为 [CharacterRepository.updateCharacter] 要求整对象且含 id。
 class CharacterEditScreen extends ConsumerStatefulWidget {
   final Novel novel;

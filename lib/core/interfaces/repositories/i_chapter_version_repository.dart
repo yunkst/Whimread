@@ -19,15 +19,7 @@ abstract class IChapterVersionRepository {
   /// [chapterUrl] 章节URL
   Future<List<ChapterVersion>> getVersions(String chapterUrl);
 
-  /// 获取指定章节的版本数量
-  ///
-  /// [chapterUrl] 章节URL
-  Future<int> getVersionCount(String chapterUrl);
 
-  /// 获取指定版本（by id）
-  ///
-  /// [id] 版本记录 ID
-  Future<ChapterVersion?> getVersionById(int id);
 
   /// 删除指定版本
   ///

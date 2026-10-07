@@ -12,9 +12,7 @@
 /// - _CancelAfterFirstToolScenario in agent_loop_cancel_test.dart（内层包装）
 library;
 
-import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
-import 'package:novel_app/services/dsl_engine/llm_provider.dart' show ChatMessage;
 
 /// 测试基类：实现 AgentScenario 接口全部方法，子类按需 override。
 ///

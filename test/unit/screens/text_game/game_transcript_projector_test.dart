@@ -414,6 +414,48 @@ void main() {
     });
   });
 
+  group('正文转义残留归一化（normalizeStoryText）', () {
+    test('字面量 \\n / \\r\\n / \\r 还原为真实换行', () {
+      expect(normalizeStoryText(r'第一段\n第二段'), '第一段\n第二段');
+      expect(normalizeStoryText(r'第一段\r\n第二段'), '第一段\n第二段');
+      expect(normalizeStoryText(r'第一段\r第二段'), '第一段\n第二段');
+      // 混合：字面量与真实换行并存
+      expect(normalizeStoryText('甲\n乙\\n丙'), '甲\n乙\n丙');
+    });
+
+    test('真实换行与无转义文本原样透传', () {
+      expect(normalizeStoryText('第一段\n第二段'), '第一段\n第二段');
+      expect(normalizeStoryText('没有转义的正文。'), '没有转义的正文。');
+      expect(normalizeStoryText(''), '');
+    });
+
+    test('narrate / speak 投影时归一化，剧情流不出现字面量 \\n', () {
+      final messages = [
+        // 模型偶发双重转义：JSON 里的 \\n 解码后是「\ + n」两个字符
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call('narrate', {
+            'text': r'烛火摇曳。\n窗外雨声渐歇。',
+          })),
+        ]),
+        AgentChatMessage.assistantFromSegments([
+          ToolCallSegment(_call(
+            'speak',
+            {
+              'character': '林昭',
+              'text': r'你终于来了。\r\n我等了很久。',
+            },
+            id: 'tc2',
+          )),
+        ]),
+      ];
+
+      final segs = projectGameTranscript(messages, agentRunning: false);
+
+      expect((segs[0] as GameNarration).text, '烛火摇曳。\n窗外雨声渐歇。');
+      expect((segs[1] as GameDialogue).text, '你终于来了。\n我等了很久。');
+    });
+  });
+
   group('speak 缺角色名降级', () {
     test('speak 未带 character：退化为旁白，不渲染空名字签', () {
       final messages = [

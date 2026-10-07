@@ -124,13 +124,7 @@ ApiServiceWrapper apiServiceWrapper(Ref ref) {
   final dio = ref.watch(dioProvider);
   final apiService = ApiServiceWrapper(dio);
 
-  // 自动初始化（异步，不阻塞返回）
-  // 使用 onAddListener 的方式确保初始化只执行一次
-  ref.onDispose(() {
-    // 清理资源（如果需要）
-  });
-
-  // 异步初始化，不阻塞 Provider 返回
+  // 异步初始化，不阻塞 Provider 返回（Dio 连接池随进程生命周期存续，无需释放）
   _initializeApiService(apiService);
 
   return apiService;
@@ -209,8 +203,6 @@ PreloadService preloadService(Ref ref) {
     headlessService: headlessService,
   );
 }
-
-/// SceneIllustrationService 和 SceneIllustrationCacheService 已删除，相关 provider 已移除。
 
 /// HeadlessWebViewContentService Provider
 ///

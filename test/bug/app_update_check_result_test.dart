@@ -189,7 +189,7 @@ void main() {
 
   group('双通道 (stable/preview)', () {
     /// 构造一个 prerelease 的 release JSON
-    Map<String, dynamic> _prereleaseJson(String tag) => {
+    Map<String, dynamic> prereleaseJson(String tag) => {
           ..._releaseJson(tag),
           'prerelease': true,
         };
@@ -215,7 +215,7 @@ void main() {
       final service = AppUpdateService(
         githubService: _FakeGithubReleaseService(
           () async =>
-              GithubRelease.fromJson(_prereleaseJson('v2.0.0-preview.1')),
+              GithubRelease.fromJson(prereleaseJson('v2.0.0-preview.1')),
         ),
         packageInfoGetter: () async => _fakePackageInfo('1.0.0'),
       );
@@ -252,7 +252,7 @@ void main() {
       final service = AppUpdateService(
         githubService: _FakeGithubReleaseService(
           () async =>
-              GithubRelease.fromJson(_prereleaseJson('v2.0.0-preview.1')),
+              GithubRelease.fromJson(prereleaseJson('v2.0.0-preview.1')),
         ),
         packageInfoGetter: () async => _fakePackageInfo('1.0.0'),
       );

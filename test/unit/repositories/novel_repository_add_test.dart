@@ -12,7 +12,6 @@ import 'package:novel_app/core/database/database_migrations.dart';
 import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/repositories/novel_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite/sqflite.dart' show inMemoryDatabasePath;
 
 void main() {
   setUpAll(() {

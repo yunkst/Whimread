@@ -10,8 +10,6 @@ abstract class IPromptTagRepository {
   Future<void> reorder(List<int> orderedIds);
   Future<List<PromptTag>> getByIds(List<int> ids);
   Future<List<TagGroup>> getGroupedByCategory(int categoryId);
-  Future<String?> getRandomPromptText(int categoryId, String name);
-  Future<PromptTag?> getRandomTag(int categoryId, String name);
   Future<List<PromptTag>> getAll();
   Future<void> moveToCategory(int tagId, int newCategoryId);
   Future<int> getNextSortOrder(int categoryId);

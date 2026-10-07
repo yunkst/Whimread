@@ -23,7 +23,7 @@ void main() {
 
   const testNovelUrl = 'https://example.com/novel/test-novel';
 
-  Chapter _makeChapter(
+  Chapter makeChapter(
     String url, {
     int index = 0,
     String? title,
@@ -46,16 +46,15 @@ void main() {
   });
 
   tearDown(() async {
-    repository.clearMemoryState();
     await db.close();
   });
 
   group('正文命中', () {
     test('标题不含关键词时 titleMatched=false 且坐标可还原', () async {
-      final content = '前' * 100 + '玄铁剑' + '后' * 100;
+      final content = '${'前' * 100}玄铁剑${'后' * 100}';
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter('https://example.com/chapter/1', index: 0),
+        makeChapter('https://example.com/chapter/1', index: 0),
         content,
       );
 
@@ -82,7 +81,7 @@ void main() {
     test('仅标题命中 → 返回该章，titleMatched=true、无正文匹配', () async {
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter(
+        makeChapter(
           'https://example.com/chapter/1',
           index: 0,
           title: '第1章 玄铁重剑',
@@ -104,7 +103,7 @@ void main() {
     test('标题与正文同时命中 → titleMatched=true 且有正文匹配位置', () async {
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter(
+        makeChapter(
           'https://example.com/chapter/1',
           index: 0,
           title: '第1章 玄铁重剑',
@@ -122,7 +121,7 @@ void main() {
     test('标题命中大小写不敏感', () async {
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter(
+        makeChapter(
           'https://example.com/chapter/1',
           index: 0,
           title: 'Chapter One: The Sword',
@@ -140,12 +139,12 @@ void main() {
     test('novelUrl 过滤只返回指定小说', () async {
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter('https://example.com/chapter/1', index: 0),
+        makeChapter('https://example.com/chapter/1', index: 0),
         '含有关键词的内容',
       );
       await repository.cacheChapter(
         'https://example.com/novel/other',
-        _makeChapter('https://example.com/chapter/x', index: 0),
+        makeChapter('https://example.com/chapter/x', index: 0),
         '含有关键词的内容',
       );
 
@@ -160,7 +159,7 @@ void main() {
     test('无命中返回空列表且不截断', () async {
       await repository.cacheChapter(
         testNovelUrl,
-        _makeChapter('https://example.com/chapter/1', index: 0),
+        makeChapter('https://example.com/chapter/1', index: 0),
         '普通内容',
       );
 
@@ -175,7 +174,7 @@ void main() {
       for (var i = 0; i < 205; i++) {
         await repository.cacheChapter(
           testNovelUrl,
-          _makeChapter('https://example.com/chapter/$i', index: i),
+          makeChapter('https://example.com/chapter/$i', index: i),
           '命中词 $i',
         );
       }
@@ -189,7 +188,7 @@ void main() {
       for (var i = 0; i < 5; i++) {
         await repository.cacheChapter(
           testNovelUrl,
-          _makeChapter('https://example.com/chapter/$i', index: i),
+          makeChapter('https://example.com/chapter/$i', index: i),
           '命中词 $i',
         );
       }

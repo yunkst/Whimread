@@ -43,18 +43,7 @@ void main() {
     });
   }
 
-  group('getBookshelves', () {
-    test('返回三档系统书架（全部/原创/联网），顺序固定', () async {
-      final shelves = await repo.getBookshelves();
-      expect(shelves.map((s) => s.kind).toList(), [
-        BookshelfKind.all,
-        BookshelfKind.original,
-        BookshelfKind.online,
-      ]);
-    });
-  });
-
-  group('getNovelsByBookshelf', () {
+group('getNovelsByBookshelf', () {
     test('全部：返回所有小说（含原创与联网）', () async {
       await seedNovel(url: 'custom://custom_novel_1', title: '原创书');
       await seedNovel(url: 'https://example.com/n1', title: '联网书');
@@ -168,21 +157,4 @@ void main() {
     });
   });
 
-  group('getNovelCountByBookshelf', () {
-    test('按来源派生计数', () async {
-      await seedNovel(url: 'custom://custom_novel_1');
-      await seedNovel(url: 'custom://custom_novel_2');
-      await seedNovel(url: 'https://example.com/n1');
-
-      expect(await repo.getNovelCountByBookshelf(BookshelfKind.all), 3);
-      expect(
-          await repo.getNovelCountByBookshelf(BookshelfKind.original), 2);
-      expect(
-          await repo.getNovelCountByBookshelf(BookshelfKind.online), 1);
-    });
-
-    test('空书架计数为 0', () async {
-      expect(await repo.getNovelCountByBookshelf(BookshelfKind.all), 0);
-    });
-  });
 }

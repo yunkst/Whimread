@@ -60,11 +60,6 @@ abstract class ICharacterRepository {
   /// 返回角色对象，如果不存在则返回null
   Future<Character?> findCharacterByName(String novelUrl, String name);
 
-  /// 删除小说的所有角色（版本记录级联清理）
-  ///
-  /// [novelUrl] 小说URL
-  /// 返回受影响的行数
-  Future<int> deleteAllCharacters(String novelUrl);
 
   // ========== 角色图片管理 ==========
 

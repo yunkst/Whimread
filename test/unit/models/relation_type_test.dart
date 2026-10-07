@@ -43,7 +43,8 @@ void main() {
 
     test('颜色非透明', () {
       for (final t in RelationType.values) {
-        expect(t.color.alpha, greaterThan(0), reason: '${t.name}.color 透明');
+        expect(((t.color.a * 255.0).round() & 0xff), greaterThan(0),
+            reason: '${t.name}.color 透明');
       }
     });
 

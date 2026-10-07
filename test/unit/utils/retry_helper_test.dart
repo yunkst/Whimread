@@ -564,36 +564,6 @@ void main() {
     });
   });
 
-  group('isRetryableStatus', () {
-    test('5xx → true', () {
-      expect(isRetryableStatus(500), true);
-      expect(isRetryableStatus(502), true);
-      expect(isRetryableStatus(503), true);
-      expect(isRetryableStatus(599), true);
-    });
-
-    test('429 → true（关键：限流现在重试）', () {
-      expect(isRetryableStatus(429), true);
-    });
-
-    test('408 → true（Request Timeout）', () {
-      expect(isRetryableStatus(408), true);
-    });
-
-    test('所有 4xx + 5xx → true（含 400/401/403/404/422）', () {
-      expect(isRetryableStatus(400), true, reason: '4xx 统一重试（用户策略：宁可多等也尽量自愈）');
-      expect(isRetryableStatus(401), true);
-      expect(isRetryableStatus(403), true);
-      expect(isRetryableStatus(404), true);
-      expect(isRetryableStatus(422), true);
-    });
-
-    test('2xx / 3xx → false', () {
-      expect(isRetryableStatus(200), false);
-      expect(isRetryableStatus(301), false);
-    });
-  });
-
   group('LlmRetryBudget', () {
     test('默认值', () {
       const b = LlmRetryBudget();

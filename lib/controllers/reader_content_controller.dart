@@ -1,7 +1,6 @@
 import '../services/logger_service.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
-import '../services/api_service_wrapper.dart';
 import '../services/headless_webview_content_service.dart';
 import '../services/headless_webview_errors.dart';
 import '../core/interfaces/repositories/i_chapter_repository.dart';
@@ -22,11 +21,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// ```dart
 /// final controller = ReaderContentController(
 ///   ref: ref,
-///   apiService: _apiService,
 ///   chapterRepository: _chapterRepository,
 /// );
 ///
-/// await controller.initialize();
 /// await controller.loadChapter(chapter, novel);
 /// ```
 ///
@@ -40,7 +37,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// `INovelRepository.updateLastReadChapter` 绕过了 Notifier 的 invalidate。
 class ReaderContentController {
   // ========== 依赖服务 ==========
-  final ApiServiceWrapper _apiService;
   final IChapterRepository _chapterRepository;
   final WidgetRef _ref;
   final HeadlessWebViewContentService? _headlessService;
@@ -49,40 +45,13 @@ class ReaderContentController {
 
   ReaderContentController({
     required WidgetRef ref,
-    required ApiServiceWrapper apiService,
     required IChapterRepository chapterRepository,
     HeadlessWebViewContentService? headlessService,
   })  : _ref = ref,
-        _apiService = apiService,
         _chapterRepository = chapterRepository,
         _headlessService = headlessService;
 
   // ========== 公开方法 ==========
-
-  /// 初始化Controller
-  ///
-  /// 初始化API服务。API 初始化失败不阻断后续流程：章节内容提取已完全走
-  /// HeadlessWebView + 本地缓存，不依赖后端 API。失败时只记日志，调用方
-  /// 仍可正常调用 [loadChapter]。
-  Future<void> initialize() async {
-    try {
-      await _apiService.init();
-      LoggerService.instance.i(
-        'ReaderContentController: API初始化成功',
-        category: LogCategory.ui,
-        tags: ['reader'],
-      );
-    } catch (e, stackTrace) {
-      LoggerService.instance.w(
-        'ReaderContentController: API 初始化失败（非致命，内容提取走 HeadlessWebView）: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ui,
-        tags: ['reader', 'api', 'non-fatal'],
-      );
-      // 不 setError、不 rethrow——loadChapter 的缓存+HeadlessWebView 路径
-      // 不需要后端 API。
-    }
-  }
 
   /// 加载章节内容
   ///
@@ -98,8 +67,9 @@ class ReaderContentController {
   }) async {
     final notifier = _ref.read(chapterContentStateNotifierProvider.notifier);
 
-    // 设置当前上下文
-    notifier.setCurrentContext(chapter, novel);
+    // 设置当前上下文（同时开启新加载世代：await 后所有回写按世代校验，
+    // 期间切章会让本世代的 setContent/setLoading 全部作废）
+    final generation = notifier.setCurrentContext(chapter, novel);
 
     // 设置加载状态
     notifier.setLoading(true);
@@ -128,9 +98,8 @@ class ReaderContentController {
             tags: ['reader'],
           );
 
-          // 更新状态
-          notifier.setContent(content);
-          notifier.setLoading(false);
+          // 更新状态（世代过期 = 期间已切章，丢弃本次写入）
+          if (!notifier.finishLoad(generation, content)) return;
 
           // 更新阅读进度
           await updateReadingProgress(novel.url, chapter);
@@ -181,9 +150,8 @@ class ReaderContentController {
         throw Exception('章节内容为空，无法显示');
       }
 
-      // 更新状态
-      notifier.setContent(content);
-      notifier.setLoading(false);
+      // 更新状态（世代过期 = 期间已切章，丢弃本次写入）
+      if (!notifier.finishLoad(generation, content)) return;
 
       // 更新阅读进度
       await updateReadingProgress(novel.url, chapter);
@@ -197,8 +165,7 @@ class ReaderContentController {
         tags: ['reader'],
       );
     } catch (e) {
-      notifier.setLoading(false);
-      notifier.setError('加载章节失败: $e');
+      notifier.failLoad(generation, '加载章节失败: $e');
       LoggerService.instance.e(
         'ReaderContentController: 加载失败 - $e',
         category: LogCategory.ui,

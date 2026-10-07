@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 55;
+  static const int currentVersion = 57;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -1144,6 +1144,28 @@ class DatabaseMigrations {
         await _addColumnIfNotExists(
             db, 'image_models', 'default_aspect_ratio', 'TEXT');
         _log('迁移 v54 → v55: image_models 加 default_aspect_ratio 列');
+        break;
+
+      // ========== 版本 56：生图参数留痕（为「重新生成/抽卡」提供复现依据） ==========
+      case 56:
+        // genParams 存出图时的**生效参数** JSON（steps/cfg/negativePrompt/
+        // aspectRatio；刻意不含 seed——用户不需要复现同一张图）。与已存在的
+        // prompt 列、modelName 列合起来 = 「这张图怎么生成的」完整快照：
+        // 模型预设被改/删后仍可按原参数重新生成。存量行为 null（读取方
+        // 回退当前模型预设推导）。
+        await _addColumnIfNotExists(db, 'media_items', 'genParams', 'TEXT');
+        _log('迁移 v55 → v56: media_items 加 genParams 列（生图参数留痕）');
+        break;
+
+      // ========== 版本 57：媒体来源恢复双值（AI 生成 / 用户上传） ==========
+      case 57:
+        // v51 曾把全部来源归一为 local_upload（当时云回源刚下线、无法区分）。
+        // v56 给 AI 生成图加了 genParams 留痕——它只有 AI 生成路径会写，
+        // 以此为准把存量 AI 图归回 ai_generated；用户上传图保持不变。
+        await db.execute(
+            "UPDATE media_items SET source = 'ai_generated' "
+            "WHERE genParams IS NOT NULL AND source = 'local_upload'");
+        _log('迁移 v56 → v57: 按 genParams 把 AI 生成图归回 ai_generated 来源');
         break;
     }
   }

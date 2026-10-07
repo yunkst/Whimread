@@ -226,46 +226,6 @@ class CharacterRepository extends BaseRepository
     return null;
   }
 
-  /// 删除小说的所有角色
-  ///
-  /// [novelUrl] 小说URL
-  /// 返回受影响的行数
-  @override
-  Future<int> deleteAllCharacters(String novelUrl) {
-    return guard(
-      'character.deleteAllCharacters',
-      () async {
-        final db = await database;
-        // 与 deleteCharacter 同理，三步联动单事务（子查询须在删角色前执行）
-        final affected = await db.transaction<int>((txn) async {
-          await txn.execute(
-            'DELETE FROM character_images WHERE characterId IN '
-            '(SELECT id FROM characters WHERE novelUrl = ?)',
-            [novelUrl],
-          );
-          await txn.execute(
-            'DELETE FROM character_revisions WHERE characterId IN '
-            '(SELECT id FROM characters WHERE novelUrl = ?)',
-            [novelUrl],
-          );
-          return txn.delete(
-            'characters',
-            where: 'novelUrl = ?',
-            whereArgs: [novelUrl],
-          );
-        });
-        LoggerService.instance.i(
-          '删除小说所有角色: novelUrl=$novelUrl (affected=$affected)',
-          category: LogCategory.character,
-          tags: ['character', 'delete_all', 'success'],
-        );
-        return affected;
-      },
-      message: (e) => '删除小说所有角色失败: novelUrl=$novelUrl - $e',
-      category: LogCategory.character,
-      tags: ['character', 'delete_all', 'failed'],
-    );
-  }
 
   // ========== 角色图片管理 ==========
 

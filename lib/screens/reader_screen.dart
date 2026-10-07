@@ -7,15 +7,13 @@
 /// - 章节导航控制
 ///
 /// 架构：
-/// - 使用 ReaderContentController 处理内容加载
+/// - 使用 ReaderContentController 处理章节内容加载
 /// - 使用 ReaderConcatController 处理无限滚动拼接（块几何缓存/回收/锚点）
-/// - 使用 ReaderInteractionController 处理用户交互
 /// - 使用 AutoScrollMixin 处理自动滚动
 ///
 /// 依赖：
 /// - ReaderContentController (lib/controllers/reader_content_controller.dart)
 /// - ReaderConcatController (lib/controllers/reader_concat_controller.dart)
-/// - ReaderInteractionController (lib/controllers/reader_interaction_controller.dart)
 /// - AutoScrollMixin (lib/mixins/reader/auto_scroll_mixin.dart)
 ///
 /// 状态管理：
@@ -31,7 +29,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
 import '../models/search_result.dart';
-import '../services/api_service_wrapper.dart';
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../mixins/reader/auto_scroll_mixin.dart';
 import '../widgets/paragraph_widget.dart'; // 拼接章节的 Offstage 高度测量
@@ -90,8 +87,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     with
         TickerProviderStateMixin,
         AutoScrollMixin {
-  late final ApiServiceWrapper _apiService;
-
   final ScrollController _scrollController = ScrollController();
 
   // ========== 新增：ReaderContentController ==========
@@ -177,9 +172,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void initState() {
     super.initState();
 
-    // 使用 Riverpod 获取依赖
-    _apiService = ref.read(apiServiceWrapperProvider);
-
     _currentChapter = widget.chapter;
 
     // ========== 加载持久化设置 ==========
@@ -190,7 +182,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // 新版本：不再需要onStateChanged回调，状态通过Riverpod Provider自动管理
     _contentController = ReaderContentController(
       ref: ref,
-      apiService: _apiService,
       chapterRepository: ref.read(chapterRepositoryProvider),
       headlessService: ref.read(headlessWebViewContentServiceProvider),
     );
@@ -228,19 +219,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       }
     });
 
-    _initApiAndLoadContent();
+    _loadInitialContent();
   }
 
-  /// 初始化API并加载内容
-  Future<void> _initApiAndLoadContent() async {
+  /// 首次加载章节内容
+  Future<void> _loadInitialContent() async {
     try {
-      await _contentController.initialize();
       // 初始加载时不重置滚动位置，以保持搜索匹配跳转行为
-      _loadChapterContent(resetScrollPosition: false);
-      // 新系统不需要 _loadIllustrations()
+      await _loadChapterContent(resetScrollPosition: false);
     } catch (e, stackTrace) {
       LoggerService.instance.e(
-        '初始化API并加载内容失败',
+        '首次加载章节内容失败',
         stackTrace: stackTrace.toString(),
         category: LogCategory.cache,
         tags: ['initialization', 'load-content'],
@@ -258,10 +247,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       ref.read(readingContextProvider.notifier).state = const ReadingContext();
     }
     // 章内阅读位置兜底落库（节流窗口内的最后位置不丢；deactivate 阶段
-    // ref 仍有效，写库异步完成即可，幂等写入无副作用）
-    final anchor = _concat.lastReadingAnchor;
-    if (anchor != null) {
-      unawaited(_concat.writeReadingAnchor(anchor));
+    // ref 仍有效，写库异步完成即可，幂等写入无副作用）。
+    // 仅在采样窗口已打开（用户本次真实滚动过）时写：重进不滚动就退出
+    // 时无任何写入，离开时存好的锚点原样保留（否则会被进入首帧的
+    // p=0 采样覆盖，恢复永远回到章首）。
+    if (_concat.anchorTrackingOpen) {
+      final anchor = _concat.lastReadingAnchor;
+      if (anchor != null) {
+        unawaited(_concat.writeReadingAnchor(anchor));
+      }
     }
     super.deactivate();
   }
@@ -1273,10 +1267,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           onPointerUp: () {
             // handleTouch() 已经设置了恢复定时器，所以这里不需要额外处理
           },
-          onScrollNotification: (notification) {
-            // 保留以兼容现有代码（不再处理用户滚动）
-            return handleScrollNotification(notification);
-          },
         ),
       );
     }
@@ -1427,8 +1417,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     );
   }
 
-  // 注意：插图处理相关方法已迁移（IllustrationHandlerMixin 已移除）
-
   // ========== 沉浸模式（点击正文隐藏/显示阅读 UI） ==========
 
   void _showChrome() {
@@ -1481,6 +1469,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       }
       final restored = await _concat.restoreAnchor(anchor);
       if (restored && mounted) {
+        // 落位后把内存锚点重置为当前位置：退出兜底写的是恢复后的真实
+        // 位置，而不是进入首帧（章首）那次采样
+        _concat.markAnchorTrackingAtCurrentPosition();
         ToastUtils.showInfo('已回到上次阅读位置', context: context);
         LoggerService.instance.i(
           '恢复章内阅读位置: p=${anchor.paragraphIndex} r=${anchor.paragraphRatio}',

@@ -374,7 +374,7 @@ void main() {
 
     /// 读取子执行器源码并按方法签名切片。
     /// 返回 {methodName: methodBody}，键不含前导下划线（与 toolMethodMap 对齐）。
-    Map<String, String> _resolveExecutorMethodBodies(String source) {
+    Map<String, String> resolveExecutorMethodBodies(String source) {
       // 子执行器方法签名：Future<String> methodName( ... )
       // 不要求前导下划线；方法按 public 命名。
       final sigPattern = RegExp(r'Future<String>\s+(\w+)\s*\(');
@@ -394,7 +394,7 @@ void main() {
     }
 
     /// 从方法体中提取所有 parser.xxx('field') 的字段名集合。
-    Set<String> _parsedFields(String body) {
+    Set<String> parsedFields(String body) {
       final re = RegExp(r"parser\.\w+\(\s*'([^']+)'");
       return re.allMatches(body).map((m) => m.group(1)!).toSet();
     }
@@ -407,14 +407,14 @@ void main() {
         final executorPath =
             'lib/services/novel_agent/tool_executor/$file';
         final src = File(executorPath).readAsStringSync();
-        final bodies = _resolveExecutorMethodBodies(src);
+        final bodies = resolveExecutorMethodBodies(src);
 
         final body = bodies[methodName];
         expect(body, isNotNull,
             reason: '执行端找不到方法 $methodName（工具 $toolName @ $file）—— '
                 '若方法被重命名，请同步更新 toolMethodMap');
 
-        var fields = _parsedFields(body!);
+        var fields = parsedFields(body!);
         fields = fields.difference(intentionallyUndeclared[toolName] ?? const {});
 
         final schemaProps = (AgentTools.findTool(toolName)!
@@ -436,13 +436,13 @@ void main() {
         final executorPath =
             'lib/services/novel_agent/tool_executor/$file';
         final src = File(executorPath).readAsStringSync();
-        final bodies = _resolveExecutorMethodBodies(src);
+        final bodies = resolveExecutorMethodBodies(src);
 
         final body = bodies[methodName];
         expect(body, isNotNull,
             reason: '执行端找不到方法 $methodName（工具 $toolName @ $file）');
 
-        final fields = _parsedFields(body!);
+        final fields = parsedFields(body!);
 
         final schemaProps = (AgentTools.findTool(toolName)!
                 ['function']['parameters']['properties']

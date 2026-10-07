@@ -24,7 +24,6 @@ import 'package:novel_app/core/database/database_connection.dart';
 import 'package:novel_app/core/providers/bookshelf_mutation_provider.dart';
 import 'package:novel_app/core/providers/database_providers.dart';
 import 'package:novel_app/core/providers/image_model_providers.dart';
-import 'package:novel_app/core/providers/character_providers.dart';
 import 'package:novel_app/models/character.dart';
 import 'package:novel_app/models/image_model.dart';
 import 'package:novel_app/models/novel.dart';

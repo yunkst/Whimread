@@ -192,11 +192,13 @@ List<GameChoice> parseGameChoices(Object? raw) {
       final label = (item['label'] as String?)?.trim() ?? '';
       if (label.isEmpty) continue;
       result.add(GameChoice(
-        label: label,
-        hint: (item['hint'] as String?)?.trim(),
+        label: normalizeStoryText(label),
+        hint: (item['hint'] as String?)?.trim() == null
+            ? null
+            : normalizeStoryText((item['hint'] as String).trim()),
       ));
     } else if (item is String && item.trim().isNotEmpty) {
-      result.add(GameChoice(label: item.trim()));
+      result.add(GameChoice(label: normalizeStoryText(item.trim())));
     }
   }
   return result;
@@ -233,6 +235,16 @@ String? parseSceneImageError(String? toolResultJson) {
   } catch (_) {}
   return null;
 }
+
+/// 归一化剧情正文的转义残留
+///
+/// 模型偶发在工具参数 JSON 里把换行写成双重转义（`\\n`），经 jsonDecode
+/// 后就是「\ + n」两个字符，Text 会原样画出字面量 `\n`。渲染边界统一
+/// 还原为真实换行；正常解码出的真实换行不受影响。
+String normalizeStoryText(String raw) => raw
+    .replaceAll(r'\r\n', '\n')
+    .replaceAll(r'\n', '\n')
+    .replaceAll(r'\r', '\n');
 
 /// 解析 roll_random_event 参数里的分支列表（宽容：缺 label 跳过，
 /// 非法权重按 1 计），权重归一化为百分比文案
@@ -455,13 +467,15 @@ List<GameSegment> projectGameTranscript(
                 // 校验失败的调用没有真正演出（工具返回纠错提示等 GM 重调），
                 // 不进剧情流——否则失败版 + 重调成功版重复渲染
                 if (isFailedToolCall(call)) break;
-                final text = call.arguments['text']?.toString() ?? '';
+                final text =
+                    normalizeStoryText(call.arguments['text']?.toString() ?? '');
                 if (text.trim().isNotEmpty) {
                   result.add(GameNarration(text.trim()));
                 }
               case 'speak':
                 if (isFailedToolCall(call)) break;
-                final text = call.arguments['text']?.toString() ?? '';
+                final text =
+                    normalizeStoryText(call.arguments['text']?.toString() ?? '');
                 final character =
                     call.arguments['character']?.toString().trim() ?? '';
                 if (text.trim().isNotEmpty) {

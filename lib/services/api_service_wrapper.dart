@@ -1,7 +1,5 @@
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:novel_api/novel_api.dart';
-import 'package:built_value/serializer.dart';
 import 'dart:io';
 import '../core/backend/backend_config.dart';
 import '../models/remote_script.dart';
@@ -10,8 +8,7 @@ import 'logger_service.dart';
 /// API 服务封装层
 ///
 /// 提供统一的 Dio HTTP 客户端配置、后端地址管理、错误处理与重试。
-/// 直接调用 backend REST API（不走 OpenAPI 生成的 DefaultApi），
-/// 部分方法使用 novel_api 包定义的类型做反序列化（如 BackupUploadResponse）。
+/// 直接调用 backend REST API（不套 OpenAPI 生成的 Api 类）。
 ///
 /// ## 核心职责
 /// 1. **配置管理**：统一管理后端 Host（托管模式以打包注入地址优先）
@@ -83,9 +80,9 @@ class ApiServiceWrapper {
   /// 仅更新其配置 / Adapter / 拦截器,避免连接池与 LogInterceptor 泄漏。
   ///
   /// [baseUrl] 仅供测试注入假 Host（生产 Host 唯一来源是打包注入的
-  /// `BACKEND_BASE_URL`,经 [getHost] 解析）。
+  /// `BACKEND_BASE_URL`,经 `resolveBackendHost` 解析）。
   Future<void> init({String? baseUrl}) async {
-    final host = baseUrl ?? await getHost();
+    final host = baseUrl ?? await resolveBackendHost();
 
     LoggerService.instance.d(
       '=== ApiServiceWrapper 初始化 ===',
@@ -98,7 +95,7 @@ class ApiServiceWrapper {
       tags: ['api'],
     );
 
-    if (host == null || host.isEmpty) {
+    if (host.isEmpty) {
       throw Exception('后端 HOST 未配置');
     }
 
@@ -173,20 +170,11 @@ class ApiServiceWrapper {
     );
   }
 
-  /// 确保已初始化
-  void _ensureInitialized() {
-    if (!_initialized) {
-      throw Exception('ApiServiceWrapper 未初始化，请先调用 init()');
-    }
-  }
-
   // ========================================================================
 // 统一错误处理
 // ========================================================================
 
   /// 获取配置的 Host（统一走 [resolveBackendHost]，Host 由打包注入）
-  Future<String?> getHost() => resolveBackendHost();
-
   /// 统一错误处理
   Exception _handleError(dynamic error) {
     if (error is DioException) {
@@ -220,176 +208,6 @@ class ApiServiceWrapper {
       );
       throw _handleError(e);
     }
-  }
-
-  /// 释放资源
-  ///
-  /// 真正关闭内部 [Dio]（含其 [HttpClientAdapter] 与连接池）并标记未初始化。
-  /// 由 Provider 在 dispose 阶段调用,也可手动调用。
-  void dispose() {
-    LoggerService.instance.i(
-      'ApiServiceWrapper.dispose() called, closing Dio',
-      category: LogCategory.network,
-      tags: ['lifecycle', 'dispose'],
-    );
-    _dio.close(force: true);
-    _initialized = false;
-  }
-
-  // ========================================================================
-  // 备份相关 API
-  // ========================================================================
-
-  /// 上传数据库备份
-  ///
-  /// [dbFile] 数据库文件
-  /// [onProgress] 上传进度回调
-  ///
-  /// 返回BackupUploadResponse，包含上传结果信息
-  Future<BackupUploadResponse> uploadBackup({
-    required File dbFile,
-    ProgressCallback? onProgress,
-  }) async {
-    _ensureInitialized();
-    return _guard('备份上传失败', () async {
-      final authHeaders = await _authHeaders();
-
-      // 直接用 Dio 构造 multipart 请求，绕过生成的 BackupApi
-      // （生成的 BackupApi 的 encodeFormParameter 处理文件路径时格式不正确，导致 422）
-      final fileName = dbFile.path.split(Platform.pathSeparator).last;
-      final formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(
-          dbFile.path,
-          filename: fileName,
-        ),
-      });
-
-      final response = await _dio.post(
-        '/api/backup/upload',
-        data: formData,
-        options: Options(
-          headers: authHeaders,
-          contentType: 'multipart/form-data',
-        ),
-        onSendProgress: onProgress,
-      );
-
-      if (response.statusCode == 200 && response.data != null) {
-        final result = standardSerializers.deserialize(
-          response.data,
-          specifiedType: const FullType(BackupUploadResponse),
-        ) as BackupUploadResponse;
-
-        LoggerService.instance.i(
-          '备份上传成功: ${result.storedPath}',
-          category: LogCategory.network,
-          tags: ['backup', 'success'],
-        );
-        return result;
-      } else {
-        throw Exception('备份上传失败：${response.statusCode}');
-      }
-    });
-  }
-
-  /// 获取服务器备份列表
-  ///
-  /// 返回服务器上所有备份文件的信息（按时间倒序）
-  /// 直接使用 _dio 绕过 OpenAPI 生成代码
-  Future<List<Map<String, dynamic>>> getBackupList() async {
-    _ensureInitialized();
-    return _guard('获取备份列表失败', () async {
-      final authHeaders = await _authHeaders();
-
-      final response = await _dio.get(
-        '/api/backup/list',
-        options: Options(
-          headers: authHeaders,
-        ),
-      );
-
-      if (response.statusCode == 200 && response.data != null) {
-        final data = response.data as Map<String, dynamic>;
-        final backups = (data['backups'] as List<dynamic>?)
-                ?.cast<Map<String, dynamic>>() ??
-            [];
-
-        LoggerService.instance.i(
-          '获取备份列表成功: ${backups.length} 条',
-          category: LogCategory.network,
-          tags: ['backup', 'list', 'success'],
-        );
-        return backups;
-      } else {
-        throw Exception('获取备份列表失败：${response.statusCode}');
-      }
-    });
-  }
-
-  /// 下载备份到本地文件
-  ///
-  /// [backupId] 备份唯一标识（如 "2025-07-15/novel_app_backup.db"）
-  /// [savePath] 本地保存路径
-  /// [onProgress] 下载进度回调（可选）
-  ///
-  /// 返回本地保存的文件路径
-  Future<String> downloadBackup({
-    required String backupId,
-    required String savePath,
-    ProgressCallback? onProgress,
-  }) async {
-    _ensureInitialized();
-    return _guard('备份下载失败: $backupId', () async {
-      final authHeaders = await _authHeaders();
-
-      // 对 backupId 进行 URL 编码（路径含 /）
-      final encodedId = Uri.encodeComponent(backupId);
-
-      await _dio.download(
-        '/api/backup/download/$encodedId',
-        savePath,
-        options: Options(
-          headers: authHeaders,
-        ),
-        onReceiveProgress: onProgress,
-      );
-
-      LoggerService.instance.i(
-        '备份下载成功: $backupId -> $savePath',
-        category: LogCategory.network,
-        tags: ['backup', 'download', 'success'],
-      );
-      return savePath;
-    });
-  }
-
-  /// 删除服务器上的备份
-  ///
-  /// [backupId] 备份唯一标识（如 "2025-07-15/novel_app_backup.db"）
-  Future<void> deleteBackupOnServer({required String backupId}) async {
-    _ensureInitialized();
-    return _guard('备份删除失败: $backupId', () async {
-      final authHeaders = await _authHeaders();
-
-      final encodedId = Uri.encodeComponent(backupId);
-
-      final response = await _dio.delete(
-        '/api/backup/delete/$encodedId',
-        options: Options(
-          headers: authHeaders,
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        LoggerService.instance.i(
-          '备份删除成功: $backupId',
-          category: LogCategory.network,
-          tags: ['backup', 'delete', 'success'],
-        );
-      } else {
-        throw Exception('备份删除失败：${response.statusCode}');
-      }
-    });
   }
 
   // ========================================================================

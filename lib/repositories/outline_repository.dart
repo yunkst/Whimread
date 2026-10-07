@@ -100,38 +100,7 @@ class OutlineRepository extends BaseRepository implements IOutlineRepository {
     return null;
   }
 
-  /// 获取所有大纲
-  /// ... (文档注释不变)
-  @override
-  Future<List<Outline>> getAllOutlines() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'outlines',
-      orderBy: 'updated_at DESC',
-    );
 
-    return List.generate(maps.length, (i) {
-      return Outline.fromMap(maps[i]);
-    });
-  }
-
-  /// 删除大纲
-  /// ... (文档注释不变)
-  @override
-  Future<int> deleteOutline(String novelUrl) async {
-    final db = await database;
-    final result = await db.delete(
-      'outlines',
-      where: 'novel_url = ?',
-      whereArgs: [novelUrl],
-    );
-    LoggerService.instance.i(
-      '大纲已删除: $novelUrl',
-      category: LogCategory.database,
-      tags: ['outline', 'delete'],
-    );
-    return result;
-  }
 
   /// 更新大纲内容
   /// ... (文档注释不变)

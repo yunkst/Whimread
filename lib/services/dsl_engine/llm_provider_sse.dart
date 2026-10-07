@@ -78,24 +78,8 @@ class StreamingResult {
     }).toList();
   }
 
-  /// 当前已聚合的 tool_call 状态快照（不解析 JSON，参数保留原始累计串）。
-  ///
-  /// 供 AgentLoop 在流式过程中转发白名单工具的参数增量（文字游戏剧情
-  /// 打字机）：每收到 tool_call delta 批次后调用一次，按流内 index 聚合出
-  /// 各 tool_call 当前的 id / name / arguments 累计文本。
-  List<StreamingToolCallState> toolCallStates() {
-    return _aggregateDeltas().values
-        .map((d) => StreamingToolCallState(
-              index: d.index,
-              id: d.id,
-              name: d.name,
-              argumentsSoFar: d.argumentsBuffer.toString(),
-            ))
-        .toList();
-  }
-
-  /// 按 delta['index'] 聚合 tool_call deltas（[buildToolCalls] /
-  /// [toolCallStates] 共用的聚合骨架，含 id/name 空串防御）
+  /// 按 delta['index'] 聚合 tool_call deltas（[buildToolCalls] 共用的
+  /// 聚合骨架，含 id/name 空串防御）
   Map<int, _ToolCallDelta> _aggregateDeltas() {
     if (toolCallDeltas.isEmpty) return {};
     final aggregated = <int, _ToolCallDelta>{};
@@ -127,27 +111,6 @@ class StreamingResult {
   }
 }
 
-/// 流式过程中单个 tool_call 的聚合状态快照（参数尚未解析为 JSON）
-class StreamingToolCallState {
-  final int index;
-  final String? id;
-  final String? name;
-
-  /// arguments 的原始累计串（可能是半截 JSON）
-  final String argumentsSoFar;
-
-  const StreamingToolCallState({
-    required this.index,
-    this.id,
-    this.name,
-    required this.argumentsSoFar,
-  });
-
-  /// 稳定 toolCallId：真实 id 未到达时按流内 index 合成占位（与
-  /// buildToolCalls 的兜底规则一致）
-  String get callId =>
-      (id != null && id!.isNotEmpty) ? id! : 'call_$index';
-}
 
 class _ToolCallDelta {
   final int index;

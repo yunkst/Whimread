@@ -2,6 +2,23 @@
 ///
 /// Phase 2: 实现思考-行动循环，管理 LLM 对话和工具调用
 /// 重构: 依赖 AgentScenario 抽象，支持多场景切换
+///
+/// ── 消息链四方同步（不变量，单点真理）──────────────────────────
+/// 同一条消息链存在于四处，任何「改写消息链」的新功能必须同时维护：
+/// 1. AgentLoop.run 的本地 `messages`（下一轮 LLM 上下文）——运行期唯一可写副本；
+/// 2. ScenarioSession._pendingSegments（本回合待定稿段，事件流实时累积）；
+/// 3. ScenarioSession._agentMessages（回合 finalize 时由 ② 汇总）；
+/// 4. chat_messages 表（③ 落库）。
+///
+/// 规则：
+/// - **① 的改写必须以事件通知 ②**（如【后悔重置】：truncateRetractableToolCalls
+///   截断 ① + emit DraftDiscardedEvent 让 session 清 ②）——否则回合收尾时
+///   ② 会把已改写的内容汇总写回 ③④，变更"复活"。
+/// - 已 finalize 的 ③④ 不可被运行中变更回滚（持久化历史只增）；
+///   玩家可见的回退走 rollbackToMessage（会话级 API，内存+DB 同步重写）。
+/// - 当前已知会改写 ① 的分支：上下文压缩（CompactionEvent 同步 ③④）、
+///   【后悔重置】、_repairUnpairedToolResults。新增分支时先读上面的规则。
+/// ──────────────────────────────────────────────────────────────
 library;
 
 import 'dart:async';
@@ -42,6 +59,20 @@ const Set<String> _kPlainTextToolNames = {'read_chapter_content'};
 
 /// 【后悔重置】工具名（AgentLoop 层拦截，不走场景 executor）
 const String kDiscardOutputToolName = 'discard_output';
+
+/// 一轮工具批次的执行结果（见 [_AgentLoopState 的 _executeRoundTools]）
+class ToolBatchResult {
+  /// 批次中途被取消（调用方应 emit AgentDoneEvent 并终止回合）
+  final bool cancelled;
+
+  /// 本轮成功执行的终止工具名（时间序）
+  final List<String> terminalToolHits;
+
+  const ToolBatchResult({
+    this.cancelled = false,
+    this.terminalToolHits = const [],
+  });
+}
 
 /// 【后悔重置】核心：从消息链中撤回本回合尚未展示的展示类工具调用。
 ///
@@ -573,80 +604,14 @@ class AgentLoop {
           toolCalls: toolCalls,
         ));
 
-        // 5. 执行工具调用
-        //
-        // 任务 7：拆分「普通工具串行 + dispatch_subagent 并行」
-        // - 普通工具（read_chapter / list_novels 等）：保持串行（按 toolCalls 顺序）
-        // - dispatch_subagent：先收集再 Future.wait 并行（子 Agent 间互不阻塞）
-        // - 普通工具先全部跑完，再并行派发子 Agent（避免子 Agent 与普通工具
-        //   并发产生不可预测的时序）
-        final subagentCalls = <ToolCall>[];
-        // 本轮成功执行的终止工具（AgentScenario.terminalToolNames）
-        final terminalToolHits = <String>[];
-        for (final call in toolCalls) {
-          // 检查点 C：批量工具执行中途被取消，跳过剩余工具
-          if (cancellationToken?.isCancelled == true) {
-            LoggerService.instance.i(
-                'Agent 循环已取消，跳过工具 ${call.name} 及后续工具 (scenario=${_scenario.id})',
-                category: LogCategory.ai,
-                tags: ['agent', 'loop', 'cancelled', _scenario.id]);
-            emit(const AgentDoneEvent());
-            return;
-          }
-
-          if (call.name == 'dispatch_subagent') {
-            subagentCalls.add(call);
-            continue;
-          }
-
-          // 【后悔重置】：loop 层拦截（不走场景 executor——它需要动本函数
-          // 局部的 messages 列表）。撤回本回合尚未展示给玩家的展示类调用，
-          // 让 GM 从干净状态重新创作；撤回对玩家不可见（回合内容一次性展示）。
-          if (call.name == kDiscardOutputToolName) {
-            final (toolMessage, removedIds) =
-                _handleDiscardOutput(call, messages, emit);
-            messages.add(toolMessage);
-            if (removedIds.isNotEmpty) {
-              emit(DraftDiscardedEvent(removedIds));
-            }
-            continue;
-          }
-
-          final (toolMessage, toolOk) =
-              await _executeSingleTool(call, emit, cancellationToken);
-          messages.add(toolMessage);
-          if (toolOk && _scenario.terminalToolNames.contains(call.name)) {
-            terminalToolHits.add(call.name);
-          }
+        // 5. 执行工具调用（三种策略见 [_executeRoundTools]）
+        final batch =
+            await _executeRoundTools(toolCalls, messages, emit, cancellationToken);
+        if (batch.cancelled) {
+          emit(const AgentDoneEvent()); // 检查点 C：批次中途被取消
+          return;
         }
-
-        // 子 Agent 并行派发：同一轮内多个 dispatch_subagent 互不阻塞。
-        // 并行结束后按原序 append 到 messages（保持顺序可预测）。
-        if (subagentCalls.isNotEmpty) {
-          // 检查点 C（再次）：派发子 Agent 前再确认未被取消
-          if (cancellationToken?.isCancelled == true) {
-            LoggerService.instance.i(
-                'Agent 循环已取消，跳过 ${subagentCalls.length} 个 dispatch_subagent (scenario=${_scenario.id})',
-                category: LogCategory.ai,
-                tags: ['agent', 'loop', 'cancelled', _scenario.id]);
-            emit(const AgentDoneEvent());
-            return;
-          }
-          final parallelResults = await Future.wait(subagentCalls.map(
-            (call) async {
-              final (toolMessage, toolOk) =
-                  await _executeSingleTool(call, emit, cancellationToken);
-              return (call.name, toolMessage, toolOk);
-            },
-          ));
-          for (final (name, toolMessage, toolOk) in parallelResults) {
-            messages.add(toolMessage);
-            // 并行派发也守终止工具（防御：当前无场景这样声明）
-            if (toolOk && _scenario.terminalToolNames.contains(name)) {
-              terminalToolHits.add(name);
-            }
-          }
-        }
+        final terminalToolHits = batch.terminalToolHits;
 
         // 终止工具成功 → 回合原则上到此交付。但终止前必须先看一眼补充
         // 输入队列：补充消息只在每轮 LLM 调用前 drain，若玩家在回合期间
@@ -859,6 +824,96 @@ class AgentLoop {
   /// 任务 7：从原「第 5 步 for 循环体」抽出，使普通串行与 dispatch_subagent 并行
   /// 共用同一段逻辑。**保持与原循环体 100% 一致行为**（含 onProgress 节流、
   /// JSON 解析容错、截断日志、toolSuccess 判断）。
+  /// 执行一轮的工具调用批次——round 主循环与工具策略之间的唯一接口。
+  ///
+  /// 三种策略，按 toolCalls 声明序分派：
+  /// - **普通工具**：串行执行（[AgentScenario.executeTool]），tool 结果按序入链；
+  /// - **dispatch_subagent**：先收集，普通工具全部跑完后再 Future.wait 并行
+  ///   （子 Agent 间互不阻塞，也避免与普通工具并发产生不可预测的时序）；
+  /// - **【后悔重置】**（[kDiscardOutputToolName]）：loop 层拦截
+  ///   （[_handleDiscardOutput]，不走场景 executor）。
+  ///
+  /// 返回 [ToolBatchResult]：
+  /// - [ToolBatchResult.cancelled]：批次中途被取消——调用方应立即 emit
+  ///   AgentDoneEvent 并终止回合（保留原检查点 C 语义，不在本方法内 emit）；
+  /// - [ToolBatchResult.terminalToolHits]：本轮成功执行的终止工具名
+  ///   （[AgentScenario.terminalToolNames]），供调用方判定回合终点。
+  ///
+  /// 消息链不变量（任何新增工具策略必须遵守，见库头「消息链四方同步」）：
+  /// 本方法内所有写入都只作用于本地 [messages]（下一轮 LLM 上下文）；
+  /// 影响展示/持久化的变更（如撤回）必须以事件形式通知 session，
+  /// 不得在本方法内直接触碰 session 状态。
+  Future<ToolBatchResult> _executeRoundTools(
+    List<ToolCall> toolCalls,
+    List<ChatMessage> messages,
+    void Function(AgentEvent) emit,
+    CancellationToken? cancellationToken,
+  ) async {
+    final subagentCalls = <ToolCall>[];
+    final terminalToolHits = <String>[];
+    for (final call in toolCalls) {
+      // 检查点 C：批量工具执行中途被取消，跳过剩余工具
+      if (cancellationToken?.isCancelled == true) {
+        LoggerService.instance.i(
+            'Agent 循环已取消，跳过工具 ${call.name} 及后续工具 (scenario=${_scenario.id})',
+            category: LogCategory.ai,
+            tags: ['agent', 'loop', 'cancelled', _scenario.id]);
+        return const ToolBatchResult(cancelled: true);
+      }
+
+      if (call.name == 'dispatch_subagent') {
+        subagentCalls.add(call);
+        continue;
+      }
+
+      if (call.name == kDiscardOutputToolName) {
+        final (toolMessage, removedIds) =
+            _handleDiscardOutput(call, messages, emit);
+        messages.add(toolMessage);
+        if (removedIds.isNotEmpty) {
+          emit(DraftDiscardedEvent(removedIds));
+        }
+        continue;
+      }
+
+      final (toolMessage, toolOk) =
+          await _executeSingleTool(call, emit, cancellationToken);
+      messages.add(toolMessage);
+      if (toolOk && _scenario.terminalToolNames.contains(call.name)) {
+        terminalToolHits.add(call.name);
+      }
+    }
+
+    // 子 Agent 并行派发：同一轮内多个 dispatch_subagent 互不阻塞。
+    // 并行结束后按原序 append 到 messages（保持顺序可预测）。
+    if (subagentCalls.isNotEmpty) {
+      // 检查点 C（再次）：派发子 Agent 前再确认未被取消
+      if (cancellationToken?.isCancelled == true) {
+        LoggerService.instance.i(
+            'Agent 循环已取消，跳过 ${subagentCalls.length} 个 dispatch_subagent (scenario=${_scenario.id})',
+            category: LogCategory.ai,
+            tags: ['agent', 'loop', 'cancelled', _scenario.id]);
+        return const ToolBatchResult(cancelled: true);
+      }
+      final parallelResults = await Future.wait(subagentCalls.map(
+        (call) async {
+          final (toolMessage, toolOk) =
+              await _executeSingleTool(call, emit, cancellationToken);
+          return (call.name, toolMessage, toolOk);
+        },
+      ));
+      for (final (name, toolMessage, toolOk) in parallelResults) {
+        messages.add(toolMessage);
+        // 并行派发也守终止工具（防御：当前无场景这样声明）
+        if (toolOk && _scenario.terminalToolNames.contains(name)) {
+          terminalToolHits.add(name);
+        }
+      }
+    }
+
+    return ToolBatchResult(terminalToolHits: terminalToolHits);
+  }
+
   /// 【后悔重置】（[kDiscardOutputToolName]）的 loop 层处理。
   ///
   /// 不走 [_executeSingleTool]：撤回要动本函数外局部捕获的 messages 列表，

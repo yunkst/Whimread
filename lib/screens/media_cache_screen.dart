@@ -7,8 +7,6 @@
 /// localOnly（用户上传）项标注"本地唯一副本，删除不可恢复"。
 library;
 
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,7 +17,8 @@ import '../../services/media/media_store.dart';
 import '../../services/media/media_types.dart';
 import '../../utils/format_utils.dart';
 import '../../widgets/common/confirm_dialog.dart';
-import 'package:photo_view/photo_view.dart';
+import '../../widgets/media/media_view.dart';
+import 'media_preview_screen.dart';
 
 class MediaCacheScreen extends ConsumerStatefulWidget {
   const MediaCacheScreen({super.key});
@@ -80,6 +79,8 @@ class _MediaCacheScreenState extends ConsumerState<MediaCacheScreen> {
     switch (s) {
       case MediaSource.localUpload:
         return '用户上传';
+      case MediaSource.aiGenerated:
+        return 'AI 生成';
     }
   }
 
@@ -238,121 +239,31 @@ class _MediaTile extends StatelessWidget {
   }
 
   Widget _thumb(BuildContext context) {
-    return _MediaThumbImage(
-      mediaId: item.mediaId,
-      onOpen: _openImage,
-    );
-  }
-
-  void _openImage(BuildContext context, File file) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MediaImagePreviewScreen(
-          file: file,
-          heroTag: 'media_cache_image_${item.mediaId}',
-        ),
-      ),
-    );
-  }
-
-}
-
-/// 本地图片全屏预览页
-///
-/// 使用 PhotoView 支持缩放，带 Hero 过渡和单击退出。
-class MediaImagePreviewScreen extends StatefulWidget {
-  final File file;
-  final String heroTag;
-
-  /// 图片内容构建器；默认使用 PhotoView 支持缩放。
-  /// 测试时可注入轻量 widget 避免 PhotoView 动画挂起。
-  final Widget Function(BuildContext context, File file)? imageBuilder;
-
-  const MediaImagePreviewScreen({
-    required this.file,
-    required this.heroTag,
-    this.imageBuilder,
-  });
-
-  @override
-  State<MediaImagePreviewScreen> createState() => _MediaImagePreviewScreenState();
-}
-
-class _MediaImagePreviewScreenState extends State<MediaImagePreviewScreen> {
-  @override
-  Widget build(BuildContext context) {
-    final builder = widget.imageBuilder ??
-        (context, file) => PhotoView(
-              imageProvider: FileImage(file),
-              backgroundDecoration: const BoxDecoration(color: Colors.black),
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 4,
-              loadingBuilder: (_, __) => const Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            );
-
+    final heroTag = 'media_cache_image_${item.mediaId}';
     return GestureDetector(
-      onTap: () => Navigator.of(context).pop(),
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Hero(
-          tag: widget.heroTag,
-          child: builder(context, widget.file),
+      onTap: () => _openImage(context),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          // Hero 与 MediaPreviewScreen 初项同 tag，点开播转场。
+          // 2026-10 审查：缩略图曾绕开 MediaView 直查 MediaStore——解析路径
+          // 归一后统一走 MediaView（加载/miss 占位、状态持有都在它那里）
+          child: Hero(
+            tag: heroTag,
+            child: MediaView(mediaId: item.mediaId, boxFit: BoxFit.cover),
+          ),
         ),
       ),
     );
   }
-}
 
-/// 缩略图（StatefulWidget 持有 future，避免 build 重复触发 IO 查询）
-///
-/// 2026-09 审查 P2：原实现在 StatelessWidget._thumb 里内联
-/// FutureBuilder(future: MediaStore.getFile(...))，父级每次 rebuild 都会
-/// 重新发起文件查询；列表 N 项 = N 次重复 IO。
-class _MediaThumbImage extends StatefulWidget {
-  final String mediaId;
-  final void Function(BuildContext, File) onOpen;
-
-  const _MediaThumbImage({required this.mediaId, required this.onOpen});
-
-  @override
-  State<_MediaThumbImage> createState() => _MediaThumbImageState();
-}
-
-class _MediaThumbImageState extends State<_MediaThumbImage> {
-  late final Future<File?> _future =
-      MediaStore.instance.getFile(widget.mediaId, MediaKind.image);
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<File?>(
-      future: _future,
-      builder: (context, snap) {
-        final f = snap.data;
-        if (f != null) {
-          return GestureDetector(
-            onTap: () => widget.onOpen(context, f),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Hero(
-                tag: 'media_cache_image_${widget.mediaId}',
-                child: Image.file(
-                  f,
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-          );
-        }
-        return const Icon(Icons.image_outlined);
-      },
+  void _openImage(BuildContext context) {
+    MediaPreviewScreen.open(
+      context,
+      item.mediaId,
+      heroTag: 'media_cache_image_${item.mediaId}',
     );
   }
 }

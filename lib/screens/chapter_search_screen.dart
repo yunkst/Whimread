@@ -40,9 +40,6 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(novelParamProvider.notifier).setNovel(widget.novel);
     });
-
-    // 移除自动搜索监听器 - 改为仅在用户按回车时搜索
-    // _searchController.addListener(_onSearchChanged);
   }
 
   @override
@@ -50,8 +47,6 @@ class _ChapterSearchScreenState extends ConsumerState<ChapterSearchScreen> {
     _searchController.dispose();
     super.dispose();
   }
-
-  // _onSearchChanged已移除 - 不再需要实时搜索
 
   Future<void> _performSearch(String keyword) async {
     if (keyword.trim().isEmpty) {

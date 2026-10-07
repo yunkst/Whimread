@@ -452,7 +452,8 @@ class DeviceAuthService {
 
   /// 解析 /star/redeem 成功响应；字段缺失时抛 ArgumentError。
   @visibleForTesting
-  static StarRedeemResult parseStarRedeemResponse(dynamic data) {    if (data is! Map) {
+  static StarRedeemResult parseStarRedeemResponse(dynamic data) {
+    if (data is! Map) {
       throw ArgumentError('star/redeem 响应不是 JSON 对象: $data');
     }
     final granted = data['granted'];

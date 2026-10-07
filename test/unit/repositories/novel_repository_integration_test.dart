@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart';
 import 'package:novel_app/core/database/database_connection.dart';
 import 'package:novel_app/repositories/novel_repository.dart';
 import 'package:novel_app/models/novel.dart';

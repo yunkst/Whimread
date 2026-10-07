@@ -6,7 +6,6 @@
 /// - 连接失败映射为 LocalDreamException
 library;
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';

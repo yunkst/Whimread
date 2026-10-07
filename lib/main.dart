@@ -597,12 +597,6 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // 应用生命周期标记不再需要（CacheManager已删除）
-  }
-
-  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     LoggerService.instance.i(

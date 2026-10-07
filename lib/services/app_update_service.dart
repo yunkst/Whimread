@@ -410,11 +410,6 @@ class AppUpdateService {
     return ignored == version;
   }
 
-  /// 清除忽略的版本
-  Future<void> clearIgnoredVersion() async {
-    await PreferencesService.instance.remove(_ignoreVersionKey);
-  }
-
   /// 预览版通道开关是否启用
   static Future<bool> isPreviewChannelEnabled() async {
     return await PreferencesService.instance.getBool(

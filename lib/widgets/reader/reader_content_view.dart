@@ -42,7 +42,6 @@ class ReaderContentView extends StatefulWidget {
   final ScrollController scrollController;
   final Function() onPointerDown;
   final Function() onPointerUp;
-  final bool Function(ScrollNotification) onScrollNotification;
 
   const ReaderContentView({
     super.key,
@@ -58,7 +57,6 @@ class ReaderContentView extends StatefulWidget {
     required this.scrollController,
     required this.onPointerDown,
     required this.onPointerUp,
-    required this.onScrollNotification,
   });
 
   @override
@@ -171,67 +169,64 @@ class _ReaderContentViewState extends State<ReaderContentView> {
       behavior: HitTestBehavior.translucent,
       onPointerDown: (_) => widget.onPointerDown(),
       onPointerUp: (_) => widget.onPointerUp(),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: widget.onScrollNotification,
-        child: ListView.builder(
-          controller: widget.scrollController,
-          padding: const EdgeInsets.all(16.0),
-          itemCount: layout.itemCount,
-          itemBuilder: (context, index) {
-            // 尾部占位（末章底部留白）
-            if (index == layout.itemCount - 1) {
-              return SizedBox(
-                height: 160,
-                child: Container(),
-              );
-            }
-
-            // 章节分隔线（每章起点，携带章节级 GlobalKey 供上层采样/检测/定位）
-            final markerUrl = layout.markerChapterUrlAt(index);
-            if (markerUrl != null) {
-              final markerKey = widget.blockStartKeys[markerUrl];
-              final markerSegment = widget.segments.firstWhere(
-                (s) => s.chapterUrl == markerUrl,
-              );
-              return ReaderChapterDivider(
-                key: markerKey,
-                title: markerSegment.chapterTitle,
-              );
-            }
-
-            final paragraphInfo = layout.paragraphAt(index);
-            if (paragraphInfo == null) {
-              return const SizedBox.shrink();
-            }
-            final (chapterUrl, paragraphIndex, paragraph) = paragraphInfo;
-            final segment = widget.segments.firstWhere(
-              (s) => s.chapterUrl == chapterUrl,
+      child: ListView.builder(
+        controller: widget.scrollController,
+        padding: const EdgeInsets.all(16.0),
+        itemCount: layout.itemCount,
+        itemBuilder: (context, index) {
+          // 尾部占位（末章底部留白）
+          if (index == layout.itemCount - 1) {
+            return SizedBox(
+              height: 160,
+              child: Container(),
             );
-            final reveal = segment.pendingReveals[paragraphIndex];
+          }
 
-            return ParagraphWidget(
-              // 稳定 key：顶部拼接插入条目时元素可跨索引匹配，
-              // 避免段落 State（揭示动画等）错挂到别的段落
-              key: ValueKey('p_${chapterUrl}_$paragraphIndex'),
-              paragraph: paragraph,
-              index: paragraphIndex,
-              fontSize: widget.fontSize,
-              textBrightness: widget.textBrightness,
-              isEditMode: false,
-              hasAnnotation: segment.annotatedIndexes.contains(paragraphIndex),
-              revealNewText: reveal,
-              onRevealComplete:
-                  widget.onParagraphRevealComplete == null
-                      ? null
-                      : (i, text) =>
-                          widget.onParagraphRevealComplete!(chapterUrl, i, text),
-              onLongPress: widget.onParagraphLongPress == null
-                  ? null
-                  : () =>
-                      widget.onParagraphLongPress!(chapterUrl, paragraphIndex, paragraph),
+          // 章节分隔线（每章起点，携带章节级 GlobalKey 供上层采样/检测/定位）
+          final markerUrl = layout.markerChapterUrlAt(index);
+          if (markerUrl != null) {
+            final markerKey = widget.blockStartKeys[markerUrl];
+            final markerSegment = widget.segments.firstWhere(
+              (s) => s.chapterUrl == markerUrl,
             );
-          },
-        ),
+            return ReaderChapterDivider(
+              key: markerKey,
+              title: markerSegment.chapterTitle,
+            );
+          }
+
+          final paragraphInfo = layout.paragraphAt(index);
+          if (paragraphInfo == null) {
+            return const SizedBox.shrink();
+          }
+          final (chapterUrl, paragraphIndex, paragraph) = paragraphInfo;
+          final segment = widget.segments.firstWhere(
+            (s) => s.chapterUrl == chapterUrl,
+          );
+          final reveal = segment.pendingReveals[paragraphIndex];
+
+          return ParagraphWidget(
+            // 稳定 key：顶部拼接插入条目时元素可跨索引匹配，
+            // 避免段落 State（揭示动画等）错挂到别的段落
+            key: ValueKey('p_${chapterUrl}_$paragraphIndex'),
+            paragraph: paragraph,
+            index: paragraphIndex,
+            fontSize: widget.fontSize,
+            textBrightness: widget.textBrightness,
+            isEditMode: false,
+            hasAnnotation: segment.annotatedIndexes.contains(paragraphIndex),
+            revealNewText: reveal,
+            onRevealComplete:
+                widget.onParagraphRevealComplete == null
+                    ? null
+                    : (i, text) =>
+                        widget.onParagraphRevealComplete!(chapterUrl, i, text),
+            onLongPress: widget.onParagraphLongPress == null
+                ? null
+                : () =>
+                    widget.onParagraphLongPress!(chapterUrl, paragraphIndex, paragraph),
+          );
+        },
       ),
     );
   }

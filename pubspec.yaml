@@ -34,18 +34,9 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-
   # HTTP请求
   http: ^1.1.0
   dio: ^5.4.0
-  built_value: ^8.9.0
-  built_collection: ^5.1.1
-
-  # HTML解析
-  html: ^0.15.4
 
   # Markdown渲染
   flutter_markdown: ^0.6.14
@@ -58,23 +49,12 @@ dependencies:
   path_provider: ^2.1.1
   path: ^1.8.3
 
-  # FFI 工具（sd.cpp 绑定层用 Utf8.toUtf8 / calloc；sqflite_common_ffi 已传递依赖但显式声明便于阅读）
-  ffi: ^2.1.0
-
-  # 注解（visibleForTesting 等）；conversion 模块刻意不依赖 flutter 以便宿主机 dart run 复用
+  # 注解（visibleForTesting 等）
   meta: ^1.10.0
-
-  # 状态管理 (已弃用，改用 Riverpod)
-  # provider: ^6.1.1
-  equatable: ^2.0.5
 
   # Riverpod 状态管理
   flutter_riverpod: ^2.4.9
   riverpod_annotation: ^2.3.3
-
-  # 视频播放
-
-  # 可见性检测
 
   # Agent 图片画廊全屏查看（双指缩放 + PageView）
   photo_view: ^0.15.0
@@ -84,9 +64,6 @@ dependencies:
 
   # 图片选择（相册）
   image_picker: ^1.1.2
-
-  # 依赖注入 (未使用，已注释)
-  # get_it: ^7.6.4
 
   # 共享偏好设置
   shared_preferences: ^2.2.2
@@ -109,9 +86,6 @@ dependencies:
   # 设备信息（用于按 CPU 架构选择 APK）
   device_info_plus: ^11.0.0
 
-  # OpenAPI生成的代码包
-  novel_api:
-    path: generated/api
   crypto: ^3.0.7
 
   # 图可视化(统一使用 flutter_force_directed_graph)
@@ -122,12 +96,7 @@ dependencies:
 
   riverpod: any
 
-  # DSL 引擎依赖
-  yaml: ^3.1.2
-  jinja: ^0.6.6
-
-  # OCR：PP-OCRv6 离线识别（lib/services/ocr/ocr_predictor.dart，生产 OCR 还原
-  # 与 main_ppocr_demo.dart 调试入口共用；原 lib/poc/ 已并入 services）
+  # OCR：PP-OCRv6 离线识别（lib/services/ocr/ocr_predictor.dart，生产 OCR 还原）
   # 2026-07-28 升级 ^1.6.0 → ^1.8.3：底层 ORT 1.22.0 → 1.23.0，排查 vivo Android 16
   # 真机 SIGABRT（libonnxruntime.so 内 ORT native abort）。changelog 无针对该 bug
   # 的直接修复，升级属版本试探，非定向补丁。
@@ -148,15 +117,17 @@ dev_dependencies:
 
   # 测试数据库
   sqflite_common_ffi: ^2.3.0
+  # 测试直接引用的底层接口（内存库构造 / 平台路径注入；此前是传递依赖，
+  # 测试代码 import 后 analyzer 报 depend_on_referenced_packages）
+  sqflite_common: ^2.5.6
+  path_provider_platform_interface: ^2.1.2
 
-  # JSON序列化代码生成
+  # 代码生成（build_runner 同时驱动 riverpod_generator / mockito / json_serializable）
   build_runner: ^2.4.7
   json_serializable: ^6.7.0
-  built_value_generator: ^8.9.0
 
   # Riverpod 代码生成
   riverpod_generator: ^2.3.9
-  riverpod_lint: ^2.3.7
 
   # 测试依赖
   mockito: ^5.4.0

@@ -74,9 +74,34 @@ class ChapterContentStateNotifier extends _$ChapterContentStateNotifier {
     state = state.copyWith(content: content);
   }
 
-  /// 设置当前章节和小说
-  void setCurrentContext(Chapter chapter, Novel novel) {
+  /// 加载世代：每次「切换到新章节上下文」自增。
+  ///
+  /// 抓取是秒级异步：loadChapter 发起的旧章抓取可能晚于切章落地，若无条件
+  /// setContent 就把旧内容写进新章状态（B 标题下显示 A 正文）。所有异步
+  /// 回写经 [finishLoad] / [failLoad] 按世代校验，过期世代直接丢弃。
+  int _loadGeneration = 0;
+
+  /// 设置当前章节和小说，同时开启新世代；返回本次世代号。
+  ///
+  /// 调用方（loadChapter）需持有返回值，在 await 之后回写状态前校验。
+  int setCurrentContext(Chapter chapter, Novel novel) {
+    _loadGeneration++;
     state = state.copyWith(currentChapter: chapter, currentNovel: novel);
+    return _loadGeneration;
+  }
+
+  /// 抓取成功回写：世代已过期（期间切了章）则丢弃并返回 false。
+  bool finishLoad(int generation, String content) {
+    if (generation != _loadGeneration) return false;
+    state = state.copyWith(content: content, isLoading: false);
+    return true;
+  }
+
+  /// 抓取失败回写：世代已过期则丢弃并返回 false（不覆盖新章的错误态）。
+  bool failLoad(int generation, String message) {
+    if (generation != _loadGeneration) return false;
+    state = state.copyWith(errorMessage: message, isLoading: false);
+    return true;
   }
 
   /// 设置错误信息

@@ -5,15 +5,13 @@
 ///
 /// 使用示例：
 /// ```dart
-/// // 检查是否需要显示引导
-/// final shouldShow = ref.watch(shouldShowOnboardingProvider);
-/// if (shouldShow.value == true) { /* 显示引导页面 */ }
+/// // 检查是否需要显示引导（main.dart 的 _AppRoot 即此用法）
+/// final state = await ref.watch(onboardingNotifierProvider.future);
+/// if (!state.onboardingCompleted) { /* 显示引导页面 */ }
 ///
 /// // 标记引导完成
 /// ref.read(onboardingNotifierProvider.notifier).completeOnboarding();
 ///
-/// // 重置引导（设置页"重新查看引导"）
-/// ref.read(onboardingNotifierProvider.notifier).resetOnboarding();
 /// ```
 library;
 
@@ -26,48 +24,19 @@ part 'onboarding_providers.g.dart';
 
 /// Onboarding 引导状态数据类
 ///
-/// 封装各类引导的完成状态，每个场景独立管理
+/// 目前只跟踪「首次启动向导是否已完成」一个标记。
 class OnboardingState {
   /// 首次启动向导是否已完成
   final bool onboardingCompleted;
 
-  /// 书架引导是否已显示
-  final bool bookshelfGuideShown;
-
-  /// 搜索引导是否已显示
-  final bool searchGuideShown;
-
-  /// 阅读器引导是否已显示
-  final bool readerGuideShown;
-
-  /// 章节列表引导是否已显示
-  final bool chapterListGuideShown;
-
-  const OnboardingState({
-    this.onboardingCompleted = false,
-    this.bookshelfGuideShown = false,
-    this.searchGuideShown = false,
-    this.readerGuideShown = false,
-    this.chapterListGuideShown = false,
-  });
+  const OnboardingState({this.onboardingCompleted = false});
 
   /// 初始状态（未完成任何引导）
   static const initial = OnboardingState();
 
-  OnboardingState copyWith({
-    bool? onboardingCompleted,
-    bool? bookshelfGuideShown,
-    bool? searchGuideShown,
-    bool? readerGuideShown,
-    bool? chapterListGuideShown,
-  }) {
+  OnboardingState copyWith({bool? onboardingCompleted}) {
     return OnboardingState(
       onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
-      bookshelfGuideShown: bookshelfGuideShown ?? this.bookshelfGuideShown,
-      searchGuideShown: searchGuideShown ?? this.searchGuideShown,
-      readerGuideShown: readerGuideShown ?? this.readerGuideShown,
-      chapterListGuideShown:
-          chapterListGuideShown ?? this.chapterListGuideShown,
     );
   }
 
@@ -76,20 +45,10 @@ class OnboardingState {
       identical(this, other) ||
       other is OnboardingState &&
           runtimeType == other.runtimeType &&
-          onboardingCompleted == other.onboardingCompleted &&
-          bookshelfGuideShown == other.bookshelfGuideShown &&
-          searchGuideShown == other.searchGuideShown &&
-          readerGuideShown == other.readerGuideShown &&
-          chapterListGuideShown == other.chapterListGuideShown;
+          onboardingCompleted == other.onboardingCompleted;
 
   @override
-  int get hashCode => Object.hash(
-        onboardingCompleted,
-        bookshelfGuideShown,
-        searchGuideShown,
-        readerGuideShown,
-        chapterListGuideShown,
-      );
+  int get hashCode => onboardingCompleted.hashCode;
 }
 
 /// Onboarding 状态管理器
@@ -101,17 +60,12 @@ class OnboardingState {
 ///
 /// **持久化键**:
 /// - `onboarding_completed`: 首次启动向导
-/// - `guide_bookshelf_shown`: 书架引导
-/// - `guide_search_shown`: 搜索引导
-/// - `guide_reader_shown`: 阅读器引导
-/// - `guide_chapter_list_shown`: 章节列表引导
+///
+/// 历史注记：书架/搜索/阅读器/章节列表四个 per-场景引导标记从未被任何
+/// 界面写入或读取，已随死代码清理移除。
 @riverpod
 class OnboardingNotifier extends _$OnboardingNotifier {
   static const String _onboardingCompletedKey = 'onboarding_completed';
-  static const String _bookshelfGuideKey = 'guide_bookshelf_shown';
-  static const String _searchGuideKey = 'guide_search_shown';
-  static const String _readerGuideKey = 'guide_reader_shown';
-  static const String _chapterListGuideKey = 'guide_chapter_list_shown';
 
   @override
   Future<OnboardingState> build() async {
@@ -122,26 +76,14 @@ class OnboardingNotifier extends _$OnboardingNotifier {
 
       final onboardingCompleted =
           await prefs.getBool(_onboardingCompletedKey);
-      final bookshelfShown = await prefs.getBool(_bookshelfGuideKey);
-      final searchShown = await prefs.getBool(_searchGuideKey);
-      final readerShown = await prefs.getBool(_readerGuideKey);
-      final chapterListShown = await prefs.getBool(_chapterListGuideKey);
 
       LoggerService.instance.i(
-        'Onboarding 状态加载完成: '
-        'completed=$onboardingCompleted, bookshelf=$bookshelfShown, '
-        'search=$searchShown, reader=$readerShown, chapterList=$chapterListShown',
+        'Onboarding 状态加载完成: completed=$onboardingCompleted',
         category: LogCategory.general,
         tags: ['onboarding', 'load'],
       );
 
-      return OnboardingState(
-        onboardingCompleted: onboardingCompleted,
-        bookshelfGuideShown: bookshelfShown,
-        searchGuideShown: searchShown,
-        readerGuideShown: readerShown,
-        chapterListGuideShown: chapterListShown,
-      );
+      return OnboardingState(onboardingCompleted: onboardingCompleted);
     } catch (e, st) {
       LoggerService.instance.e(
         '加载 Onboarding 状态失败: $e',
@@ -177,87 +119,4 @@ class OnboardingNotifier extends _$OnboardingNotifier {
     }
   }
 
-  /// 标记书架引导已显示
-  Future<void> markBookshelfGuideShown() async {
-    await _setGuideFlag(_bookshelfGuideKey, 'bookshelfGuideShown');
-  }
-
-  /// 标记搜索引导已显示
-  Future<void> markSearchGuideShown() async {
-    await _setGuideFlag(_searchGuideKey, 'searchGuideShown');
-  }
-
-  /// 标记阅读器引导已显示
-  Future<void> markReaderGuideShown() async {
-    await _setGuideFlag(_readerGuideKey, 'readerGuideShown');
-  }
-
-  /// 标记章节列表引导已显示
-  Future<void> markChapterListGuideShown() async {
-    await _setGuideFlag(_chapterListGuideKey, 'chapterListGuideShown');
-  }
-
-  /// 重置所有引导标记（用于"重新查看引导"）
-  ///
-  /// 清空所有持久化数据，恢复初始状态
-  Future<void> resetOnboarding() async {
-    try {
-      final prefs = PreferencesService.instance;
-      await Future.wait([
-        prefs.remove(_onboardingCompletedKey),
-        prefs.remove(_bookshelfGuideKey),
-        prefs.remove(_searchGuideKey),
-        prefs.remove(_readerGuideKey),
-        prefs.remove(_chapterListGuideKey),
-      ]);
-
-      state = AsyncData(OnboardingState.initial);
-
-      LoggerService.instance.i(
-        'Onboarding 状态已重置',
-        category: LogCategory.general,
-        tags: ['onboarding', 'reset'],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        '重置 Onboarding 状态失败: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.general,
-        tags: ['onboarding', 'reset', 'error'],
-      );
-    }
-  }
-
-  /// 设置单个引导标记
-  Future<void> _setGuideFlag(String key, String fieldName) async {
-    try {
-      final prefs = PreferencesService.instance;
-      await prefs.setBool(key, true);
-
-      final current = await future;
-      final newState = switch (fieldName) {
-        'bookshelfGuideShown' =>
-          current.copyWith(bookshelfGuideShown: true),
-        'searchGuideShown' => current.copyWith(searchGuideShown: true),
-        'readerGuideShown' => current.copyWith(readerGuideShown: true),
-        'chapterListGuideShown' =>
-          current.copyWith(chapterListGuideShown: true),
-        _ => current,
-      };
-      state = AsyncData(newState);
-
-      LoggerService.instance.d(
-        '引导标记已设置: $fieldName',
-        category: LogCategory.general,
-        tags: ['onboarding', 'mark', fieldName],
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        '设置引导标记失败: $fieldName, $e',
-        stackTrace: st.toString(),
-        category: LogCategory.general,
-        tags: ['onboarding', 'mark', fieldName, 'error'],
-      );
-    }
-  }
 }

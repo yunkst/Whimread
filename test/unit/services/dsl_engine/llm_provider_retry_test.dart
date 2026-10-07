@@ -96,7 +96,6 @@ void main() {
     });
 
     test('显式注入 budget → transportStreamMaxAttempts=2 生效', () async {
-      var callCount = 0;
       // 验证 budget 的 transportStreamMaxAttempts 控制流式握手 maxAttempts
       // 直接验证 withRetry 被调用时的 config.maxAttempts：
       // 这里用 RetryConfig(maxAttempts: budget.transportStreamMaxAttempts)
@@ -138,17 +137,15 @@ void main() {
     });
 
     test('maxAttempts=0 → 抛出 StateError（防御性兜底）', () async {
-      try {
-        await withRetry(
-          () async => throw SocketException('断'),
-          config: const RetryConfig(maxAttempts: 0),
-        );
-        fail('应该抛出');
-      } on StateError catch (e) {
-        expect(e.message, contains('withRetry'));
-      }
       // 若 maxAttempts=0 被 RetryConfig 限制（实际未限制），测试会失败
       // 若 for 循环跳过，lastError=null → StateError
+      await expectLater(
+        withRetry(
+          () async => throw SocketException('断'),
+          config: const RetryConfig(maxAttempts: 0),
+        ),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }

@@ -1,4 +1,3 @@
-import 'package:sqflite/sqflite.dart';
 import '../models/bookshelf.dart';
 import '../models/novel.dart';
 import 'base_repository.dart';
@@ -33,14 +32,6 @@ class BookshelfRepository extends BaseRepository
 
   // ==================== 书架列表 ====================
 
-  /// 获取基础书架（全部/原创/联网聚合的固定列表）
-  ///
-  /// UI Tab 的完整列表（联网按站点拆分）由 [getOnlineSourceDomains]
-  /// 配合 `Bookshelf.tabShelves` 生成。
-  @override
-  Future<List<Bookshelf>> getBookshelves() async {
-    return Bookshelf.systemShelves;
-  }
 
   // ==================== 书架内容查询 ====================
 
@@ -164,40 +155,4 @@ class BookshelfRepository extends BaseRepository
     return domains;
   }
 
-  /// 获取书架中的小说数量
-  ///
-  /// [kind] 书架分类（全部/原创/联网聚合）
-  @override
-  Future<int> getNovelCountByBookshelf(BookshelfKind kind) async {
-    if (isWebPlatform) {
-      return 0;
-    }
-
-    final db = await database;
-
-    final String? where;
-    final List<Object?>? whereArgs;
-    switch (kind) {
-      case BookshelfKind.all:
-        where = null;
-        whereArgs = null;
-        break;
-      case BookshelfKind.original:
-        where = 'url LIKE ?';
-        whereArgs = ['$_originalPrefix%'];
-        break;
-      case BookshelfKind.online:
-        where = _onlineWhere;
-        whereArgs = ['$_originalPrefix%'];
-        break;
-    }
-
-    final result = await db.query(
-      'bookshelf',
-      columns: ['COUNT(*) as count'],
-      where: where,
-      whereArgs: whereArgs,
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
 }

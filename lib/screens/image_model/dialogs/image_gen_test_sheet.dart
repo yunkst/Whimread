@@ -13,9 +13,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../models/image_model.dart';
 import '../../../services/image_generation/image_generation_providers.dart';
+import '../../../services/image_generation/image_generation_service.dart'
+    show GenerationOverrides;
 import '../../../services/local_dream_embedded/model_pack.dart';
 import '../../../services/logger_service.dart';
 import '../../../widgets/media/media_view.dart';
+import '../../media_preview_screen.dart';
 
 class ImageGenTestSheet extends ConsumerStatefulWidget {
   final ImageModel model;
@@ -88,13 +91,14 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
         await ref.read(imageGenerationServiceProvider).generate(
               modelName: widget.model.name,
               prompt: prompt,
-              negativePrompt:
-                  _negativeController.text.trim().isEmpty
-                      ? null
-                      : _negativeController.text.trim(),
-              steps: _steps,
-              cfg: _cfg,
-              seed: _seed,
+              overrides: GenerationOverrides(
+                negativePrompt: _negativeController.text.trim().isEmpty
+                    ? null
+                    : _negativeController.text.trim(),
+                steps: _steps,
+                cfg: _cfg,
+                seed: _seed,
+              ),
               onProgress: (step, total) {
                 if (!mounted || total <= 0) return;
                 setState(() => _progress = (step / total).clamp(0.0, 1.0));
@@ -140,18 +144,7 @@ class _ImageGenTestSheetState extends ConsumerState<ImageGenTestSheet> {
   void _openFullscreen() {
     final mediaId = _resultMediaId;
     if (mediaId == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      fullscreenDialog: true,
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        body: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Center(
-            child: MediaView(mediaId: mediaId, fullscreen: true),
-          ),
-        ),
-      ),
-    ));
+    MediaPreviewScreen.open<void>(context, mediaId);
   }
 
   @override

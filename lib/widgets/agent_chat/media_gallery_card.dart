@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
+import '../../screens/media_preview_screen.dart';
 import '../../services/media/media_types.dart';
 import '../media/media_view.dart';
 
@@ -148,71 +149,10 @@ class _GallerySlot extends StatelessWidget {
       aspectRatio: 1,
       child: MediaView(
         mediaId: item.mediaId,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => _FullScreenGallery(
-              items: allItems,
-              initialIndex: index,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FullScreenGallery extends StatefulWidget {
-  final List<MediaGalleryItem> items;
-  final int initialIndex;
-  const _FullScreenGallery({required this.items, required this.initialIndex});
-  @override
-  State<_FullScreenGallery> createState() => _FullScreenGalleryState();
-}
-
-class _FullScreenGalleryState extends State<_FullScreenGallery> {
-  late final PageController _controller;
-  late int _index;
-
-  @override
-  void initState() {
-    super.initState();
-    _index = widget.initialIndex.clamp(0, widget.items.length - 1);
-    _controller = PageController(initialPage: _index);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final total = widget.items.length;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black.withValues(alpha: 0.5),
-        foregroundColor: Colors.white,
-        title: Text(
-          total > 1 ? '${_index + 1} / $total' : '图片',
-          style: AppTypography.metaItalic.copyWith(
-            fontSize: 14,
-            color: context.appColors.galleryOnDark,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: PageView.builder(
-        controller: _controller,
-        itemCount: total,
-        onPageChanged: (i) => setState(() => _index = i),
-        itemBuilder: (context, i) => MediaView(
-          mediaId: widget.items[i].mediaId,
-          fullscreen: true,
+        onTap: () => MediaPreviewScreen.openGallery(
+          context,
+          allItems.map((e) => e.mediaId).toList(),
+          initialIndex: index,
         ),
       ),
     );

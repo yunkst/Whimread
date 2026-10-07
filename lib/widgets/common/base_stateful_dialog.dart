@@ -104,14 +104,6 @@ abstract class BaseStatefulDialog extends StatefulWidget {
     );
   }
 
-  /// 获取对话框的标准内边距
-  static EdgeInsets get standardPadding => const EdgeInsets.all(24);
-
-  /// 获取对话框的标准间距
-  static double get standardSpacing => 16.0;
-
-  /// 获取对话框的小间距
-  static double get smallSpacing => 8.0;
 }
 
 /// [BaseStatefulDialog] 配套的 State 基类

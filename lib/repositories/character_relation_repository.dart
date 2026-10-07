@@ -85,58 +85,6 @@ class CharacterRelationRepository extends BaseRepository
     }
   }
 
-  @override
-  Future<int> updateRelationship(CharacterRelationship relationship) {
-    if (relationship.id == null) {
-      throw ArgumentError('关系 ID 不能为空');
-    }
-    return guard(
-      'character_relationship.updateRelationship',
-      () async {
-        final db = await database;
-        final count = await db.update(
-          'character_relationships',
-          relationship.toMap(),
-          where: 'id = ?',
-          whereArgs: [relationship.id],
-        );
-        LoggerService.instance.i(
-          '更新关系成功: ${relationship.id}',
-          category: LogCategory.character,
-          tags: ['relationship', 'update', 'success'],
-        );
-        return count;
-      },
-      message: (e) => '更新关系失败: $e',
-      category: LogCategory.character,
-      tags: ['relationship', 'update', 'error'],
-    );
-  }
-
-  @override
-  Future<int> deleteRelationship(int relationshipId) {
-    return guard(
-      'character_relationship.deleteRelationship',
-      () async {
-        final db = await database;
-        final count = await db.delete(
-          'character_relationships',
-          where: 'id = ?',
-          whereArgs: [relationshipId],
-        );
-        LoggerService.instance.i(
-          '删除关系成功: $relationshipId',
-          category: LogCategory.character,
-          tags: ['relationship', 'delete', 'success'],
-        );
-        return count;
-      },
-      message: (e) => '删除关系失败: $e',
-      category: LogCategory.character,
-      tags: ['relationship', 'delete', 'error'],
-    );
-  }
-
   // ========== 图快照查询 ==========
 
   @override
@@ -169,16 +117,4 @@ class CharacterRelationRepository extends BaseRepository
     );
   }
 
-  @override
-  Future<List<CharacterRelationship>> getAllRelationships(
-      String novelUrl) async {
-    final db = await database;
-    final maps = await db.query(
-      'character_relationships',
-      where: 'novel_url = ?',
-      whereArgs: [novelUrl],
-      orderBy: 'start_chapter ASC, created_at DESC',
-    );
-    return maps.map(CharacterRelationship.fromMap).toList();
-  }
 }

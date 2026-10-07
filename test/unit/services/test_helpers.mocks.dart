@@ -3,15 +3,12 @@
 // Do not manually edit this file.
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
-import 'dart:async' as _i6;
-import 'dart:io' as _i7;
+import 'dart:async' as _i5;
 
 import 'package:dio/dio.dart' as _i2;
 import 'package:mockito/mockito.dart' as _i1;
-import 'package:mockito/src/dummies.dart' as _i8;
-import 'package:novel_api/novel_api.dart' as _i3;
-import 'package:novel_app/models/remote_script.dart' as _i4;
-import 'package:novel_app/services/api_service_wrapper.dart' as _i5;
+import 'package:novel_app/models/remote_script.dart' as _i3;
+import 'package:novel_app/services/api_service_wrapper.dart' as _i4;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -37,9 +34,9 @@ class _FakeDio_0 extends _i1.SmartFake implements _i2.Dio {
         );
 }
 
-class _FakeBackupUploadResponse_1 extends _i1.SmartFake
-    implements _i3.BackupUploadResponse {
-  _FakeBackupUploadResponse_1(
+class _FakeRemoteScriptPayload_1 extends _i1.SmartFake
+    implements _i3.RemoteScriptPayload {
+  _FakeRemoteScriptPayload_1(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -48,20 +45,9 @@ class _FakeBackupUploadResponse_1 extends _i1.SmartFake
         );
 }
 
-class _FakeRemoteScriptPayload_2 extends _i1.SmartFake
-    implements _i4.RemoteScriptPayload {
-  _FakeRemoteScriptPayload_2(
-    Object parent,
-    Invocation parentInvocation,
-  ) : super(
-          parent,
-          parentInvocation,
-        );
-}
-
-class _FakeRemoteShareResult_3 extends _i1.SmartFake
-    implements _i4.RemoteShareResult {
-  _FakeRemoteShareResult_3(
+class _FakeRemoteShareResult_2 extends _i1.SmartFake
+    implements _i3.RemoteShareResult {
+  _FakeRemoteShareResult_2(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -73,7 +59,7 @@ class _FakeRemoteShareResult_3 extends _i1.SmartFake
 /// A class which mocks [ApiServiceWrapper].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
+class MockApiServiceWrapper extends _i1.Mock implements _i4.ApiServiceWrapper {
   MockApiServiceWrapper() {
     _i1.throwOnMissingStub(this);
   }
@@ -95,7 +81,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
 
   @override
   set authHeaderProvider(
-          _i6.Future<Map<String, String>> Function()? _authHeaderProvider) =>
+          _i5.Future<Map<String, String>> Function()? _authHeaderProvider) =>
       super.noSuchMethod(
         Invocation.setter(
           #authHeaderProvider,
@@ -106,7 +92,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
 
   @override
   set unauthorizedRecoveryProvider(
-          _i6.Future<Map<String, String>?> Function()?
+          _i5.Future<Map<String, String>?> Function()?
               _unauthorizedRecoveryProvider) =>
       super.noSuchMethod(
         Invocation.setter(
@@ -117,116 +103,18 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
       );
 
   @override
-  _i6.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
+  _i5.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
         Invocation.method(
           #init,
           [],
           {#baseUrl: baseUrl},
         ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
+        returnValue: _i5.Future<void>.value(),
+        returnValueForMissingStub: _i5.Future<void>.value(),
+      ) as _i5.Future<void>);
 
   @override
-  _i6.Future<String?> getHost() => (super.noSuchMethod(
-        Invocation.method(
-          #getHost,
-          [],
-        ),
-        returnValue: _i6.Future<String?>.value(),
-      ) as _i6.Future<String?>);
-
-  @override
-  void dispose() => super.noSuchMethod(
-        Invocation.method(
-          #dispose,
-          [],
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
-  _i6.Future<_i3.BackupUploadResponse> uploadBackup({
-    required _i7.File? dbFile,
-    _i2.ProgressCallback? onProgress,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #uploadBackup,
-          [],
-          {
-            #dbFile: dbFile,
-            #onProgress: onProgress,
-          },
-        ),
-        returnValue: _i6.Future<_i3.BackupUploadResponse>.value(
-            _FakeBackupUploadResponse_1(
-          this,
-          Invocation.method(
-            #uploadBackup,
-            [],
-            {
-              #dbFile: dbFile,
-              #onProgress: onProgress,
-            },
-          ),
-        )),
-      ) as _i6.Future<_i3.BackupUploadResponse>);
-
-  @override
-  _i6.Future<List<Map<String, dynamic>>> getBackupList() => (super.noSuchMethod(
-        Invocation.method(
-          #getBackupList,
-          [],
-        ),
-        returnValue: _i6.Future<List<Map<String, dynamic>>>.value(
-            <Map<String, dynamic>>[]),
-      ) as _i6.Future<List<Map<String, dynamic>>>);
-
-  @override
-  _i6.Future<String> downloadBackup({
-    required String? backupId,
-    required String? savePath,
-    _i2.ProgressCallback? onProgress,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #downloadBackup,
-          [],
-          {
-            #backupId: backupId,
-            #savePath: savePath,
-            #onProgress: onProgress,
-          },
-        ),
-        returnValue: _i6.Future<String>.value(_i8.dummyValue<String>(
-          this,
-          Invocation.method(
-            #downloadBackup,
-            [],
-            {
-              #backupId: backupId,
-              #savePath: savePath,
-              #onProgress: onProgress,
-            },
-          ),
-        )),
-      ) as _i6.Future<String>);
-
-  @override
-  _i6.Future<void> deleteBackupOnServer({required String? backupId}) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #deleteBackupOnServer,
-          [],
-          {#backupId: backupId},
-        ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
-
-  @override
-  _i6.Future<List<_i4.RemoteScriptMeta>> searchRemoteScripts(
+  _i5.Future<List<_i3.RemoteScriptMeta>> searchRemoteScripts(
           {required String? host}) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -234,29 +122,29 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
           [],
           {#host: host},
         ),
-        returnValue: _i6.Future<List<_i4.RemoteScriptMeta>>.value(
-            <_i4.RemoteScriptMeta>[]),
-      ) as _i6.Future<List<_i4.RemoteScriptMeta>>);
+        returnValue: _i5.Future<List<_i3.RemoteScriptMeta>>.value(
+            <_i3.RemoteScriptMeta>[]),
+      ) as _i5.Future<List<_i3.RemoteScriptMeta>>);
 
   @override
-  _i6.Future<_i4.RemoteScriptPayload> getRemoteScript(String? remoteId) =>
+  _i5.Future<_i3.RemoteScriptPayload> getRemoteScript(String? remoteId) =>
       (super.noSuchMethod(
         Invocation.method(
           #getRemoteScript,
           [remoteId],
         ),
-        returnValue: _i6.Future<_i4.RemoteScriptPayload>.value(
-            _FakeRemoteScriptPayload_2(
+        returnValue: _i5.Future<_i3.RemoteScriptPayload>.value(
+            _FakeRemoteScriptPayload_1(
           this,
           Invocation.method(
             #getRemoteScript,
             [remoteId],
           ),
         )),
-      ) as _i6.Future<_i4.RemoteScriptPayload>);
+      ) as _i5.Future<_i3.RemoteScriptPayload>);
 
   @override
-  _i6.Future<_i4.RemoteShareResult> shareScriptToRemote({
+  _i5.Future<_i3.RemoteShareResult> shareScriptToRemote({
     required String? domain,
     required String? displayName,
     required String? chapterListJs,
@@ -288,7 +176,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
           },
         ),
         returnValue:
-            _i6.Future<_i4.RemoteShareResult>.value(_FakeRemoteShareResult_3(
+            _i5.Future<_i3.RemoteShareResult>.value(_FakeRemoteShareResult_2(
           this,
           Invocation.method(
             #shareScriptToRemote,
@@ -308,20 +196,20 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
             },
           ),
         )),
-      ) as _i6.Future<_i4.RemoteShareResult>);
+      ) as _i5.Future<_i3.RemoteShareResult>);
 
   @override
-  _i6.Future<void> unshareRemoteScript(String? remoteId) => (super.noSuchMethod(
+  _i5.Future<void> unshareRemoteScript(String? remoteId) => (super.noSuchMethod(
         Invocation.method(
           #unshareRemoteScript,
           [remoteId],
         ),
-        returnValue: _i6.Future<void>.value(),
-        returnValueForMissingStub: _i6.Future<void>.value(),
-      ) as _i6.Future<void>);
+        returnValue: _i5.Future<void>.value(),
+        returnValueForMissingStub: _i5.Future<void>.value(),
+      ) as _i5.Future<void>);
 
   @override
-  _i6.Future<List<_i4.RemoteScriptUpdate>> checkRemoteScriptUpdates(
+  _i5.Future<List<_i3.RemoteScriptUpdate>> checkRemoteScriptUpdates(
           {required List<({String remoteId, int version})>? items}) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -329,7 +217,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
           [],
           {#items: items},
         ),
-        returnValue: _i6.Future<List<_i4.RemoteScriptUpdate>>.value(
-            <_i4.RemoteScriptUpdate>[]),
-      ) as _i6.Future<List<_i4.RemoteScriptUpdate>>);
+        returnValue: _i5.Future<List<_i3.RemoteScriptUpdate>>.value(
+            <_i3.RemoteScriptUpdate>[]),
+      ) as _i5.Future<List<_i3.RemoteScriptUpdate>>);
 }

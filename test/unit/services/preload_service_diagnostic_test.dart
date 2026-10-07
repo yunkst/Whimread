@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:mockito/mockito.dart';
@@ -13,7 +12,6 @@ import 'package:novel_app/models/chapter.dart';
 import 'package:novel_app/models/chapter_content_result.dart';
 
 import '../../helpers/test_database_setup.dart';
-import 'test_helpers.mocks.dart' as test_mocks;
 
 /// Manual mock for HeadlessWebViewContentService
 class MockHeadlessWebViewContentService extends Mock
@@ -176,7 +174,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('500ms后检查: $stats');
 
       expect(
         (stats['total_processed'] as int) +
@@ -207,7 +204,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('步骤2 stats: $stats');
 
       // 验证至少处理了一个任务
       expect(stats['total_processed'] as int, greaterThanOrEqualTo(1),
@@ -229,7 +225,6 @@ void main() {
 
       // Assert: 直接查数据库
       final cached = await chapterRepository.getCachedChapter(url);
-      print('cached content: $cached');
 
       expect(cached, isNotNull,
           reason: '章节应该被缓存到数据库');

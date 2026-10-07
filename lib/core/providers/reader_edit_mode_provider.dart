@@ -14,8 +14,6 @@ class ReaderEditMode extends _$ReaderEditMode {
   void toggle() => state = !state;
 
   /// 启用编辑模式
-  void enable() => state = true;
 
   /// 禁用编辑模式
-  void disable() => state = false;
 }

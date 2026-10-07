@@ -21,7 +21,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/services/dsl_engine/llm_provider.dart';
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_loop.dart';
-import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import '../../../helpers/fake_agent_scenario.dart';
 import '../../../helpers/noop_llm_http_client.dart';
 

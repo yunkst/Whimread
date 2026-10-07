@@ -2,7 +2,7 @@
 ///
 /// 从原 `llm_provider.dart` 上帝文件拆分。本文件承载：
 /// [LlmHttpClient] 抽象接口、[LlmStreamChunk] 流式帧模型、
-/// [LlmProvider] 业务门面（chat / chatForJson / chatStream / chatStreamWithTools）、
+/// [LlmProvider] 业务门面（chatStream / chatStreamWithTools）、
 /// 以及流式响应行分割器 [LineSplitter]。
 library;
 
@@ -10,7 +10,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:novel_app/services/logger_service.dart';
-import 'package:novel_app/utils/json_utils.dart';
 import 'package:novel_app/services/dsl_engine/llm_provider_config.dart';
 
 // -- LLM Provider --
@@ -203,102 +202,6 @@ class LlmProvider {
             .toList() ??
         [];
     return LlmResponse(content: content, toolCalls: toolCalls);
-  }
-
-  /// 阻塞式调用：完整返回 LLM 响应（Phase 1: 返回 LlmResponse）
-  Future<LlmResponse> chat({
-    required List<ChatMessage> messages,
-    String? model,
-    double? temperature,
-    Map<String, dynamic>? responseFormat,
-    List<Map<String, dynamic>>? tools,
-    String? toolChoice,
-  }) async {
-    LoggerService.instance.d(
-      'LLM chat 阻塞调用入口: model=${model ?? config.defaultModel}, '
-      'messages=${messages.length}, baseUrl=${config.baseUrl}, '
-      'temperature=${temperature ?? config.temperature}',
-      category: LogCategory.ai,
-      tags: ['dsl', 'llm'],
-    );
-    final client = _httpClient;
-    final body = buildRequestBody(
-      messages: messages,
-      model: model,
-      temperature: temperature,
-      responseFormat: responseFormat,
-      tools: tools,
-      toolChoice: toolChoice,
-      stream: false,
-    );
-    try {
-      final sw = Stopwatch()..start();
-      final raw = await client.postJson(
-          chatCompletionsUrl, defaultHeaders, jsonEncode(body));
-      final response = parseBlockingResponse(raw);
-      sw.stop();
-      LoggerService.instance.i(
-        'LLM chat 阻塞调用完成: contentLength=${response.content.length}, '
-        'elapsed=${sw.elapsedMilliseconds}ms',
-        category: LogCategory.ai,
-        tags: ['dsl', 'llm'],
-      );
-      return response;
-    } catch (e, stackTrace) {
-      LoggerService.instance.e(
-        'LLM chat 阻塞调用失败: $e',
-        stackTrace: stackTrace.toString(),
-        category: LogCategory.ai,
-        tags: ['dsl', 'llm'],
-      );
-      rethrow;
-    }
-  }
-
-  /// 结构化 JSON 调用 — 自动启用 json_object 模式 + 解析
-  ///
-  /// [retryOnParseError] — 保留参数以向后兼容；应用层重试已完全委托给
-  ///   传输层 [withRetry]（自 2026-07-17 起 retryOnParseError 默认 0）。
-  Future<T?> chatForJson<T>({
-    required List<ChatMessage> messages,
-    required T Function(Map<String, dynamic>) fromJson,
-    String schemaDescription = '',
-    @Deprecated('应用层重试已委托传输层') int retryOnParseError = 0,
-    String? model,
-    double? temperature,
-  }) async {
-    final systemIdx = messages.indexWhere((m) => m.role == 'system');
-    final enrichedMessages = List<ChatMessage>.from(messages);
-    if (systemIdx >= 0) {
-      final original = messages[systemIdx];
-      enrichedMessages[systemIdx] = ChatMessage(
-        role: 'system',
-        content: '${original.content ?? ''}\n\n'
-            '你必须返回合法的 JSON 对象。$schemaDescription',
-      );
-    } else {
-      enrichedMessages.insert(
-        0,
-        ChatMessage(
-          role: 'system',
-          content: '你必须返回合法的 JSON 对象。$schemaDescription',
-        ),
-      );
-    }
-    final response = await chat(
-      messages: enrichedMessages,
-      model: model,
-      temperature: temperature ?? 0.3,
-      responseFormat: const {'type': 'json_object'},
-    );
-    if (response.content.trim().isEmpty) {
-      throw FormatException('LLM 返回空内容');
-    }
-    final json = safeJsonDecode(response.content);
-    if (json is! Map<String, dynamic>) {
-      throw FormatException('JSON 不是对象: ${json.runtimeType}');
-    }
-    return fromJson(json);
   }
 
   Stream<String> chatStream({

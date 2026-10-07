@@ -46,28 +46,7 @@ class ChapterVersionRepository extends BaseRepository
     return maps.map((m) => ChapterVersion.fromMap(m)).toList();
   }
 
-  @override
-  Future<int> getVersionCount(String chapterUrl) async {
-    final db = await database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as cnt FROM $_table WHERE chapterUrl = ?',
-      [chapterUrl],
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
 
-  @override
-  Future<ChapterVersion?> getVersionById(int id) async {
-    final db = await database;
-    final maps = await db.query(
-      _table,
-      where: 'id = ?',
-      whereArgs: [id],
-      limit: 1,
-    );
-    if (maps.isEmpty) return null;
-    return ChapterVersion.fromMap(maps.first);
-  }
 
   @override
   Future<int> deleteVersion(int id) async {

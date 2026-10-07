@@ -16,7 +16,7 @@ import '../logger_service.dart';
 import '../local_dream_embedded/engine_manager.dart';
 import '../local_dream_embedded/model_pack.dart';
 import '../media/media_proxy.dart';
-import '../media/media_types.dart';
+import '../media/media_types.dart' show MediaKind, MediaSource;
 import 'image_generation_backend.dart';
 import 'local_dream_client.dart';
 
@@ -123,6 +123,17 @@ class LocalDreamEmbeddedBackend implements ImageGenerationBackend {
           complete.bytes,
           MediaKind.image,
           prompt: request.prompt,
+          modelName: model.name,
+          source: MediaSource.aiGenerated,
+          // 生图参数留痕（逐张；刻意不含 seed——用户要的是"换一张"而非复现
+          // 同一张），供「重新生成」按原参数重放：模型预设之后被改/删也不受影响
+          genParams: {
+            'steps': genRequest.steps,
+            'cfg': genRequest.cfg,
+            'negativePrompt': genRequest.negativePrompt,
+            if (genRequest.aspectRatio != null)
+              'aspectRatio': genRequest.aspectRatio,
+          },
         );
         mediaIds.add(mediaId);
         LoggerService.instance.i(

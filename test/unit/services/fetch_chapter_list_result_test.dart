@@ -10,7 +10,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:novel_app/models/chapter.dart';
 import 'package:novel_app/models/chapter_content_result.dart';
-import 'package:novel_app/models/site_bookshelf_entry.dart';
 import 'package:novel_app/services/headless_webview_errors.dart';
 
 void main() {

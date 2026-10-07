@@ -105,21 +105,7 @@ void main() {
     expect(after.first.reason, '清除头像');
   });
 
-  test('delete / deleteAllCharacters：版本记录级联清理', () async {
-    final id = await repo.createCharacter(card());
-    final id2 = await repo.createCharacter(card(name: '白芷'));
-    await repo.updateCharacter(
-        (await repo.getCharacter(id))!.copyWith(currentState: 'x'));
-
-    await repo.deleteCharacter(id);
-    expect(await repo.getRevisions(id), isEmpty);
-
-    // 按小说清理
-    await repo.deleteAllCharacters('流云志');
-    expect(await repo.getRevisions(id2), isEmpty);
-  });
-
-  test('rollbackToRevision：恢复快照字段并追加 rollback 版本', () async {
+test('rollbackToRevision：恢复快照字段并追加 rollback 版本', () async {
     final id = await repo.createCharacter(card(currentState: '初入宗门'));
     await repo.updateCharacter(
       (await repo.getCharacter(id))!.copyWith(

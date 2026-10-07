@@ -161,7 +161,7 @@ class _ChapterListScreenRiverpodState
                                 onCreateChapter: () =>
                                     _showInsertChapterDialog(0),
                                 onLoadFromSource: () =>
-                                    notifier.refreshChapters(context),
+                                    notifier.refreshChapters(forceRefresh: true),
                               )
                             : state.isReorderingMode
                                 ? _buildReorderableChapterList(state, notifier)
@@ -194,7 +194,7 @@ class _ChapterListScreenRiverpodState
           ),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: () => notifier.refreshChapters(context),
+            onPressed: () => notifier.refreshChapters(forceRefresh: true),
             child: const Text('重试'),
           ),
         ],
@@ -260,7 +260,7 @@ class _ChapterListScreenRiverpodState
             _showClearCacheDialog(notifier);
             break;
           case 'refresh':
-            notifier.refreshChapters(context);
+            _refreshChaptersFromSource();
             break;
           case 'background_setting':
             Navigator.push(
@@ -712,11 +712,12 @@ class _ChapterListScreenRiverpodState
             insertIndex: insertIndex,
           );
 
-      // 刷新章节列表
+      // createChapter 已 bump signal 触发章节列表软刷新；这里主动 await 一次
+      // softReload，保证随后读取的 state.chapters 已包含新章节（导航需要）
       if (mounted) {
         await ref
             .read(chapterListProvider(widget.novel).notifier)
-            .refreshChapters(context);
+            .softReload();
       }
 
       if (mounted) {
@@ -747,6 +748,34 @@ class _ChapterListScreenRiverpodState
       if (mounted) {
         ToastUtils.showError('插入章节失败: $e');
       }
+    }
+  }
+
+  /// 菜单「刷新章节」：从书源重新抓取章节列表。
+  ///
+  /// 确认交互收口在 UI 层，provider 只负责数据刷新。本地小说无书源，
+  /// 直接重读数据库；书源小说的重抓走 headless WebView、耗时较长，
+  /// 需先确认，取消则列表保持原样。
+  Future<void> _refreshChaptersFromSource() async {
+    if (widget.novel.url.startsWith('custom://')) {
+      await ref
+          .read(chapterListProvider(widget.novel).notifier)
+          .refreshChapters(forceRefresh: true);
+      return;
+    }
+
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: '刷新章节列表',
+      message: '将从源站重新抓取最新章节列表，可能需要较长时间。\n\n确定要继续吗？',
+      confirmText: '重新抓取',
+      cancelText: '取消',
+    );
+
+    if (confirmed == true && mounted) {
+      await ref
+          .read(chapterListProvider(widget.novel).notifier)
+          .refreshChapters(forceRefresh: true);
     }
   }
 
@@ -784,17 +813,10 @@ class _ChapterListScreenRiverpodState
       }
 
       // 走 ChapterMutationNotifier 收口：单事务 delete+reindex + bump signal
-      // 触发章节列表软刷新
+      // 触发章节列表软刷新，无需手动 refreshChapters
       await ref
           .read(chapterMutationProvider.notifier)
           .deleteChapter(widget.novel.url, chapter.url);
-
-      // 重新加载章节列表
-      if (mounted) {
-        await ref
-            .read(chapterListProvider(widget.novel).notifier)
-            .refreshChapters(context);
-      }
 
       // 显示成功提示
       if (mounted) {

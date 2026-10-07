@@ -10,11 +10,6 @@ import '../../../models/novel.dart';
 /// moveNovelToBookshelf）已随"用户自定义书架"功能一起移除——
 /// 旧 `novel_bookshelves` 关联表不再读写。
 abstract class IBookshelfRepository {
-  /// 获取基础书架（全部/原创/联网聚合的固定列表）
-  ///
-  /// UI Tab 的完整列表（联网按站点拆分）由 [getOnlineSourceDomains]
-  /// 配合 `Bookshelf.tabShelves` 生成。
-  Future<List<Bookshelf>> getBookshelves();
 
   /// 获取指定书架中的小说列表
   ///
@@ -46,8 +41,4 @@ abstract class IBookshelfRepository {
   /// 顺序即 UI Tab 顺序。Web平台返回空列表。
   Future<List<String>> getOnlineSourceDomains();
 
-  /// 获取书架中的小说数量
-  ///
-  /// [kind] 书架分类（全部/原创/联网聚合）
-  Future<int> getNovelCountByBookshelf(BookshelfKind kind);
 }

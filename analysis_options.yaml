@@ -21,20 +21,9 @@ analyzer:
     unnecessary_import: warning
     unused_shown_name: warning
   exclude:
-    # 排除生成的 API 代码
-    - lib/generated/**
-    - generated/**
     # 排除构建生成的文件
     - "**/*.g.dart"
     - "**/*.freezed.dart"
-    # TODO: 测试代码 lint 待逐步开启（2026-08-05 评估）
-    # 摸底：`flutter analyze test/` = 193 issues（39 error / 124 warning / 30 info）。
-    # 其中 39 个 error 多为 lib/ 重构后未同步的过时测试文件（引用 core/di/、
-    # WorkflowInfoBuilder.workflowId、SubagentRun.tokenSource、CancellationTokenSource
-    # 等已删除 API），属「死测试」需各域 owner 逐个修复或删除，非机械可批量处理。
-    # 若立即去掉 exclude，CI `flutter analyze --no-fatal-infos` 会全红。
-    # 计划：先清死测试 → 降到 0 error → 再去 warning → 最后取消 exclude。
-    - test/**
     # 排除工具脚本目录
     - tool/**
 

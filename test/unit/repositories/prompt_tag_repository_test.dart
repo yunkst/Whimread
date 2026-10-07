@@ -230,7 +230,7 @@ void main() {
     test('应该也能实现分类移动', () async {
       final catA = await createCategory('分类A');
       final catB = await createCategory('分类B');
-      final tagId = await createTag(catA, 'copyWith移动', '提示词');
+      await createTag(catA, 'copyWith移动', '提示词');
 
       // 模拟通过 save + copyWith 移动
       final tags = await tagRepo.getByCategory(catA);

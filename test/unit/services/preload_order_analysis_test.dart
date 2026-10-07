@@ -11,7 +11,6 @@ import 'package:novel_app/models/chapter.dart';
 import 'package:novel_app/models/chapter_content_result.dart';
 
 import '../../helpers/test_database_setup.dart';
-import 'test_helpers.mocks.dart' as test_mocks;
 
 /// Manual mock for HeadlessWebViewContentService
 class MockHeadlessWebViewContentService extends Mock
@@ -86,7 +85,6 @@ void main() {
     test('5章小说, 用户在读第1章 → ch2 最先被缓存', () async {
       final urls = List.generate(5, (i) => 'https://example.com/ch${i + 1}');
 
-      final callOrder = <String>[];
       for (final url in urls) {
         mockHeadlessService.addStub(url, ChapterContentResult(content: '内容:$url'));
       }
@@ -101,7 +99,6 @@ void main() {
       // 等待第一个任务（RateLimiter 第一次无延迟）
       await Future.delayed(Duration(milliseconds: 500));
 
-      print('fetchContent 调用顺序: ${mockHeadlessService.callOrder}');
 
       // 修复后: ch2 应该是第一个被处理的
       expect(mockHeadlessService.callOrder, isNotEmpty, reason: '应该至少处理一个任务');
@@ -116,7 +113,6 @@ void main() {
         'https://example.com/ch3',
       ];
 
-      final callOrder = <String>[];
       for (final url in urls) {
         mockHeadlessService.addStub(url, ChapterContentResult(content: '内容:$url'));
       }
@@ -130,7 +126,6 @@ void main() {
 
       await Future.delayed(Duration(milliseconds: 500));
 
-      print('fetchContent 调用顺序: ${mockHeadlessService.callOrder}');
       expect(mockHeadlessService.callOrder[0], contains('ch2'),
           reason: 'ch2 应该最先被处理');
     }, timeout: Timeout(Duration(seconds: 5)));
@@ -186,7 +181,6 @@ void main() {
 
       // ch2 应该已被缓存
       final cached2 = await chapterRepository.getCachedChapter(urls[1]);
-      print('ch2 缓存: $cached2');
       expect(cached2, 'ch2的内容');
 
       // ch1（当前章节）不应被缓存
@@ -230,7 +224,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final cached3 = await chapterRepository.getCachedChapter(urls[2]);
-      print('p3 缓存: $cached3');
       expect(cached3, '新缓存p3');
     }, timeout: Timeout(Duration(seconds: 5)));
   });
@@ -278,11 +271,12 @@ void main() {
         currentIndex: 0,
       );
 
-      final stats = preloadService.getStatistics();
-      // 去重后 enqueued_urls 不应翻倍
-      // 注意：第二次调用时，第一个任务可能已被处理并从 _enqueuedUrls 移除
-      // 所以这里只验证不会异常
-      print('重复入队后 stats: $stats');
+      // 去重不变量：_enqueuedUrls 中的 URL 全仓唯一（第二次入队不得翻倍）。
+      // 注意：队头任务可能已被处理并从 _enqueuedUrls 移除，故只断言唯一性
+      // 而不断言精确数量。
+      final queueUrls = preloadService.queuedChapterUrls;
+      expect(queueUrls.toSet().length, queueUrls.length,
+          reason: '重复入队后队列不得出现重复章节');
     }, timeout: Timeout(Duration(seconds: 5)));
   });
 }

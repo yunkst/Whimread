@@ -117,7 +117,7 @@ class GraphViewState extends ConsumerState<RelationshipGraphView> {
 
     return ForceDirectedGraphWidget<GraphNode>(
       controller: _controller,
-      nodesBuilder: (context, data) => _NodeWidget(
+      nodesBuilder: (context, data) => GraphNodeWidget(
         data: data,
         color: theme.colorScheme.primaryContainer,
         foreground: theme.colorScheme.onPrimaryContainer,
@@ -132,7 +132,7 @@ class GraphViewState extends ConsumerState<RelationshipGraphView> {
         final label = rel != null
             ? rel.relationType.labelFor(isSource: rel.sourceCharacterId == a.id)
             : '';
-        return _EdgeWidget(
+        return GraphEdgeWidget(
           color: color,
           strokeWidth: 1.0 + strength * 0.7,
           dashed: !symmetric,
@@ -159,11 +159,15 @@ class GraphNode {
   String toString() => name;
 }
 
-class _NodeWidget extends StatelessWidget {
+/// 力导向图节点胶囊（底色圆角 + 名字）。
+///
+/// 同时服务本组件与关系图整页（relationship_graph_screen）——此前两处
+/// 各持一份逐字相同的私有实现。
+class GraphNodeWidget extends StatelessWidget {
   final GraphNode data;
   final Color color;
   final Color foreground;
-  const _NodeWidget({
+  const GraphNodeWidget({
     required this.data,
     required this.color,
     required this.foreground,
@@ -190,12 +194,13 @@ class _NodeWidget extends StatelessWidget {
   }
 }
 
-class _EdgeWidget extends StatelessWidget {
+/// 力导向图边（实/虚线 + 关系标签）。
+class GraphEdgeWidget extends StatelessWidget {
   final Color color;
   final double strokeWidth;
   final bool dashed;
   final String label;
-  const _EdgeWidget({
+  const GraphEdgeWidget({
     required this.color,
     required this.strokeWidth,
     required this.dashed,

@@ -159,14 +159,6 @@ mixin AutoScrollMixin<T extends StatefulWidget> on State<T> {
     startAutoScroll();
   }
 
-  /// 处理滚动通知（保留以兼容现有代码，但已简化）
-  ///
-  /// 返回 false 表示不阻止通知继续传递
-  bool handleScrollNotification(ScrollNotification notification) {
-    // 不再处理 UserScrollNotification，改用 GestureDetector
-    return false;
-  }
-
   // ========== Getter 方法 ==========
 
   /// 是否正在自动滚动

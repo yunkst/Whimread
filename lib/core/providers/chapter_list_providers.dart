@@ -19,8 +19,6 @@ import 'service_providers.dart';
 import 'database_providers.dart';
 import 'bookshelf_mutation_provider.dart';
 
-import 'package:flutter/material.dart';
-
 part 'chapter_list_providers.g.dart';
 
 /// 从异常提取用户可读消息。
@@ -166,13 +164,8 @@ class ChapterList extends _$ChapterList {
     await _loadChapters();
   }
 
-  /// 加载章节列表
-  Future<void> _loadChapters({
-    bool forceRefresh = false,
-    BuildContext? context,
-  }) async {
-    // 在方法开始时保存 context 引用，避免跨异步边界使用
-    final savedContext = context;
+  /// 加载章节列表：优先本地缓存；forceRefresh 或缓存为空时从书源刷新。
+  Future<void> _loadChapters({bool forceRefresh = false}) async {
     final chapterLoader = ref.read(chapterLoaderProvider);
 
     state = state.copyWith(isLoading: true, errorMessage: '');
@@ -191,27 +184,18 @@ class ChapterList extends _$ChapterList {
         return;
       }
 
-      if (cachedChapters.isNotEmpty && forceRefresh && savedContext == null) {
-        // 有缓存但需要刷新，且没有提供 context（如首次加载），直接刷新
-        await _refreshChaptersFromBackend(forceRefresh: true);
-      } else if (cachedChapters.isNotEmpty && forceRefresh && savedContext != null) {
-        // 有缓存但需要刷新，且有 context（用户手动刷新）
-        // ignore: use_build_context_synchronously - savedContext 在方法开始时已保存
-        await _refreshChaptersFromBackend(forceRefresh: true, context: savedContext);
-      } else {
-        // 没有缓存时，检查是否为自定义小说
-        if (cachedChapters.isEmpty && novel.url.startsWith('custom://')) {
-          // 自定义小说没有章节时，直接设置空状态，结束loading
-          state = state.copyWith(
-            chapters: [],
-            isLoading: false,
-          );
-          _updateTotalPages();
-          return;
-        }
-        // 从后端获取
-        await _refreshChaptersFromBackend(forceRefresh: forceRefresh);
+      // 没有缓存时，自定义小说没有书源，直接设置空状态
+      if (cachedChapters.isEmpty && novel.url.startsWith('custom://')) {
+        state = state.copyWith(
+          chapters: [],
+          isLoading: false,
+        );
+        _updateTotalPages();
+        return;
       }
+
+      // 从书源获取
+      await _refreshChaptersFromBackend(forceRefresh: forceRefresh);
     } catch (e, stackTrace) {
       LoggerService.instance.e(
         '加载章节列表失败: $e',
@@ -226,10 +210,12 @@ class ChapterList extends _$ChapterList {
     }
   }
 
-  /// 从后端刷新章节列表
+  /// 从书源刷新章节列表。
+  ///
+  /// 确认对话框等交互由调用方 UI 层在调用前完成，本方法只负责数据刷新；
+  /// 无论成功失败都会结束 isLoading，不存在提前 return 留下 loading 的路径。
   Future<void> _refreshChaptersFromBackend({
     bool forceRefresh = false,
-    BuildContext? context,
   }) async {
     final chapterLoader = ref.read(chapterLoaderProvider);
 
@@ -258,41 +244,6 @@ class ChapterList extends _$ChapterList {
       return;
     }
 
-    // 如果需要强制刷新且有 context，显示确认对话框
-    if (forceRefresh && context != null) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('刷新章节列表'),
-          content: const Text(
-            '是否需要重新抓取最新章节信息？\n\n'
-            '选择"是"将强制从源站重新获取，可能需要较长时间。\n'
-            '选择"否"将使用缓存的章节列表。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('否'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('是'),
-            ),
-          ],
-        ),
-      );
-
-      if (confirmed != true) {
-        // 用户选择不刷新，使用缓存
-        LoggerService.instance.d(
-          '用户拒绝刷新章节列表: novel=${novel.title}',
-          category: LogCategory.ui,
-          tags: ['provider', 'chapter-list', 'refresh_declined'],
-        );
-        return;
-      }
-    }
-
     try {
       // 从后端获取最新章节列表
       LoggerService.instance.d(
@@ -317,10 +268,6 @@ class ChapterList extends _$ChapterList {
         );
         _updateTotalPages();
 
-        // 缓存状态已由 getCachedNovelChapters 的 LEFT JOIN 填充到 Chapter.isCached
-
-        // 显示更新成功提示
-        // ToastUtils.show('章节列表已更新');
       } else {
         state = state.copyWith(
           isLoading: false,
@@ -334,8 +281,10 @@ class ChapterList extends _$ChapterList {
         category: LogCategory.ui,
         tags: ['chapter-list'],
       );
-      // 如果已经有缓存数据，不切换到错误态，但 Toast 提示用户刷新失败
+      // 如果已经有缓存数据，不切换到错误态（保留已加载列表），
+      // 但必须结束 loading，只 Toast 提示用户刷新失败
       if (state.chapters.isNotEmpty) {
+        state = state.copyWith(isLoading: false);
         ToastUtils.showWarning(_exceptionUserMessage(e));
       } else {
         state = state.copyWith(
@@ -345,11 +294,6 @@ class ChapterList extends _$ChapterList {
       }
     }
   }
-
-  /// 加载当前页章节的缓存状态
-  ///
-  /// 已废弃：缓存状态现在直接来自 Chapter.isCached（getCachedNovelChapters 的 LEFT JOIN），
-  /// 无需单独加载。预加载进度通过 updateChapterCacheStatus 增量更新单个章节。
 
   /// 检查书架状态
   Future<void> _checkBookshelfStatus() async {
@@ -399,9 +343,11 @@ class ChapterList extends _$ChapterList {
   }
 
   /// 刷新章节列表
-  /// [context] 可选的 BuildContext，用于显示刷新确认对话框
-  Future<void> refreshChapters(BuildContext? context) async {
-    await _loadChapters(forceRefresh: true, context: context);
+  ///
+  /// [forceRefresh] 为 true 时强制从书源重新抓取（走 headless WebView，耗时），
+  /// 否则优先使用本地缓存。确认对话框等交互由 UI 层在调用前完成。
+  Future<void> refreshChapters({bool forceRefresh = false}) async {
+    await _loadChapters(forceRefresh: forceRefresh);
   }
 
   /// 切换书架状态

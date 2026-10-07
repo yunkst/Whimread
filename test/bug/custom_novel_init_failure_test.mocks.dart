@@ -3,26 +3,23 @@
 // Do not manually edit this file.
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
-import 'dart:async' as _i7;
-import 'dart:io' as _i8;
+import 'dart:async' as _i6;
 
 import 'package:dio/dio.dart' as _i2;
 import 'package:mockito/mockito.dart' as _i1;
-import 'package:mockito/src/dummies.dart' as _i9;
-import 'package:novel_api/novel_api.dart' as _i3;
 import 'package:novel_app/core/interfaces/repositories/i_chapter_repository.dart'
-    as _i10;
+    as _i7;
 import 'package:novel_app/core/interfaces/repositories/i_novel_repository.dart'
-    as _i13;
-import 'package:novel_app/models/chapter.dart' as _i11;
-import 'package:novel_app/models/novel.dart' as _i14;
-import 'package:novel_app/models/reading_anchor.dart' as _i15;
-import 'package:novel_app/models/remote_script.dart' as _i4;
-import 'package:novel_app/models/search_result.dart' as _i12;
-import 'package:novel_app/services/api_service_wrapper.dart' as _i6;
+    as _i10;
+import 'package:novel_app/models/chapter.dart' as _i8;
+import 'package:novel_app/models/novel.dart' as _i11;
+import 'package:novel_app/models/reading_anchor.dart' as _i12;
+import 'package:novel_app/models/remote_script.dart' as _i3;
+import 'package:novel_app/models/search_result.dart' as _i9;
+import 'package:novel_app/services/api_service_wrapper.dart' as _i5;
 import 'package:novel_app/services/headless_webview_chapter_list_service.dart'
-    as _i16;
-import 'package:novel_app/services/headless_webview_errors.dart' as _i5;
+    as _i13;
+import 'package:novel_app/services/headless_webview_errors.dart' as _i4;
 
 // ignore_for_file: type=lint
 // ignore_for_file: avoid_redundant_argument_values
@@ -48,9 +45,9 @@ class _FakeDio_0 extends _i1.SmartFake implements _i2.Dio {
         );
 }
 
-class _FakeBackupUploadResponse_1 extends _i1.SmartFake
-    implements _i3.BackupUploadResponse {
-  _FakeBackupUploadResponse_1(
+class _FakeRemoteScriptPayload_1 extends _i1.SmartFake
+    implements _i3.RemoteScriptPayload {
+  _FakeRemoteScriptPayload_1(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -59,9 +56,9 @@ class _FakeBackupUploadResponse_1 extends _i1.SmartFake
         );
 }
 
-class _FakeRemoteScriptPayload_2 extends _i1.SmartFake
-    implements _i4.RemoteScriptPayload {
-  _FakeRemoteScriptPayload_2(
+class _FakeRemoteShareResult_2 extends _i1.SmartFake
+    implements _i3.RemoteShareResult {
+  _FakeRemoteShareResult_2(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -70,20 +67,9 @@ class _FakeRemoteScriptPayload_2 extends _i1.SmartFake
         );
 }
 
-class _FakeRemoteShareResult_3 extends _i1.SmartFake
-    implements _i4.RemoteShareResult {
-  _FakeRemoteShareResult_3(
-    Object parent,
-    Invocation parentInvocation,
-  ) : super(
-          parent,
-          parentInvocation,
-        );
-}
-
-class _FakeFetchChapterListResult_4 extends _i1.SmartFake
-    implements _i5.FetchChapterListResult {
-  _FakeFetchChapterListResult_4(
+class _FakeFetchChapterListResult_3 extends _i1.SmartFake
+    implements _i4.FetchChapterListResult {
+  _FakeFetchChapterListResult_3(
     Object parent,
     Invocation parentInvocation,
   ) : super(
@@ -95,7 +81,7 @@ class _FakeFetchChapterListResult_4 extends _i1.SmartFake
 /// A class which mocks [ApiServiceWrapper].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
+class MockApiServiceWrapper extends _i1.Mock implements _i5.ApiServiceWrapper {
   MockApiServiceWrapper() {
     _i1.throwOnMissingStub(this);
   }
@@ -117,7 +103,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
 
   @override
   set authHeaderProvider(
-          _i7.Future<Map<String, String>> Function()? _authHeaderProvider) =>
+          _i6.Future<Map<String, String>> Function()? _authHeaderProvider) =>
       super.noSuchMethod(
         Invocation.setter(
           #authHeaderProvider,
@@ -128,7 +114,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
 
   @override
   set unauthorizedRecoveryProvider(
-          _i7.Future<Map<String, String>?> Function()?
+          _i6.Future<Map<String, String>?> Function()?
               _unauthorizedRecoveryProvider) =>
       super.noSuchMethod(
         Invocation.setter(
@@ -139,116 +125,18 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
       );
 
   @override
-  _i7.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
+  _i6.Future<void> init({String? baseUrl}) => (super.noSuchMethod(
         Invocation.method(
           #init,
           [],
           {#baseUrl: baseUrl},
         ),
-        returnValue: _i7.Future<void>.value(),
-        returnValueForMissingStub: _i7.Future<void>.value(),
-      ) as _i7.Future<void>);
+        returnValue: _i6.Future<void>.value(),
+        returnValueForMissingStub: _i6.Future<void>.value(),
+      ) as _i6.Future<void>);
 
   @override
-  _i7.Future<String?> getHost() => (super.noSuchMethod(
-        Invocation.method(
-          #getHost,
-          [],
-        ),
-        returnValue: _i7.Future<String?>.value(),
-      ) as _i7.Future<String?>);
-
-  @override
-  void dispose() => super.noSuchMethod(
-        Invocation.method(
-          #dispose,
-          [],
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
-  _i7.Future<_i3.BackupUploadResponse> uploadBackup({
-    required _i8.File? dbFile,
-    _i2.ProgressCallback? onProgress,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #uploadBackup,
-          [],
-          {
-            #dbFile: dbFile,
-            #onProgress: onProgress,
-          },
-        ),
-        returnValue: _i7.Future<_i3.BackupUploadResponse>.value(
-            _FakeBackupUploadResponse_1(
-          this,
-          Invocation.method(
-            #uploadBackup,
-            [],
-            {
-              #dbFile: dbFile,
-              #onProgress: onProgress,
-            },
-          ),
-        )),
-      ) as _i7.Future<_i3.BackupUploadResponse>);
-
-  @override
-  _i7.Future<List<Map<String, dynamic>>> getBackupList() => (super.noSuchMethod(
-        Invocation.method(
-          #getBackupList,
-          [],
-        ),
-        returnValue: _i7.Future<List<Map<String, dynamic>>>.value(
-            <Map<String, dynamic>>[]),
-      ) as _i7.Future<List<Map<String, dynamic>>>);
-
-  @override
-  _i7.Future<String> downloadBackup({
-    required String? backupId,
-    required String? savePath,
-    _i2.ProgressCallback? onProgress,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #downloadBackup,
-          [],
-          {
-            #backupId: backupId,
-            #savePath: savePath,
-            #onProgress: onProgress,
-          },
-        ),
-        returnValue: _i7.Future<String>.value(_i9.dummyValue<String>(
-          this,
-          Invocation.method(
-            #downloadBackup,
-            [],
-            {
-              #backupId: backupId,
-              #savePath: savePath,
-              #onProgress: onProgress,
-            },
-          ),
-        )),
-      ) as _i7.Future<String>);
-
-  @override
-  _i7.Future<void> deleteBackupOnServer({required String? backupId}) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #deleteBackupOnServer,
-          [],
-          {#backupId: backupId},
-        ),
-        returnValue: _i7.Future<void>.value(),
-        returnValueForMissingStub: _i7.Future<void>.value(),
-      ) as _i7.Future<void>);
-
-  @override
-  _i7.Future<List<_i4.RemoteScriptMeta>> searchRemoteScripts(
+  _i6.Future<List<_i3.RemoteScriptMeta>> searchRemoteScripts(
           {required String? host}) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -256,29 +144,29 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
           [],
           {#host: host},
         ),
-        returnValue: _i7.Future<List<_i4.RemoteScriptMeta>>.value(
-            <_i4.RemoteScriptMeta>[]),
-      ) as _i7.Future<List<_i4.RemoteScriptMeta>>);
+        returnValue: _i6.Future<List<_i3.RemoteScriptMeta>>.value(
+            <_i3.RemoteScriptMeta>[]),
+      ) as _i6.Future<List<_i3.RemoteScriptMeta>>);
 
   @override
-  _i7.Future<_i4.RemoteScriptPayload> getRemoteScript(String? remoteId) =>
+  _i6.Future<_i3.RemoteScriptPayload> getRemoteScript(String? remoteId) =>
       (super.noSuchMethod(
         Invocation.method(
           #getRemoteScript,
           [remoteId],
         ),
-        returnValue: _i7.Future<_i4.RemoteScriptPayload>.value(
-            _FakeRemoteScriptPayload_2(
+        returnValue: _i6.Future<_i3.RemoteScriptPayload>.value(
+            _FakeRemoteScriptPayload_1(
           this,
           Invocation.method(
             #getRemoteScript,
             [remoteId],
           ),
         )),
-      ) as _i7.Future<_i4.RemoteScriptPayload>);
+      ) as _i6.Future<_i3.RemoteScriptPayload>);
 
   @override
-  _i7.Future<_i4.RemoteShareResult> shareScriptToRemote({
+  _i6.Future<_i3.RemoteShareResult> shareScriptToRemote({
     required String? domain,
     required String? displayName,
     required String? chapterListJs,
@@ -310,7 +198,7 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
           },
         ),
         returnValue:
-            _i7.Future<_i4.RemoteShareResult>.value(_FakeRemoteShareResult_3(
+            _i6.Future<_i3.RemoteShareResult>.value(_FakeRemoteShareResult_2(
           this,
           Invocation.method(
             #shareScriptToRemote,
@@ -330,20 +218,20 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
             },
           ),
         )),
-      ) as _i7.Future<_i4.RemoteShareResult>);
+      ) as _i6.Future<_i3.RemoteShareResult>);
 
   @override
-  _i7.Future<void> unshareRemoteScript(String? remoteId) => (super.noSuchMethod(
+  _i6.Future<void> unshareRemoteScript(String? remoteId) => (super.noSuchMethod(
         Invocation.method(
           #unshareRemoteScript,
           [remoteId],
         ),
-        returnValue: _i7.Future<void>.value(),
-        returnValueForMissingStub: _i7.Future<void>.value(),
-      ) as _i7.Future<void>);
+        returnValue: _i6.Future<void>.value(),
+        returnValueForMissingStub: _i6.Future<void>.value(),
+      ) as _i6.Future<void>);
 
   @override
-  _i7.Future<List<_i4.RemoteScriptUpdate>> checkRemoteScriptUpdates(
+  _i6.Future<List<_i3.RemoteScriptUpdate>> checkRemoteScriptUpdates(
           {required List<({String remoteId, int version})>? items}) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -351,171 +239,154 @@ class MockApiServiceWrapper extends _i1.Mock implements _i6.ApiServiceWrapper {
           [],
           {#items: items},
         ),
-        returnValue: _i7.Future<List<_i4.RemoteScriptUpdate>>.value(
-            <_i4.RemoteScriptUpdate>[]),
-      ) as _i7.Future<List<_i4.RemoteScriptUpdate>>);
+        returnValue: _i6.Future<List<_i3.RemoteScriptUpdate>>.value(
+            <_i3.RemoteScriptUpdate>[]),
+      ) as _i6.Future<List<_i3.RemoteScriptUpdate>>);
 }
 
 /// A class which mocks [IChapterRepository].
 ///
 /// See the documentation for Mockito's code generation for more information.
 class MockIChapterRepository extends _i1.Mock
-    implements _i10.IChapterRepository {
+    implements _i7.IChapterRepository {
   MockIChapterRepository() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  _i7.Future<bool> isChapterCached(String? chapterUrl) => (super.noSuchMethod(
+  _i6.Future<bool> isChapterCached(String? chapterUrl) => (super.noSuchMethod(
         Invocation.method(
           #isChapterCached,
           [chapterUrl],
         ),
-        returnValue: _i7.Future<bool>.value(false),
-      ) as _i7.Future<bool>);
+        returnValue: _i6.Future<bool>.value(false),
+      ) as _i6.Future<bool>);
 
   @override
-  _i7.Future<List<String>> filterUncachedChapters(List<String>? chapterUrls) =>
+  _i6.Future<List<String>> filterUncachedChapters(List<String>? chapterUrls) =>
       (super.noSuchMethod(
         Invocation.method(
           #filterUncachedChapters,
           [chapterUrls],
         ),
-        returnValue: _i7.Future<List<String>>.value(<String>[]),
-      ) as _i7.Future<List<String>>);
+        returnValue: _i6.Future<List<String>>.value(<String>[]),
+      ) as _i6.Future<List<String>>);
 
   @override
-  _i7.Future<Map<String, bool>> getChaptersCacheStatus(
+  _i6.Future<Map<String, bool>> getChaptersCacheStatus(
           List<String>? chapterUrls) =>
       (super.noSuchMethod(
         Invocation.method(
           #getChaptersCacheStatus,
           [chapterUrls],
         ),
-        returnValue: _i7.Future<Map<String, bool>>.value(<String, bool>{}),
-      ) as _i7.Future<Map<String, bool>>);
+        returnValue: _i6.Future<Map<String, bool>>.value(<String, bool>{}),
+      ) as _i6.Future<Map<String, bool>>);
 
   @override
-  void clearMemoryState() => super.noSuchMethod(
-        Invocation.method(
-          #clearMemoryState,
-          [],
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
-  _i7.Future<String?> getCachedChapter(String? chapterUrl) =>
+  _i6.Future<String?> getCachedChapter(String? chapterUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getCachedChapter,
           [chapterUrl],
         ),
-        returnValue: _i7.Future<String?>.value(),
-      ) as _i7.Future<String?>);
+        returnValue: _i6.Future<String?>.value(),
+      ) as _i6.Future<String?>);
 
   @override
-  _i7.Future<List<_i11.Chapter>> getCachedNovelChapters(String? novelUrl) =>
+  _i6.Future<List<_i8.Chapter>> getCachedNovelChapters(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getCachedNovelChapters,
           [novelUrl],
         ),
-        returnValue: _i7.Future<List<_i11.Chapter>>.value(<_i11.Chapter>[]),
-      ) as _i7.Future<List<_i11.Chapter>>);
+        returnValue: _i6.Future<List<_i8.Chapter>>.value(<_i8.Chapter>[]),
+      ) as _i6.Future<List<_i8.Chapter>>);
 
   @override
-  _i7.Future<int> getCachedChaptersCount(String? novelUrl) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #getCachedChaptersCount,
-          [novelUrl],
-        ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
-
-  @override
-  _i7.Future<int> getTotalChaptersCount(String? novelUrl) =>
+  _i6.Future<int> getTotalChaptersCount(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getTotalChaptersCount,
           [novelUrl],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<Map<String, ({int cached, int total})>> getChapterCountsForNovels(
+  _i6.Future<Map<String, ({int cached, int total})>> getChapterCountsForNovels(
           List<String>? novelUrls) =>
       (super.noSuchMethod(
         Invocation.method(
           #getChapterCountsForNovels,
           [novelUrls],
         ),
-        returnValue: _i7.Future<Map<String, ({int cached, int total})>>.value(
+        returnValue: _i6.Future<Map<String, ({int cached, int total})>>.value(
             <String, ({int cached, int total})>{}),
-      ) as _i7.Future<Map<String, ({int cached, int total})>>);
+      ) as _i6.Future<Map<String, ({int cached, int total})>>);
 
   @override
-  _i7.Future<({List<_i12.ChapterSearchResult> results, bool truncated})>
-      searchInCachedContent(
+  _i6.Future<
+      ({
+        List<_i9.ChapterSearchResult> results,
+        bool truncated
+      })> searchInCachedContent(
     String? keyword, {
     String? novelUrl,
   }) =>
-          (super.noSuchMethod(
-            Invocation.method(
-              #searchInCachedContent,
-              [keyword],
-              {#novelUrl: novelUrl},
-            ),
-            returnValue: _i7.Future<
-                    ({
-                      List<_i12.ChapterSearchResult> results,
-                      bool truncated
-                    })>.value(
-                (results: <_i12.ChapterSearchResult>[], truncated: false)),
-          ) as _i7.Future<
-              ({List<_i12.ChapterSearchResult> results, bool truncated})>);
+      (super.noSuchMethod(
+        Invocation.method(
+          #searchInCachedContent,
+          [keyword],
+          {#novelUrl: novelUrl},
+        ),
+        returnValue: _i6.Future<
+            ({
+              List<_i9.ChapterSearchResult> results,
+              bool truncated
+            })>.value((results: <_i9.ChapterSearchResult>[], truncated: false)),
+      ) as _i6
+          .Future<({List<_i9.ChapterSearchResult> results, bool truncated})>);
 }
 
 /// A class which mocks [INovelRepository].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
+class MockINovelRepository extends _i1.Mock implements _i10.INovelRepository {
   MockINovelRepository() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  _i7.Future<List<_i14.Novel>> getNovels() => (super.noSuchMethod(
+  _i6.Future<List<_i11.Novel>> getNovels() => (super.noSuchMethod(
         Invocation.method(
           #getNovels,
           [],
         ),
-        returnValue: _i7.Future<List<_i14.Novel>>.value(<_i14.Novel>[]),
-      ) as _i7.Future<List<_i14.Novel>>);
+        returnValue: _i6.Future<List<_i11.Novel>>.value(<_i11.Novel>[]),
+      ) as _i6.Future<List<_i11.Novel>>);
 
   @override
-  _i7.Future<bool> isInBookshelf(String? novelUrl) => (super.noSuchMethod(
+  _i6.Future<bool> isInBookshelf(String? novelUrl) => (super.noSuchMethod(
         Invocation.method(
           #isInBookshelf,
           [novelUrl],
         ),
-        returnValue: _i7.Future<bool>.value(false),
-      ) as _i7.Future<bool>);
+        returnValue: _i6.Future<bool>.value(false),
+      ) as _i6.Future<bool>);
 
   @override
-  _i7.Future<String?> findExistingBookshelfUrl(String? novelUrl) =>
+  _i6.Future<String?> findExistingBookshelfUrl(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #findExistingBookshelfUrl,
           [novelUrl],
         ),
-        returnValue: _i7.Future<String?>.value(),
-      ) as _i7.Future<String?>);
+        returnValue: _i6.Future<String?>.value(),
+      ) as _i6.Future<String?>);
 
   @override
-  _i7.Future<int> updateLastReadChapter(
+  _i6.Future<int> updateLastReadChapter(
     String? novelUrl,
     int? chapterIndex,
   ) =>
@@ -527,23 +398,23 @@ class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
             chapterIndex,
           ],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<_i15.ReadingAnchor?> getLastReadAnchor(String? novelUrl) =>
+  _i6.Future<_i12.ReadingAnchor?> getLastReadAnchor(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getLastReadAnchor,
           [novelUrl],
         ),
-        returnValue: _i7.Future<_i15.ReadingAnchor?>.value(),
-      ) as _i7.Future<_i15.ReadingAnchor?>);
+        returnValue: _i6.Future<_i12.ReadingAnchor?>.value(),
+      ) as _i6.Future<_i12.ReadingAnchor?>);
 
   @override
-  _i7.Future<int> updateLastReadAnchor(
+  _i6.Future<int> updateLastReadAnchor(
     String? novelUrl,
-    _i15.ReadingAnchor? anchor,
+    _i12.ReadingAnchor? anchor,
   ) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -553,11 +424,11 @@ class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
             anchor,
           ],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<int> updateBackgroundSetting(
+  _i6.Future<int> updateBackgroundSetting(
     String? novelUrl,
     String? backgroundSetting,
   ) =>
@@ -569,58 +440,58 @@ class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
             backgroundSetting,
           ],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<String?> getBackgroundSetting(String? novelUrl) =>
+  _i6.Future<String?> getBackgroundSetting(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getBackgroundSetting,
           [novelUrl],
         ),
-        returnValue: _i7.Future<String?>.value(),
-      ) as _i7.Future<String?>);
+        returnValue: _i6.Future<String?>.value(),
+      ) as _i6.Future<String?>);
 
   @override
-  _i7.Future<int> getLastReadChapter(String? novelUrl) => (super.noSuchMethod(
+  _i6.Future<int> getLastReadChapter(String? novelUrl) => (super.noSuchMethod(
         Invocation.method(
           #getLastReadChapter,
           [novelUrl],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<_i14.Novel?> getNovelByUrl(String? novelUrl) =>
+  _i6.Future<_i11.Novel?> getNovelByUrl(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #getNovelByUrl,
           [novelUrl],
         ),
-        returnValue: _i7.Future<_i14.Novel?>.value(),
-      ) as _i7.Future<_i14.Novel?>);
+        returnValue: _i6.Future<_i11.Novel?>.value(),
+      ) as _i6.Future<_i11.Novel?>);
 
   @override
-  _i7.Future<_i14.Novel?> getNovelById(int? id) => (super.noSuchMethod(
+  _i6.Future<_i11.Novel?> getNovelById(int? id) => (super.noSuchMethod(
         Invocation.method(
           #getNovelById,
           [id],
         ),
-        returnValue: _i7.Future<_i14.Novel?>.value(),
-      ) as _i7.Future<_i14.Novel?>);
+        returnValue: _i6.Future<_i11.Novel?>.value(),
+      ) as _i6.Future<_i11.Novel?>);
 
   @override
-  _i7.Future<String?> getNovelUrlById(int? id) => (super.noSuchMethod(
+  _i6.Future<String?> getNovelUrlById(int? id) => (super.noSuchMethod(
         Invocation.method(
           #getNovelUrlById,
           [id],
         ),
-        returnValue: _i7.Future<String?>.value(),
-      ) as _i7.Future<String?>);
+        returnValue: _i6.Future<String?>.value(),
+      ) as _i6.Future<String?>);
 
   @override
-  _i7.Future<int> updateBackgroundSettingById(
+  _i6.Future<int> updateBackgroundSettingById(
     int? id,
     String? setting,
   ) =>
@@ -632,11 +503,11 @@ class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
             setting,
           ],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 
   @override
-  _i7.Future<int> updateCoverMediaIdById(
+  _i6.Future<int> updateCoverMediaIdById(
     int? id,
     String? mediaId,
   ) =>
@@ -648,35 +519,35 @@ class MockINovelRepository extends _i1.Mock implements _i13.INovelRepository {
             mediaId,
           ],
         ),
-        returnValue: _i7.Future<int>.value(0),
-      ) as _i7.Future<int>);
+        returnValue: _i6.Future<int>.value(0),
+      ) as _i6.Future<int>);
 }
 
 /// A class which mocks [HeadlessWebViewChapterListService].
 ///
 /// See the documentation for Mockito's code generation for more information.
 class MockHeadlessWebViewChapterListService extends _i1.Mock
-    implements _i16.HeadlessWebViewChapterListService {
+    implements _i13.HeadlessWebViewChapterListService {
   MockHeadlessWebViewChapterListService() {
     _i1.throwOnMissingStub(this);
   }
 
   @override
-  _i7.Future<_i5.FetchChapterListResult> fetchChapterList(String? novelUrl) =>
+  _i6.Future<_i4.FetchChapterListResult> fetchChapterList(String? novelUrl) =>
       (super.noSuchMethod(
         Invocation.method(
           #fetchChapterList,
           [novelUrl],
         ),
-        returnValue: _i7.Future<_i5.FetchChapterListResult>.value(
-            _FakeFetchChapterListResult_4(
+        returnValue: _i6.Future<_i4.FetchChapterListResult>.value(
+            _FakeFetchChapterListResult_3(
           this,
           Invocation.method(
             #fetchChapterList,
             [novelUrl],
           ),
         )),
-      ) as _i7.Future<_i5.FetchChapterListResult>);
+      ) as _i6.Future<_i4.FetchChapterListResult>);
 
   @override
   void dispose() => super.noSuchMethod(

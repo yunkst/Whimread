@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
-import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/models/chapter.dart';
 import 'package:novel_app/services/api_service_wrapper.dart';
 import 'package:novel_app/core/interfaces/repositories/i_chapter_repository.dart';
@@ -161,6 +160,36 @@ void main() {
       expect(result[0].title, equals('第一章'));
       expect(result[1].title, equals('第二章'));
       expect(result[2].title, equals('第三章'));
+    });
+
+    test('场景4: 空章节的自定义小说加载返回空列表且不初始化 API', () async {
+      // Arrange
+      final customNovelUrl = 'custom://novel/empty';
+      when(mockChapterRepo.getCachedNovelChapters(customNovelUrl))
+          .thenAnswer((_) async => []);
+
+      // Act
+      final result = await chapterLoader.loadChapters(customNovelUrl);
+
+      // Assert
+      expect(result, isEmpty);
+      verifyNever(mockApi.init());
+    });
+
+    test('场景5: 刷新空章节的自定义小说返回空列表', () async {
+      // Arrange
+      final customNovelUrl = 'custom://novel/empty';
+      when(mockChapterRepo.getCachedNovelChapters(customNovelUrl))
+          .thenAnswer((_) async => []);
+
+      // Act
+      final result = await chapterLoader.refreshFromBackend(
+        customNovelUrl,
+        forceRefresh: true,
+      );
+
+      // Assert
+      expect(result, isEmpty);
     });
   });
 }

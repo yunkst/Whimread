@@ -14,7 +14,6 @@ class Character {
   final String? backgroundStory;
   final String? facePrompts; // 面部提示词
   final String? bodyPrompts; // 身材提示词
-  final String? cachedImageUrl; // 缓存的图集第一张图片路径
   final String? avatarMediaId; // 头像媒体资源ID（图像/视频），经 MediaView 渲染
   final List<String>? aliases; // 别名列表，上限10个
   final int? firstAppearanceChapter; // 登场章节(0-based index),空=视为§0登场
@@ -37,7 +36,6 @@ class Character {
     this.backgroundStory,
     this.facePrompts,
     this.bodyPrompts,
-    this.cachedImageUrl,
     this.avatarMediaId,
     this.aliases,
     this.firstAppearanceChapter,
@@ -62,7 +60,6 @@ class Character {
       'backgroundStory': backgroundStory,
       'facePrompts': facePrompts,
       'bodyPrompts': bodyPrompts,
-      'cachedImageUrl': cachedImageUrl,
       'avatarMediaId': avatarMediaId,
       'aliases': aliases?.isEmpty ?? true ? null : jsonEncode(aliases),
       'firstAppearanceChapter': firstAppearanceChapter,
@@ -98,8 +95,7 @@ class Character {
       backgroundStory: map['backgroundStory'] as String?,
       facePrompts: map['facePrompts'] as String?,
       bodyPrompts: map['bodyPrompts'] as String?,
-      cachedImageUrl: map['cachedImageUrl'] as String?,
-      avatarMediaId: map['avatarMediaId'] as String?,
+        avatarMediaId: map['avatarMediaId'] as String?,
       aliases: parseAliases(map['aliases'] as String?),
       firstAppearanceChapter: map['firstAppearanceChapter'] as int?,
       speechStyle: map['speechStyle'] as String?,
@@ -125,7 +121,6 @@ class Character {
     String? backgroundStory,
     String? facePrompts,
     String? bodyPrompts,
-    String? cachedImageUrl,
     String? avatarMediaId,
     List<String>? aliases,
     int? firstAppearanceChapter,
@@ -148,7 +143,6 @@ class Character {
       backgroundStory: backgroundStory ?? this.backgroundStory,
       facePrompts: facePrompts ?? this.facePrompts,
       bodyPrompts: bodyPrompts ?? this.bodyPrompts,
-      cachedImageUrl: cachedImageUrl ?? this.cachedImageUrl,
       avatarMediaId: avatarMediaId ?? this.avatarMediaId,
       aliases: aliases ?? this.aliases,
       firstAppearanceChapter: firstAppearanceChapter ?? this.firstAppearanceChapter,

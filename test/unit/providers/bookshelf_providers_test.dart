@@ -16,7 +16,7 @@ void main() {
   ///
   /// 注意：provider 是 AutoDispose 的，必须先 `listen` 保持存活，
   /// 否则 read 返回后 notifier 立即销毁，异步回写的 state 会丢失。
-  Future<void> _waitForShelf(
+  Future<void> waitForShelf(
     ProviderContainer container,
     Bookshelf expected, {
     Duration timeout = const Duration(seconds: 2),
@@ -89,7 +89,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.original, name: '原创'),
       );
@@ -102,7 +102,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(
           kind: BookshelfKind.online,
@@ -119,7 +119,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.all, name: '全部'),
       );
@@ -133,7 +133,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.all, name: '全部'),
       );
@@ -146,7 +146,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.all, name: '全部'),
       );
@@ -160,7 +160,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.original, name: '原创'),
       );
@@ -173,7 +173,7 @@ void main() {
       final c = ProviderContainer();
       addTearDown(c.dispose);
       c.read(currentBookshelfProvider);
-      await _waitForShelf(
+      await waitForShelf(
         c,
         const Bookshelf(kind: BookshelfKind.all, name: '全部'),
       );

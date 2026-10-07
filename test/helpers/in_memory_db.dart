@@ -1,5 +1,4 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:novel_app/core/database/database_migrations.dart';
 
 /// 测试用:初始化 sqflite_ffi 并返回一个跑完所有迁移的 in-memory 数据库。

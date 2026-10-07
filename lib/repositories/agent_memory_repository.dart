@@ -126,44 +126,5 @@ class AgentMemoryRepository extends BaseRepository {
     );
   }
 
-  /// 精确匹配查找记忆（按 content 完全匹配）
-  Future<Map<String, dynamic>?> findByContent(
-    String scenarioId,
-    String oldText,
-  ) {
-    return guard(
-      'agent_memory.findByContent',
-      () async {
-        final db = await database;
-        final results = await db.query(
-          'agent_memory',
-          where: 'scenario_id = ? AND content = ?',
-          whereArgs: [scenarioId, oldText],
-          limit: 1,
-        );
-        return results.isNotEmpty ? results.first : null;
-      },
-      message: (e) => '查找记忆失败: scenarioId=$scenarioId - $e',
-      category: LogCategory.database,
-      tags: ['agent_memory', 'find', 'failed'],
-    );
-  }
 
-  /// 获取指定场景的记忆总数
-  Future<int> countByScenario(String scenarioId) {
-    return guard(
-      'agent_memory.countByScenario',
-      () async {
-        final db = await database;
-        final result = await db.rawQuery(
-          'SELECT COUNT(*) as cnt FROM agent_memory WHERE scenario_id = ?',
-          [scenarioId],
-        );
-        return (result.first['cnt'] as int?) ?? 0;
-      },
-      message: (e) => '统计记忆数量失败: scenarioId=$scenarioId - $e',
-      category: LogCategory.database,
-      tags: ['agent_memory', 'count', 'failed'],
-    );
-  }
 }

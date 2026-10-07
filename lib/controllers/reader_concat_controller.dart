@@ -31,6 +31,7 @@ import '../models/chapter.dart';
 import '../models/reading_anchor.dart';
 import '../services/logger_service.dart';
 import '../utils/reading_anchor_math.dart';
+import '../utils/reading_geometry.dart';
 import '../widgets/reader/reader_chapter_segment.dart';
 
 /// 已拼接进阅读视图的章节内容块
@@ -125,6 +126,22 @@ class ReaderConcatController {
   /// 上次结构变化（拼接/失败）时间，作为冷却防止边缘反复触发
   DateTime _lastConcatAt = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// 用户上滑意图：上一章只在用户真实向上滚动后才允许拼接。
+  ///
+  /// 进章停在顶部时，视口整个会话都处于触发区（offset ≤ [_concatEdgeTriggerPx]），
+  /// 若只看位置，用户往下读的任何滚动都会拼进上一章——打开章节的头几秒
+  /// 背上整条拼接管线（取内容/测高/插入/补偿）。标记在 [handleScrollChanged]
+  /// 内部置位：拖拽/惯性上滑期间 `userScrollDirection == forward`；
+  /// 锚点恢复等 jumpTo 程序滚动不改方向，天然不计入。切章导航时复位。
+  bool _upwardScrollIntent = false;
+
+  /// 导航世代：每次 resetForNavigation 自增。拼接是秒级异步——await 期间
+  /// 用户可从目录切到别的章，resetForNavigation 清空块列表但复用同一个
+  /// State（_isMounted 恒真），旧章内容落地会把前一章拼进新视图，还会经
+  /// 当前章检测把旧章写成 lastReadChapterIndex（进度被污染）。拼接续体
+  /// 在两个 await 后各校验一次世代，过期即放弃。
+  int _navigationEpoch = 0;
+
   /// 距顶/底多远（像素）即触发拼接
   static const double _concatEdgeTriggerPx = 600;
 
@@ -170,6 +187,30 @@ class ReaderConcatController {
   /// 恢复跳转的最大「估算→跳转」迭代轮数（目标段落进入缓存区即精确校正）
   static const int _anchorRestoreMaxAttempts = 4;
 
+  /// 位置几何单一真理源：段落高表 + 锚点↔偏移换算（换算正确性由
+  /// reading_geometry_test 锁定；本类只负责喂数据与接线）。
+  final ReadingGeometry _geometry = ReadingGeometry();
+
+  /// 锚点采样/落库窗口：进入页面后关闭，直到用户真实滚动过才打开。
+  ///
+  /// 此前窗口内（重进首帧 offset≈0）也会采样并立即落库，把离开时存好的
+  /// 锚点覆盖成「第 0 段 0 比例」，随后退出兜底再把 p=0 写回——恢复读到
+  /// 自己的覆盖值。重进不滚动就退出时无任何写入，旧锚点原样保留。
+  bool _anchorTrackingOpen = false;
+
+  /// 锚点采样/落库窗口是否已打开（阅读页退出兜底据此决定是否写库）
+  bool get anchorTrackingOpen => _anchorTrackingOpen;
+
+  /// 打开锚点采样窗口（首次真实滚动，或恢复成功落位后由阅读页调用）
+  void openAnchorTracking() => _anchorTrackingOpen = true;
+
+  /// 恢复成功落位后把内存锚点重置为当前位置（下次采样/退出兜底写的是
+  /// 落位后的真实位置，而不是进入首帧的 p=0 采样）
+  void markAnchorTrackingAtCurrentPosition() {
+    openAnchorTracking();
+    _lastReadingAnchor = _captureReadingAnchor();
+  }
+
   // ========== 只读快照（供阅读页 build 展示） ==========
 
   /// 已拼接章节块（按显示顺序）。UI 层只读；变更一律经本控制器方法。
@@ -200,6 +241,20 @@ class ReaderConcatController {
   /// + 边缘拼接触发 + 阅读锚点采样。三步顺序与原实现一致，不可调整。
   void handleScrollChanged() {
     if (!_isMounted() || _blocks.isEmpty) return;
+    // 真实滚动（离开恢复窗口、位置离开章首）→ 打开锚点采样窗口
+    if (!_anchorTrackingOpen &&
+        !_isRestoringAnchor &&
+        _scrollController.hasClients &&
+        _scrollController.offset > 0) {
+      openAnchorTracking();
+    }
+    // 用户上滑意图置位：拖拽/惯性上滑期间方向为 forward；jumpTo 等
+    // 程序滚动不改方向，不会误置位
+    if (_scrollController.hasClients &&
+        _scrollController.position.userScrollDirection ==
+            ScrollDirection.forward) {
+      _upwardScrollIntent = true;
+    }
     if (_ref.read(readerEditModeProvider)) return;
     final detected = _detectCurrentChapterByViewport();
     if (detected != null) {
@@ -212,7 +267,13 @@ class ReaderConcatController {
   /// 显式切章导航时重置拼接状态：导航是"单章视图"重建，拼接内容全部丢弃。
   /// 须在阅读页 setState 内调用（本方法只改数据，不触发重建）。
   void resetForNavigation() {
+    _navigationEpoch++;
     _blocks = [];
+    _geometry.syncBlocks(const []);
+    // 显式切章是新的阅读会话：关闭采样窗口并清掉上一章的内存锚点，
+    // 避免退出兜底把旧章位置写进新章（新章窗口随首次真实滚动重新打开）
+    _anchorTrackingOpen = false;
+    _lastReadingAnchor = null;
     _blockStartKeys.clear();
     _knownBlockHeights.clear();
     _blockStartOffsets.clear();
@@ -220,6 +281,8 @@ class ReaderConcatController {
     _pendingPrependBlock = null;
     _prevConcatFailed = false;
     _nextConcatFailed = false;
+    // 新章节是新的阅读会话：上滑意图归零，重新由真实上滑置位
+    _upwardScrollIntent = false;
   }
 
   /// 取章节起点标记 GlobalKey（无则登记），供分段构建时挂到分隔线上。
@@ -249,6 +312,7 @@ class ReaderConcatController {
     if (_lastSeenFontSize != null && _lastSeenFontSize != fontSize) {
       _knownBlockHeights.clear();
       _blockStartOffsets.clear();
+      _geometry.invalidateAll();
     }
     _lastSeenFontSize = fontSize;
   }
@@ -282,6 +346,8 @@ class ReaderConcatController {
       _blocks[index] =
           ReaderChapterBlock(chapter: chapter, rawContent: contentState.content);
       _knownBlockHeights.remove(chapter.url);
+      _syncGeometry();
+      _geometry.invalidateChapter(chapter.url);
       // 该章之后的块整体位移未知，废弃其起点采样，滚动经过时重新采样
       for (var i = index + 1; i < _blocks.length; i++) {
         _blockStartOffsets.remove(_blocks[i].chapter.url);
@@ -308,12 +374,17 @@ class ReaderConcatController {
   void _maybeTriggerConcat() {
     if (_concatDirection != ReaderConcatDirection.none) return;
     if (_pendingPrependBlock != null) return;
+    // 恢复跳转是估算→校正的迭代程序滚动，任一方向的拼接都会移动内容、
+    // 干扰收敛校正，恢复结束前一律不触发
+    if (_isRestoringAnchor) return;
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
     if (!position.hasContentDimensions) return;
     if (DateTime.now().difference(_lastConcatAt) < _concatCooldown) return;
 
     if (position.pixels <= _concatEdgeTriggerPx) {
+      // 顶部拼接须用户真实上滑过：进章停在顶部时往下读不拼上一章
+      if (!_upwardScrollIntent) return;
       prependPreviousChapter();
     } else if (position.pixels >=
         position.maxScrollExtent - _concatEdgeTriggerPx) {
@@ -507,10 +578,11 @@ class ReaderConcatController {
     if (_blocks.any((b) => b.chapter.url == nextChapter.url)) return;
 
     _concatDirection = ReaderConcatDirection.next;
+    final epoch = _navigationEpoch;
     if (_isMounted()) _setState(() {});
     try {
       final content = await _loadBlockContent(nextChapter);
-      if (!_isMounted()) return;
+      if (epoch != _navigationEpoch || !_isMounted()) return; // 导航切换，放弃旧章拼接
       _setState(() {
         _blocks = [
           ..._blocks,
@@ -568,10 +640,11 @@ class ReaderConcatController {
     if (_blocks.any((b) => b.chapter.url == prevChapter.url)) return;
 
     _concatDirection = ReaderConcatDirection.prev;
+    final epoch = _navigationEpoch;
     if (_isMounted()) _setState(() {});
     try {
       final content = await _loadBlockContent(prevChapter);
-      if (!_isMounted()) return;
+      if (epoch != _navigationEpoch || !_isMounted()) return; // 导航切换，放弃旧章拼接
       _setState(() {
         _pendingPrependBlock =
             ReaderChapterBlock(chapter: prevChapter, rawContent: content);
@@ -649,7 +722,7 @@ class ReaderConcatController {
   /// 采样走渲染树（SliverList 子节点遍历），布局不可采样时自然跳过；
   /// 恢复跳转期间不采样不落库，避免把中间估算位置写进库。
   void _trackReadingAnchor() {
-    if (_isRestoringAnchor) return;
+    if (!_anchorTrackingOpen || _isRestoringAnchor) return;
     final anchor = _captureReadingAnchor();
     if (anchor == null) return;
     if (!ReadingAnchorMath.anchorChangedSignificantly(
@@ -749,6 +822,7 @@ class ReaderConcatController {
       break;
     }
     samples.sort((a, b) => a.index.compareTo(b.index));
+    _ingestSamplesIntoGeometry(samples);
     return samples;
   }
 
@@ -765,48 +839,47 @@ class ReaderConcatController {
     return _scrollController.offset + visualY;
   }
 
-  // ----- 扁平条目 ↔ 章内段落换算 -----
+  // ----- 扁平条目 ↔ 章内段落换算（真理源在几何层） -----
   // 与 ReaderContentView 的条目序列一致：每章 = 分隔线 + 段落，末位尾部占位
+
+  /// 把当前块列表的形状同步进几何层（同 URL 同段数保留实测，变化的块重测）
+  void _syncGeometry() {
+    _geometry.syncBlocks([for (final b in _blocks) BlockShape(b.chapter.url, b.paragraphs.length)]);
+  }
+
+  /// 采样写入几何层：段落条目记段高，分隔线条目记分隔线高。
+  void _ingestSamplesIntoGeometry(List<ReaderListItemSample> items) {
+    _syncGeometry();
+    for (final item in items) {
+      final para = _geometry.paragraphInfoAtFlatIndex(item.index);
+      if (para != null) {
+        _geometry.recordParagraph(para.url, para.paragraphIndex, item.height);
+      } else {
+        final dividerUrl = _geometry.dividerUrlAtFlatIndex(item.index);
+        if (dividerUrl != null) {
+          _geometry.recordDivider(dividerUrl, item.height);
+        }
+      }
+    }
+  }
 
   /// 扁平条目序号 →（章节 URL, 章内段落序号）；分隔线/尾部占位返回 null
   (String, int)? _paragraphInfoAtFlatIndex(int flatIndex) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      final inSegment = flatIndex - cursor - 1; // 跳过分隔线
-      if (inSegment >= 0 && inSegment < block.paragraphs.length) {
-        return (block.chapter.url, inSegment);
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
+    _syncGeometry();
+    final info = _geometry.paragraphInfoAtFlatIndex(flatIndex);
+    return info == null ? null : (info.url, info.paragraphIndex);
   }
 
   /// 扁平条目序号 → 所属章节 URL（分隔线归属其后章节；尾部占位返回 null）
   String? _chapterUrlAtFlatIndex(int flatIndex) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      if (flatIndex <= cursor + block.paragraphs.length) {
-        return block.chapter.url;
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
+    _syncGeometry();
+    return _geometry.chapterUrlAtFlatIndex(flatIndex);
   }
 
   /// 锚点目标条目的扁平索引（段落越界 clamp 到末段；章不在块列表返回 null）
   int? _targetFlatIndex(ReadingAnchor anchor) {
-    var cursor = 0;
-    for (final block in _blocks) {
-      if (block.chapter.url == anchor.chapterUrl) {
-        if (block.paragraphs.isEmpty) return cursor;
-        final paraIdx = anchor.paragraphIndex
-            .clamp(0, block.paragraphs.length - 1)
-            .toInt();
-        return cursor + 1 + paraIdx;
-      }
-      cursor += 1 + block.paragraphs.length;
-    }
-    return null;
+    _syncGeometry();
+    return _geometry.flatIndexOfAnchor(anchor);
   }
 
   /// 恢复跳转：设置「恢复进行中」窗口并执行迭代定位（估算→跳转→精确校正）。
@@ -851,11 +924,12 @@ class ReaderConcatController {
         }
         return true;
       }
-      // 未布局：外推估算并跳转，让目标进入 ListView 缓存区
-      final estimate = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: targetFlat,
-        intraRatio: anchor.paragraphRatio,
+      // 未布局：按段落高表累加估算偏移并跳转，让目标进入 ListView 缓存区
+      // （表里存的是各块各段的实测高；未实测段按块内均高兜底，比相邻
+      //   两三个样本的线性外推稳——段落高度差异大时那套会差好几屏）
+      final estimate = _geometry.estimateOffsetOf(
+        anchor,
+        topPadding: _contentTopPadding,
       );
       if (estimate == null) return false;
       final maxOffset = _scrollController.position.maxScrollExtent;

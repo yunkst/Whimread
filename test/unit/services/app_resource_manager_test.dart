@@ -1,7 +1,6 @@
 /// AppResourceManager 单测：manifest 解析 / 下载校验 / 缓存命中 / 失败重试
 library;
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 

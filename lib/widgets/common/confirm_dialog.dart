@@ -80,7 +80,6 @@ class ConfirmDialog extends BaseDialog {
     this.showIconInTitle = true,
     this.messageStyle,
     this.textAlign,
-    super.animationConfig,
     super.barrierDismissible,
     super.width,
     super.maxWidth,

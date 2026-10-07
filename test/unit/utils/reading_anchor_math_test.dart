@@ -94,7 +94,6 @@ void main() {
     });
 
     test('尾部占位（无所属章节）→ null（不保存）', () {
-      final items = uniformSamples(paragraphCounts: [3], itemHeight: 100);
       const placeholder = ReaderListItemSample(
         index: 4,
         contentOffset: 456,
@@ -129,66 +128,6 @@ void main() {
         chapterUrlOfFlat: (i) => 'u1',
       );
       expect(above?.paragraphRatio, 1.0);
-    });
-  });
-
-  group('estimateJumpOffset（恢复：跳转偏移估算）', () {
-    test('目标已布局 → 精确偏移 + 段内比例折算', () {
-      final items = uniformSamples(paragraphCounts: [5], itemHeight: 100);
-      final offset = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: 3,
-        intraRatio: 0.5,
-      );
-      // 段3 顶 = 16 + 40 + 2*100 = 256
-      expect(offset, closeTo(256 + 50, 0.001));
-    });
-
-    test('目标未布局、仅下方有样本 → 用邻近梯度线性外推', () {
-      // 只采样到前 3 条目（分隔线 + 段0 + 段1），目标为段 10
-      final items = uniformSamples(paragraphCounts: [5], itemHeight: 100)
-          .where((s) => s.index <= 2)
-          .toList();
-      final offset = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: 12,
-        intraRatio: 0,
-      );
-      // 下方样本段1 顶 = 156，邻近梯度 100px/序号 → 156 + (12-2)*100 = 1156
-      expect(offset, closeTo(1156, 0.001));
-    });
-
-    test('目标在样本之上（往下恢复）→ 反向外推出合法偏移', () {
-      final items = uniformSamples(paragraphCounts: [5], itemHeight: 100)
-          .where((s) => s.index >= 3)
-          .toList();
-      final offset = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: 1,
-        intraRatio: 0,
-      );
-      // 上方样本段2 顶 = 256，梯度 100 → 256 + (1-3)*100 = 56
-      expect(offset, closeTo(56, 0.001));
-    });
-
-    test('单一 takeSample 退化：用自身高度做梯度', () {
-      const items = [
-        ReaderListItemSample(index: 0, contentOffset: 16, height: 40),
-      ];
-      final offset = ReadingAnchorMath.estimateJumpOffset(
-        items: items,
-        targetIndex: 20,
-        intraRatio: 0,
-      );
-      expect(offset, closeTo(16 + 20 * 40, 0.001));
-    });
-
-    test('空样本 → null', () {
-      expect(
-        ReadingAnchorMath.estimateJumpOffset(
-            items: const [], targetIndex: 1, intraRatio: 0),
-        isNull,
-      );
     });
   });
 
@@ -255,7 +194,7 @@ void main() {
     // 正文：段落 0 = '第一段落'（前有 2 个空行），段落 1 = '第二段落'，
     // 段落 2 = '第三段落'。各非空行起始偏移：p0=2、p1=8、p2=13。
     const content = '\n\n第一段落\n\n第二段落\n第三段落';
-    const p0Start = 2, p1Start = 8, p2Start = 13;
+    const p0Start = 2, p1Start = 8;
 
     test('命中段落 0 首字符 → 段落 0、比例 0', () {
       final anchor = ReadingAnchorMath.anchorForCharOffset(

@@ -65,15 +65,6 @@ class MockIChapterRepository extends _i1.Mock
       ) as _i3.Future<Map<String, bool>>);
 
   @override
-  void clearMemoryState() => super.noSuchMethod(
-        Invocation.method(
-          #clearMemoryState,
-          [],
-        ),
-        returnValueForMissingStub: null,
-      );
-
-  @override
   _i3.Future<String?> getCachedChapter(String? chapterUrl) =>
       (super.noSuchMethod(
         Invocation.method(
@@ -92,16 +83,6 @@ class MockIChapterRepository extends _i1.Mock
         ),
         returnValue: _i3.Future<List<_i4.Chapter>>.value(<_i4.Chapter>[]),
       ) as _i3.Future<List<_i4.Chapter>>);
-
-  @override
-  _i3.Future<int> getCachedChaptersCount(String? novelUrl) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #getCachedChaptersCount,
-          [novelUrl],
-        ),
-        returnValue: _i3.Future<int>.value(0),
-      ) as _i3.Future<int>);
 
   @override
   _i3.Future<int> getTotalChaptersCount(String? novelUrl) =>

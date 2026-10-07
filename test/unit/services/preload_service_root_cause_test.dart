@@ -11,7 +11,6 @@ import 'package:novel_app/models/chapter.dart';
 import 'package:novel_app/models/chapter_content_result.dart';
 
 import '../../helpers/test_database_setup.dart';
-import 'test_helpers.mocks.dart' as test_mocks;
 
 /// Manual mock for HeadlessWebViewContentService
 class MockHeadlessWebViewContentService extends Mock
@@ -98,7 +97,6 @@ void main() {
       );
 
       final stats = preloadService.getStatistics();
-      print('单URL: enqueued_urls=${stats['enqueued_urls']}');
 
       // 当前章节被 _createTasks 跳过，所以 enqueued_urls = 0
       expect(stats['enqueued_urls'], 0,
@@ -124,7 +122,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('2个URL: stats=$stats');
 
       // 当前章节(ch1)被跳过，只有ch2被入队并处理
       final processed = stats['total_processed'] as int;
@@ -152,7 +149,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('3个URL: stats=$stats');
 
       // 当前章节(ch2)被跳过，ch3（后续）和ch1（前序）被入队
       final processed = stats['total_processed'] as int;
@@ -176,7 +172,6 @@ void main() {
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('10个URL: stats=$stats');
 
       // 当前章节(ch0)被跳过，9个后续章节被入队
       final processed = stats['total_processed'] as int;
@@ -210,17 +205,14 @@ void main() {
         currentIndex: 0,
       );
 
-      print('入队后: queueLength=${preloadService.queueLength}');
 
       // 等待处理（第一个任务无需等待）
       await Future.delayed(Duration(milliseconds: 500));
 
       final stats = preloadService.getStatistics();
-      print('处理后: $stats');
 
       final processed = stats['total_processed'] as int;
       final failed = stats['total_failed'] as int;
-      print('processed=$processed, failed=$failed');
 
       // 至少应该处理1个（第一个无延迟）
       expect(processed + failed, greaterThan(0),
@@ -250,14 +242,12 @@ void main() {
 
       // 验证: url2 应该被缓存（url1 是当前章节，被跳过）
       final cached2 = await chapterRepository.getCachedChapter(url2);
-      print('url2 缓存内容: $cached2');
 
       expect(cached2, isNotNull, reason: 'url2 应该被缓存');
       expect(cached2, '缓存内容2');
 
       // url1 不应该被缓存（当前章节被跳过）
       final cached1 = await chapterRepository.getCachedChapter(url1);
-      print('url1 缓存内容: $cached1');
       expect(cached1, isNull, reason: 'url1 是当前章节，不应被缓存');
     }, timeout: Timeout(Duration(seconds: 5)));
   });
@@ -306,14 +296,10 @@ void main() {
         currentIndex: 1,
       );
 
-      final stats = preloadService.getStatistics();
-      print('部分缓存场景: $stats');
-
       // 等待处理完成
       await Future.delayed(Duration(milliseconds: 500));
 
       final cached4 = await chapterRepository.getCachedChapter(urls[3]);
-      print('p4 缓存内容: $cached4');
       expect(cached4, '新缓存p4');
     }, timeout: Timeout(Duration(seconds: 5)));
   });

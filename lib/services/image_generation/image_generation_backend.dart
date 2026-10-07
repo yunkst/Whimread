@@ -60,8 +60,6 @@ class ImageGenerationRequest {
     this.aspectRatio,
   });
 
-  int get effectiveWidth => width ?? model.defaultWidth;
-  int get effectiveHeight => height ?? model.defaultHeight;
   int get effectiveSteps => steps ?? model.defaultSteps;
   double get effectiveCfg => cfg ?? model.defaultCfg;
 }

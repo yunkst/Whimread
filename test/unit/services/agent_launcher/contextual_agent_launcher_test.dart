@@ -10,7 +10,6 @@ import 'package:novel_app/core/providers/agent_scenario_provider.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/services/agent_launcher/agent_launch_request.dart';
-import 'package:novel_app/services/agent_launcher/contextual_agent_launcher.dart';
 import 'package:novel_app/services/logger_service.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 

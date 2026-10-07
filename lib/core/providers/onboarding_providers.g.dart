@@ -7,7 +7,7 @@ part of 'onboarding_providers.dart';
 // **************************************************************************
 
 String _$onboardingNotifierHash() =>
-    r'a250e185fc505b585c3c4de199cb8883b1c5b937';
+    r'7667dfc04cf14aa1426e058de727b0c2a1477bf1';
 
 /// Onboarding 状态管理器
 ///
@@ -18,10 +18,9 @@ String _$onboardingNotifierHash() =>
 ///
 /// **持久化键**:
 /// - `onboarding_completed`: 首次启动向导
-/// - `guide_bookshelf_shown`: 书架引导
-/// - `guide_search_shown`: 搜索引导
-/// - `guide_reader_shown`: 阅读器引导
-/// - `guide_chapter_list_shown`: 章节列表引导
+///
+/// 历史注记：书架/搜索/阅读器/章节列表四个 per-场景引导标记从未被任何
+/// 界面写入或读取，已随死代码清理移除。
 ///
 /// Copied from [OnboardingNotifier].
 @ProviderFor(OnboardingNotifier)

@@ -30,8 +30,6 @@ abstract class IChatSessionRepository {
   /// 删除会话（messages 经外键 CASCADE 自动清空）
   Future<int> deleteSession(int id);
 
-  /// 刷新 updatedAt（每条新消息入栈时由 appendMessage 内部调用，单测覆盖用）
-  Future<int> touchSession(int id);
 
   /// 更新会话关联的 currentNovel（写 currentNovelId / currentNovelTitle / updatedAt）
   ///
@@ -74,14 +72,6 @@ abstract class IChatSessionRepository {
   /// 返回受影响行数（0 表示消息已被删/不存在）。
   Future<int> updateMessageContent(int messageId, String content);
 
-  /// 按 toolCallId 定位会话内的单条消息（异步生图完成后改写 tool 结果用）。
-  ///
-  /// 返回命中的消息记录（含行 id，可直接喂给 updateMessageContent），
-  /// 未命中返回 null。
-  Future<ChatMessageRecord?> findMessageByToolCallId(
-    int sessionId,
-    String toolCallId,
-  );
 
   /// 获取会话的消息（按 agentMsgIndex ASC 排序）
   ///
@@ -93,15 +83,8 @@ abstract class IChatSessionRepository {
     int offset = 0,
   });
 
-  /// 获取会话的消息总数
-  Future<int> getMessageCount(int sessionId);
 
   /// 清空会话的全部消息（保留 session 行，updatedAt 由 transaction 内统一刷新）
   Future<int> clearMessages(int sessionId);
 
-  /// 删除会话中 agentMsgIndex < [beforeIndex] 的所有消息。
-  ///
-  /// 用于上下文压缩 / retry / rollback 时同步删 DB，保证内存与 DB 一致。
-  /// 同步刷新 session.updatedAt。返回删除行数。
-  Future<int> deleteMessagesBefore(int sessionId, int beforeIndex);
 }

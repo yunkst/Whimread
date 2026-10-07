@@ -311,19 +311,6 @@ int? parseRetryAfterMs(String? headerValue) {
   }
 }
 
-/// 判定 HTTP 状态码是否可重试（所有 4xx + 5xx）。
-///
-/// 自 2026-07-17 起所有 HTTP 错误统一重试：代理网关偶发 400/401、上游短暂
-/// 故障等瞬态 4xx 也纳入重试，避免直接打断会话——宁可指数退避多等也尽量自愈。
-///
-/// - 4xx：含 400/401/403/404/408/422/429，一律重试
-/// - 5xx：服务端错误，重试
-///
-/// 2xx/3xx 成功响应不进入此判断（调用方仅在 statusCode >= 400 时调用）。
-bool isRetryableStatus(int statusCode) {
-  return statusCode >= 400;
-}
-
 /// 判定异常是否是「瞬态网络错误」——值得重试。
 ///
 /// 单一真理源：传输层 [RetryConfig.defaultShouldRetry]、回合层 AgentLoop

@@ -61,7 +61,9 @@ class PreloadService {
   String? _lastActiveNovel; // 最后活跃的小说URL
 
   // 执行状态
-  bool _isRunning = false; // 🔒 串行锁：确保同一时间只有一个处理循环
+  bool _isRunning = false;
+  /// 唤醒请求：循环运行中收到再投递/恢复请求，循环退出后自动重投（消丢失唤醒）
+  bool _wakePending = false; // 🔒 串行锁：确保同一时间只有一个处理循环
   bool _shouldStop = false; // 停止标志（用于测试清理）
   bool _isPaused = false; // 暂停标志（阅读器请求优先时设置）
   int _totalProcessed = 0;
@@ -258,7 +260,13 @@ class PreloadService {
   ///
   /// 并发安全: 通过 _isRunning 标志确保同一时间只有一个循环执行
   Future<void> _processQueue() async {
-    if (_isRunning) return;
+    if (_isRunning) {
+      // 已有循环在跑：记下唤醒请求，由循环退出时重投。旧实现直接静默
+      // return——resume 撞上在途抓取时（阅读器占了 WebView，抓取返回 busy
+      // → 任务放回 → break 退出）无人重启，队列整段会话搁浅。
+      _wakePending = true;
+      return;
+    }
     _isRunning = true;
 
     final startTime = DateTime.now();
@@ -392,7 +400,14 @@ class PreloadService {
         tags: ['preload', 'error'],
       );
     } finally {
-      _isRunning = false; // ✅ 释放锁
+      _isRunning = false; // 释放锁
+      // 唤醒请求兜底重投：循环退出瞬间若还有排队请求且未停止/未暂停
+      if (_wakePending) {
+        _wakePending = false;
+        if (_queue.isNotEmpty && !_shouldStop && !_isPaused) {
+          unawaited(_processQueue());
+        }
+      }
     }
   }
 

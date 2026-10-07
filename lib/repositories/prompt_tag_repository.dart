@@ -1,4 +1,3 @@
-import 'dart:math';
 import '../models/prompt_tag.dart';
 import '../models/tag_group.dart';
 import '../services/logger_service.dart';
@@ -11,10 +10,6 @@ class PromptTagRepository extends BaseRepository
 
   static const String _table = 'prompt_tags';
 
-  /// 复用单个 Random 实例，避免每次 getRandom* 调用都新建实例。
-  /// 静态 + 懒初始化在首次访问时完成；多 isolate 环境各自独立，
-  /// 但 prompt tag 随机选取不要求跨 isolate 共享同一序列。
-  static final Random _random = Random();
 
   @override
   Future<List<PromptTag>> getByCategory(int categoryId) async {
@@ -223,42 +218,7 @@ class PromptTagRepository extends BaseRepository
         .toList();
   }
 
-  @override
-  Future<String?> getRandomPromptText(int categoryId, String name) async {
-    final db = await database;
-    LoggerService.instance.d(
-      'getRandomPromptText: 随机获取提示词文本 (categoryId: $categoryId, name: $name)',
-      category: LogCategory.database,
-      tags: ['prompt-tag', 'query', 'random'],
-    );
-    final maps = await db.query(
-      _table,
-      columns: ['prompt_text'],
-      where: 'category_id = ? AND name = ?',
-      whereArgs: [categoryId, name],
-    );
-    if (maps.isEmpty) return null;
-    final picked = maps[_random.nextInt(maps.length)];
-    return picked['prompt_text'] as String?;
-  }
 
-  @override
-  Future<PromptTag?> getRandomTag(int categoryId, String name) async {
-    final db = await database;
-    LoggerService.instance.d(
-      'getRandomTag: 随机获取完整标签 (categoryId: $categoryId, name: $name)',
-      category: LogCategory.database,
-      tags: ['prompt-tag', 'query', 'random-tag'],
-    );
-    final maps = await db.query(
-      _table,
-      where: 'category_id = ? AND name = ?',
-      whereArgs: [categoryId, name],
-    );
-    if (maps.isEmpty) return null;
-    final picked = maps[_random.nextInt(maps.length)];
-    return PromptTag.fromMap(picked);
-  }
 
   @override
   Future<List<PromptTag>> getAll() async {

@@ -17,7 +17,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/core/providers/scenario_session.dart';
-import 'package:novel_app/services/dsl_engine/llm_provider.dart' show ChatMessage;
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'package:novel_app/services/novel_agent/agent_scenario.dart';
 import 'package:novel_app/services/novel_agent/novel_agent_service.dart';
@@ -35,6 +34,11 @@ class _SlowCompactionMock implements NovelAgentService {
 
   _SlowCompactionMock({Duration delay = const Duration(milliseconds: 100)})
       : _delay = delay;
+
+  /// 为 true 时每轮 sendMessage 在 TextDelta 后发一次完整工具调用
+  /// （Start + End(success)），让链里产生 assistant(toolCalls) + tool 消息
+  bool emitToolCalls = false;
+  int _toolCallSeq = 0;
 
   @override
   Ref get ref => throw UnimplementedError();
@@ -68,6 +72,12 @@ class _SlowCompactionMock implements NovelAgentService {
     try {
       await Future<void>.delayed(Duration.zero);
       _controller.add(TextDeltaEvent('回复: $userInput'));
+      if (emitToolCalls) {
+        final id = 'call_${_toolCallSeq++}';
+        _controller.add(ToolCallStartEvent('read_chapter_content', {}, id));
+        _controller.add(ToolCallEndEvent('read_chapter_content', id,
+            '原始超长工具结果 $id', success: true));
+      }
       // 延迟，让 CompactionEvent 有机会在 AgentDoneEvent 之前被处理
       await Future<void>.delayed(_delay);
       _controller.add(const AgentDoneEvent());
@@ -95,6 +105,7 @@ class _SlowCompactionMock implements NovelAgentService {
     _running.clear();
   }
 
+  @override
   void addEvent(AgentEvent event) {
     _controller.add(event);
   }
@@ -130,6 +141,7 @@ void main() {
   CompactionEvent buildEvent({
     required int droppedAgentFromIndex,
     String? note,
+    List<({int index, String newContent})> rewrittenContent = const [],
   }) {
     final compactionNote = note ??
         '[上下文压缩|droppedCount=$droppedAgentFromIndex|keptCount=15|removedChars=420000|originalChars=580000|'
@@ -143,24 +155,8 @@ void main() {
       droppedMessageCount: droppedAgentFromIndex,
       droppedAgentFromIndex: droppedAgentFromIndex,
       compactionNote: compactionNote,
-      rewrittenContent: const [],
+      rewrittenContent: rewrittenContent,
     );
-  }
-
-  /// 走 N 次 sendMessage 让 _agentMessages 积累 N 轮对话。
-  /// 慢 mock 会等 100ms 再 emit AgentDoneEvent —— 我们在每轮 send 完成后
-  /// 才注入 CompactionEvent（因为每轮完 listener 才被取消）。
-  Future<ScenarioSession> setupSessionWithHistory({
-    required int historyUserCount,
-  }) async {
-    final sessions = container.read(scenarioSessionsProvider.notifier);
-    final session = sessions.get(ScenarioIds.writing);
-
-    for (var i = 0; i < historyUserCount; i++) {
-      await session.sendMessage(content: '历史消息 $i');
-    }
-
-    return session;
   }
 
   /// 在 sendMessage 运行期间注入 CompactionEvent（listener 活跃）
@@ -177,7 +173,7 @@ void main() {
     }
 
     // 再发一轮，但在这轮 sendMessage 运行期间注入 CompactionEvent
-    final sendFuture = session.sendMessage(content: '压缩触发消息');
+    unawaited(session.sendMessage(content: '压缩触发消息'));
     // 等 TextDelta 被 listener 处理后（约 0ms）注入 CompactionEvent
     await Future<void>.delayed(const Duration(milliseconds: 10));
     mockService.addEvent(event);
@@ -249,6 +245,52 @@ void main() {
       expect(marker, isA<ChatMessage>());
       expect(marker.role, 'system',
           reason: 'marker 角色必须为 "system"，agent_loop / LLM 才认');
+    });
+  });
+
+  group('_handleCompaction 预剪枝改写落点（off-by-one 回归）', () {
+    // 回归背景：marker 插入使压缩后索引 = 压缩前 index - cut + 1，此前误用
+    // `- cut`——每条改写落到前一条消息上：应裁剪的超长 tool 结果没裁，
+    // 反而把它前面那条的内容改坏（内存与 DB 同步写错值，测试难以察觉）。
+    //
+    // 链布局（每轮 = user + assistant(toolCalls) + tool）：
+    //   压缩前 [u1,A1,T1, u2,A2,T2, u3,A3,T3]，cut=2 → 压缩后
+    //   [M, T1, u2, A2, T2, u3, A3, T3]
+    //   entry(2)→T1、entry(5)→T2（正确落点 = index - cut + 1）；
+    //   entry(4) 是 assistant，应被 role 守卫跳过。
+    //   旧代码用 `- cut`：三条分别落到 marker / u2 / A2，全部被守卫跳过，
+    //   T1、T2 保持超长原文——本测试即在旧代码下失败。
+    test('改写精确落到目标 tool 消息，assistant 不被波及', () async {
+      mockService.emitToolCalls = true;
+      final event = buildEvent(
+        droppedAgentFromIndex: 2,
+        rewrittenContent: [
+          (index: 2, newContent: '精简后的 T1'),
+          (index: 4, newContent: 'assistant 不应被改写'),
+          (index: 5, newContent: '精简后的 T2'),
+        ],
+      );
+      final session = await setupWithCompactionEvent(
+        historyUserCount: 2,
+        event: event,
+      );
+
+      final msgs = session.agentMessages;
+      // 前置：布局符合预期 [M, T1, u2, A2, T2, ...]
+      expect(msgs[0].role, 'system', reason: '头部是压缩提示');
+      expect(msgs[1].role, 'tool', reason: 'T1 位置');
+      expect(msgs[2].role, 'user');
+      expect(msgs[3].role, 'assistant');
+      expect(msgs[4].role, 'tool', reason: 'T2 位置');
+
+      // 正确落点：两条 tool 都被改写
+      expect(msgs[1].content, '精简后的 T1',
+          reason: 'T1 应被 entry(2) 改写（旧代码落到 marker 上被跳过，T1 保持超长原文）');
+      expect(msgs[4].content, '精简后的 T2',
+          reason: 'T2 应被 entry(5) 改写（旧代码落到 A2 上被 role 守卫跳过）');
+      // assistant 不被波及
+      expect(msgs[3].content, contains('回复: 历史消息'),
+          reason: 'entry(4) 指向 assistant，应被 role 守卫跳过');
     });
   });
 }

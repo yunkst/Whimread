@@ -431,16 +431,6 @@ class SubagentRunner {
     return jsonEncode({'success': true, 'runId': run.runId});
   }
 
-  /// 测试专用：清掉全部等待队列的 completer（避免跨测试状态污染）。
-  void clearWaitingQueuesForTest() {
-    for (final queue in _waitingQueues.values) {
-      for (final c in queue) {
-        if (!c.isCompleted) c.complete();
-      }
-    }
-    _waitingQueues.clear();
-  }
-
   /// 测试专用：暴露 dispatch 入口但不要求 parentToolCallId（用空字符串占位）。
   Future<String> dispatchForTest({
     required String parentSessionId,

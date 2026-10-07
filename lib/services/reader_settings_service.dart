@@ -62,10 +62,4 @@ class ReaderSettingsService {
     await _prefs.setDouble(_keyTextBrightness, brightness);
   }
 
-  /// 重置所有设置为默认值
-  Future<void> resetToDefaults() async {
-    await setFontSize(_defaultFontSize);
-    await setScrollSpeed(_defaultScrollSpeed);
-    await setTextBrightness(_defaultTextBrightness);
-  }
 }

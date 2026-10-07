@@ -156,7 +156,8 @@ class CompactionResult {
   /// P1 预剪枝改写记录（基于压缩前 messages 索引）
   ///
   /// 落在 `[0, droppedAgentFromIndex)` 区间内的 entry 会被整条丢弃，ScenarioSession
-  /// 无须同步；`>= droppedAgentFromIndex` 的 entry 需平移到 `index - cut` 写入 content。
+  /// 无须同步；`>= droppedAgentFromIndex` 的 entry 需平移到
+  /// `index - cut + 1`（+1 为 ScenarioSession 插入的头部压缩提示）写入 content。
   /// 空列表表示未发生改写（预剪枝关闭或无 tool result 可改）。
   final List<RewrittenEntry> rewrittenContent;
 

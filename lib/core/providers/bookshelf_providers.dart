@@ -210,15 +210,6 @@ Future<List<Novel>> bookshelfNovels(Ref ref) {
   return ref.watch(shelfNovelsProvider(shelf).future);
 }
 
-/// 书架小说列表缓存统计（当前书架的快捷视图 · 兼容层）
-///
-/// 委托到 [shelfCacheStatsProvider(currentBookshelf)]。
-@riverpod
-Future<Map<String, CacheStats>> bookshelfCacheStats(Ref ref) {
-  final shelf = ref.watch(currentBookshelfProvider);
-  return ref.watch(shelfCacheStatsProvider(shelf).future);
-}
-
 /// 缓存统计
 class CacheStats {
   final int cached;

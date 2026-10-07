@@ -6,7 +6,7 @@ part of 'reader_edit_mode_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$readerEditModeHash() => r'9addba654b60808c1b63923a3796a9edf56ebab0';
+String _$readerEditModeHash() => r'b30073b59e1f5be3190e8cf6ec100aa3e271d2ff';
 
 /// 阅读器编辑模式状态管理Provider
 ///

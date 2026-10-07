@@ -113,7 +113,7 @@ void main() {
   });
 
   group('WebViewAddNovelFab 金色化', () {
-    Future<void> _pumpFab(
+    Future<void> pumpFab(
       WidgetTester tester, {
       required bool hasCachedScript,
     }) async {
@@ -131,7 +131,7 @@ void main() {
     }
 
     testWidgets('有缓存脚本 → 金色背景 + 快速提取 tooltip', (tester) async {
-      await _pumpFab(tester, hasCachedScript: true);
+      await pumpFab(tester, hasCachedScript: true);
 
       final fab = tester.widget<FloatingActionButton>(
         find.byType(FloatingActionButton),
@@ -141,7 +141,7 @@ void main() {
     });
 
     testWidgets('无缓存脚本 → 默认色 + 普通 tooltip', (tester) async {
-      await _pumpFab(tester, hasCachedScript: false);
+      await pumpFab(tester, hasCachedScript: false);
 
       final fab = tester.widget<FloatingActionButton>(
         find.byType(FloatingActionButton),

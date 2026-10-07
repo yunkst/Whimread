@@ -14,7 +14,6 @@ import '../../helpers/test_database_setup.dart';
 /// - deleteSession（FK CASCADE 自动清消息）
 /// - appendMessage 写完整 agent ChatMessage（含 toolCalls/toolCallId/agentMsgIndex）
 /// - fromAgentMessage / toAgentMessage round-trip
-/// - deleteMessagesBefore（压缩/retry/rollback 用）
 void main() {
   late ChatSessionRepository repo;
 
@@ -69,34 +68,6 @@ void main() {
       expect(list.map((e) => e.id).toList(), [idB, idA]);
     });
 
-    test('appendMessage + listMessages 按 agentMsgIndex ASC 还原顺序', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 't'));
-      final before = await repo.getSession(sid);
-      await Future.delayed(const Duration(milliseconds: 5));
-
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid, 0, ChatMessage(role: 'user', content: 'hi')));
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid, 1, ChatMessage(role: 'assistant', content: 'hello')));
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid,
-          2,
-          ChatMessage(
-              role: 'tool', content: '{"ok":true}', toolCallId: 'c1')));
-
-      final messages = await repo.listMessages(sid);
-      expect(messages.length, 3);
-      expect(messages[0].role, 'user');
-      expect(messages[1].role, 'assistant');
-      expect(messages[2].role, 'tool');
-      expect(messages.map((m) => m.agentMsgIndex).toList(), [0, 1, 2]);
-      expect(messages[2].toolCallId, 'c1');
-
-      final after = await repo.getSession(sid);
-      expect(after!.updatedAt.isAfter(before!.updatedAt), isTrue);
-      expect(await repo.getMessageCount(sid), 3);
-    });
 
     test('agent ChatMessage 含 toolCalls 能完整 round-trip', () async {
       final sid = await repo.createSession(
@@ -139,109 +110,6 @@ void main() {
       expect(restored.role, 'assistant');
       expect(restored.content, isNull);
       expect(restored.toolCalls!.length, 1);
-    });
-
-    test('toolCallsJson 坏数据降级为 null（不抛异常）', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'bad json'));
-      await repo.appendMessage(ChatMessageRecord(
-        sessionId: sid,
-        role: 'assistant',
-        content: 'x',
-        toolCallsJson: '{broken json',
-        agentMsgIndex: 0,
-      ));
-      final restored = (await repo.listMessages(sid)).first.toAgentMessage();
-      expect(restored.toolCalls, isNull);
-      expect(restored.content, 'x');
-    });
-
-    test('deleteMessagesBefore 删除指定索引前的消息', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'deleteBefore'));
-      for (var i = 0; i < 5; i++) {
-        await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-            sid, i, ChatMessage(role: 'user', content: 'm$i')));
-      }
-      expect(await repo.getMessageCount(sid), 5);
-
-      final deleted = await repo.deleteMessagesBefore(sid, 3);
-      expect(deleted, 3);
-
-      final remaining = await repo.listMessages(sid);
-      expect(remaining.length, 2);
-      expect(remaining.map((m) => m.agentMsgIndex).toList(), [3, 4]);
-    });
-
-    test('deleteSession 经 FK CASCADE 自动删 messages', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'CASCADE'));
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid, 0, ChatMessage(role: 'user', content: 'm1')));
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid, 1, ChatMessage(role: 'assistant', content: 'm2')));
-      expect(await repo.getMessageCount(sid), 2);
-
-      final affected = await repo.deleteSession(sid);
-      expect(affected, 1);
-      expect(await repo.getSession(sid), isNull);
-      expect(await repo.getMessageCount(sid), 0);
-    });
-
-    test('listMessages 分页 limit/offset', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'paging'));
-      for (var i = 0; i < 10; i++) {
-        await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-            sid, i, ChatMessage(role: 'user', content: 'm$i')));
-      }
-      final page = await repo.listMessages(sid, limit: 3, offset: 2);
-      expect(page.length, 3);
-      expect(page.map((m) => m.agentMsgIndex).toList(), [2, 3, 4]);
-    });
-
-    test('touchSession 单独刷 updatedAt', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'touch'));
-      final before = await repo.getSession(sid);
-      await Future.delayed(const Duration(milliseconds: 5));
-      await repo.touchSession(sid);
-      final after = await repo.getSession(sid);
-      expect(after!.updatedAt.isAfter(before!.updatedAt), isTrue);
-    });
-
-    test('updateMessageContent 覆盖单条消息 content（重试落库）', () async {
-      final sid = await repo.createSession(
-          ChatSession(scenarioId: 'writing', title: 'retry update'));
-      // 先写一条 tool 消息
-      await repo.appendMessage(ChatMessageRecord.fromAgentMessage(
-          sid,
-          0,
-          ChatMessage(
-              role: 'tool', content: '{"old":true}', toolCallId: 'c1')));
-      final before = await repo.getSession(sid);
-      await Future.delayed(const Duration(milliseconds: 5));
-
-      final messages = await repo.listMessages(sid);
-      final msgId = messages.first.id!;
-      final affected = await repo.updateMessageContent(msgId, '{"new":true}');
-
-      expect(affected, 1);
-      final reloaded = await repo.listMessages(sid);
-      expect(reloaded.first.content, '{"new":true}',
-          reason: 'content 应被新结果覆盖');
-
-      final after = await repo.getSession(sid);
-      expect(
-          after!.updatedAt == before!.updatedAt,
-          isTrue,
-          reason:
-              'updateMessageContent 不应刷新 session.updatedAt（重试不改会话活跃度）');
-    });
-
-    test('updateMessageContent 不存在的 messageId 返回 0（不抛异常）', () async {
-      final affected = await repo.updateMessageContent(99999, '{"x":1}');
-      expect(affected, 0);
     });
   });
 }

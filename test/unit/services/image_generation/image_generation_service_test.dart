@@ -179,8 +179,7 @@ void main() {
     test('显式传 ratio 覆盖模型预设', () async {
       await insertModel(name: '主力', isDefault: true, aspectRatio: '3:4');
 
-      final outcome =
-          await service().generate(prompt: 'p', aspectRatio: '16:9');
+      await service().generate(prompt: 'p', aspectRatio: '16:9');
 
       expect(backend.received.single.aspectRatio, '16:9');
     });
@@ -197,7 +196,7 @@ void main() {
     test('无预设且未传 → aspectRatio 为 null', () async {
       await insertModel(name: '主力', isDefault: true);
 
-      final outcome = await service().generate(prompt: 'p');
+      await service().generate(prompt: 'p');
 
       expect(backend.received.single.aspectRatio, isNull);
     });

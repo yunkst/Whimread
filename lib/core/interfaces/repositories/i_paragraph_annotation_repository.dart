@@ -9,9 +9,6 @@ abstract class IParagraphAnnotationRepository {
   /// [chapterUrl] 章节URL
   Future<List<ParagraphAnnotation>> getForChapter(String chapterUrl);
 
-  /// 获取指定段落的标注，无则返回 null
-  Future<ParagraphAnnotation?> getForParagraph(
-      String chapterUrl, int paragraphIndex);
 
   /// 保存标注（同章节同段落已存在时覆盖更新）
   ///

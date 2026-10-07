@@ -20,6 +20,8 @@
 /// bookshelf_continue_reading_fix_verification_test（旧文件为占位断言，
 /// 未触达任何生产代码）。
 
+library;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

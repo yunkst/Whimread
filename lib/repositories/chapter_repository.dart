@@ -164,16 +164,6 @@ class ChapterRepository extends BaseRepository
     );
   }
 
-  /// 清理内存状态
-  @override
-  void clearMemoryState() {
-    _cachedInMemory.clear();
-    LoggerService.instance.i(
-      'ChapterRepository内存状态已清理',
-      category: LogCategory.database,
-      tags: ['memory', 'cleanup'],
-    );
-  }
 
   /// 缓存章节内容
   @override
@@ -424,11 +414,6 @@ class ChapterRepository extends BaseRepository
     await batch.commit(noResult: true);
   }
 
-  /// 判断是否为本地章节
-  static bool isLocalChapter(String chapterUrl) {
-    return chapterUrl.startsWith('custom://') ||
-        chapterUrl.startsWith('user_chapter_');
-  }
 
   /// 更新用户创建的章节内容
   ///
@@ -519,21 +504,6 @@ class ChapterRepository extends BaseRepository
     );
   }
 
-  /// 获取已缓存的章节数量（实际有内容的章节）
-  ///
-  /// [novelUrl] 小说URL
-  /// 返回 chapter_cache 表中已缓存的章节数量
-  @override
-  Future<int> getCachedChaptersCount(String novelUrl) async {
-    final db = await database;
-
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM chapter_cache WHERE novelUrl = ?',
-      [novelUrl],
-    );
-
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
 
   /// 获取小说的总章节数
   ///

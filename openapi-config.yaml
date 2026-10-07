@@ -1,8 +1,0 @@
-generatorName: dart-dio
-inputSpec: http://localhost:3800/openapi.json
-outputDir: generated/api
-additionalProperties:
-  pubName: novel_api
-  useEnumExtension: true
-  enumUnknownDefaultCase: true
-  nullableFields: true

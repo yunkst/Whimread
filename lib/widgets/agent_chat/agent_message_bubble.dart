@@ -13,6 +13,7 @@ import 'ask_user_card.dart';
 import 'media_gallery_card.dart';
 import 'text_game_entry_card.dart';
 import 'subagent_tool_card.dart';
+import '../../screens/media_preview_screen.dart';
 import '../../screens/subagent_detail_screen.dart';
 import '../media/media_view.dart';
 import '../../core/theme/app_colors.dart';
@@ -184,29 +185,12 @@ class AgentMessageBubble extends ConsumerWidget {
   }
 
   /// 图片全屏查看（点击缩略图触发）
+  ///
+  /// 2026-10 统一：此前是 showDialog + InteractiveViewer + 非全屏 MediaView
+  /// 叠出来的临时实现——图浮在浅色聊天界面之上、缩放手感与全 app 其它入口
+  /// 不一致。现走 MediaPreviewScreen（黑底 PhotoView，点图关闭）。
   void _showImageFullScreen(BuildContext context, String mediaId) {
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.zero,
-        child: Stack(
-          children: [
-            InteractiveViewer(
-              child: Center(child: MediaView(mediaId: mediaId)),
-            ),
-            Positioned(
-              top: 40,
-              right: 20,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 32),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    MediaPreviewScreen.open<void>(context, mediaId);
   }
 
   /// 按 segments 顺序交替渲染文本片段和工具调用卡片

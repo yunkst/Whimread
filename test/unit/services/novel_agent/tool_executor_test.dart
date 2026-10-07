@@ -142,6 +142,7 @@ void main() {
   }
 
   /// 构造章节操作的上下文
+      // ignore: no_leading_underscores_for_local_identifiers
   AgentScenarioContext _ctx(int novelId, [String title = '测试小说']) =>
       _writingContext(novelId, title);
 
@@ -662,7 +663,7 @@ void main() {
       // 2*radius=160，间隔 100 会被合并 → 用 100 不行，要 >= 161
       // 改用 200 字符 padding 确保 5 个独立窗口
       final padding = '甲。' * 100; // 200 chars
-      final content = List.generate(5, (_) => '${padding}李明$padding').join();
+      final content = List.generate(5, (_) => '$padding李明$padding').join();
       await insertChapter(content: content);
       final ctx = _ctx(novelId);
 

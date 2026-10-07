@@ -49,7 +49,7 @@ final dioProvider = Provider<Dio>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef DioRef = ProviderRef<Dio>;
-String _$apiServiceWrapperHash() => r'0135da35269bab301c905e5c16985c11de90b691';
+String _$apiServiceWrapperHash() => r'd4b0d1ebbfd62b35037fda9880a43f084dbaeb7e';
 
 /// ApiServiceWrapper Provider
 ///
@@ -147,7 +147,6 @@ typedef PreloadServiceRef = ProviderRef<PreloadService>;
 String _$headlessWebViewContentServiceHash() =>
     r'0b12506f21a8e06715b1f08f9177eb31f9d74d7c';
 
-/// SceneIllustrationService 和 SceneIllustrationCacheService 已删除，相关 provider 已移除。
 /// HeadlessWebViewContentService Provider
 ///
 /// 提供无头 WebView 内容获取服务实例。

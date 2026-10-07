@@ -43,12 +43,7 @@ abstract final class AgentIcons {
   /// 工具调用
   static const IconData edit = Icons.edit_note;
 
-  /// 前往 / 查看章节
-  static const IconData arrow = Icons.arrow_forward;
-
   /// 链接 / WebView URL
   static const IconData link = Icons.link;
 
-  /// 快捷提示 / 魔法
-  static const IconData wand = Icons.auto_awesome;
 }

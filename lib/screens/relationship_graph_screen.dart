@@ -10,6 +10,7 @@ import '../../models/character_relationship.dart';
 import '../../models/relation_type.dart';
 import '../../models/relationship_graph_snapshot.dart';
 import '../widgets/relationship/timeline_chapter_slider.dart';
+import '../widgets/relationship/relationship_graph_view.dart';
 
 /// 人物关系图页面。
 ///
@@ -127,21 +128,6 @@ class _RelationshipGraphScreenState
 }
 
 // ─── 力导向图节点数据 ───────────────────────────────────────────
-class _GraphNode {
-  final int id;
-  final String name;
-  const _GraphNode(this.id, this.name);
-
-  @override
-  bool operator ==(Object other) => other is _GraphNode && other.id == id;
-
-  @override
-  int get hashCode => id;
-
-  @override
-  String toString() => name;
-}
-
 /// 力导向图视图:把 [RelationshipGraphSnapshot] 渲染为节点 + 边。
 class _GraphView extends ConsumerStatefulWidget {
   final RelationshipGraphSnapshot snapshot;
@@ -152,12 +138,12 @@ class _GraphView extends ConsumerStatefulWidget {
 }
 
 class _GraphViewState extends ConsumerState<_GraphView> {
-  late ForceDirectedGraphController<_GraphNode> _controller;
+  late ForceDirectedGraphController<GraphNode> _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = ForceDirectedGraphController<_GraphNode>();
+    _controller = ForceDirectedGraphController<GraphNode>();
     _buildGraph(widget.snapshot);
   }
 
@@ -176,14 +162,14 @@ class _GraphViewState extends ConsumerState<_GraphView> {
   }
 
   void _buildGraph(RelationshipGraphSnapshot snap) {
-    final newGraph = ForceDirectedGraph<_GraphNode>();
+    final newGraph = ForceDirectedGraph<GraphNode>();
 
-    final nodeMap = <int, Node<_GraphNode>>{};
+    final nodeMap = <int, Node<GraphNode>>{};
     for (final c in snap.characters) {
       final id = c.id;
       if (id == null) continue;
-      final node = _GraphNode(id, c.name);
-      final n = Node<_GraphNode>(node);
+      final node = GraphNode(id, c.name);
+      final n = Node<GraphNode>(node);
       newGraph.addNode(n);
       nodeMap[id] = n;
     }
@@ -224,16 +210,16 @@ class _GraphViewState extends ConsumerState<_GraphView> {
     final theme = Theme.of(context);
     final labelMap = _buildEdgeLabelMap(widget.snapshot);
 
-    return ForceDirectedGraphWidget<_GraphNode>(
+    return ForceDirectedGraphWidget<GraphNode>(
       controller: _controller,
-      nodesBuilder: (context, data) => _NodeWidget(
+      nodesBuilder: (context, data) => GraphNodeWidget(
         data: data,
         color: theme.colorScheme.primaryContainer,
         foreground: theme.colorScheme.onPrimaryContainer,
       ),
       edgesBuilder: (context, a, b, distance) {
         // _GraphView build 在 controller.sync 后,边已建好;label 由两端 id 查。
-        // 这里 a/b 是 _GraphNode,通过 _buildEdgeLabelMap 查关系类型。
+        // 这里 a/b 是 GraphNode,通过 _buildEdgeLabelMap 查关系类型。
         final lo = a.id < b.id ? a.id : b.id;
         final hi = a.id < b.id ? b.id : a.id;
         final rel = labelMap['$lo-$hi'];
@@ -245,80 +231,13 @@ class _GraphViewState extends ConsumerState<_GraphView> {
                 .byName(rel.relationType.name)
                 .labelFor(isSource: rel.sourceCharacterId == a.id)
             : '';
-        return _EdgeWidget(
+        return GraphEdgeWidget(
           color: color,
           strokeWidth: 1.0 + strength * 0.7,
           dashed: !symmetric,
           label: label,
         );
       },
-    );
-  }
-}
-
-class _NodeWidget extends StatelessWidget {
-  final _GraphNode data;
-  final Color color;
-  final Color foreground;
-  const _NodeWidget({
-    required this.data,
-    required this.color,
-    required this.foreground,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 56, minHeight: 36),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
-          BoxShadow(color: Color(0x33000000), blurRadius: 4, offset: Offset(0, 2)),
-        ],
-      ),
-      child: Text(
-        data.name,
-        style: TextStyle(color: foreground, fontSize: 13, fontWeight: FontWeight.w600),
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
-}
-
-class _EdgeWidget extends StatelessWidget {
-  final Color color;
-  final double strokeWidth;
-  final bool dashed;
-  final String label;
-  const _EdgeWidget({
-    required this.color,
-    required this.strokeWidth,
-    required this.dashed,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // 仅显示标签(连线由包内部 EdgeWidget 绘制);此 builder 返回的 widget 会
-    // 被包成 EdgeWidget,我们这里提供一个标签层。
-    // 注意:包的 EdgeBuilder 期望返回一个叠在边上的 widget,连线本身由包绘制。
-    if (label.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: Theme.of(context).canvasColor,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          color: color,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }

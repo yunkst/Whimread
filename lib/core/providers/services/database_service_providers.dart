@@ -157,5 +157,3 @@ ChapterSearchService chapterSearchService(Ref ref) {
   final chapterRepository = ref.watch(chapterRepositoryProvider);
   return ChapterSearchService(chapterRepository: chapterRepository);
 }
-
-/// CharacterExtractionService 和 PromptTagService 已删除，相关 provider 已移除。

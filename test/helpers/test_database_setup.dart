@@ -1,5 +1,4 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite_common/sqflite.dart';
 import 'package:novel_app/core/database/database_migrations.dart';
 
 /// 测试数据库设置工具

@@ -7,6 +7,10 @@
 /// - 确定性：同一本书每次生成结果一致（title.hashCode % 8）
 ///
 /// 程序化部分零网络依赖、零字体依赖，纯 Flutter 绘制。
+///
+/// 注：本组件**不走 MediaView**。coverUrl 是书源抓取/用户外链的原始 URL，
+/// 不在 media_items 体系内登记，也就没有 mediaId；缓存回写走
+/// [CoverCacheService]。AI 生成的原创书封（mediaId 封面）另有路径。
 library;
 
 import 'dart:io';

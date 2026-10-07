@@ -7,6 +7,17 @@
 /// 真的没有——不会自愈，所以不做任何自动轮询/重试（原实现的"可见时 10s
 /// 轮询"是回源时代的遗物，只会让死 id 在前台空转），交给手动刷新。
 /// 无效 id 的入口侧防护见 ToolExecutorHelpers.mediaNotFoundError。
+///
+/// ── 内嵌使用口径（2026-10 展示统一后，全 app 遵守）────────────
+/// - 全屏查看一律走 `MediaPreviewScreen.open / openGallery`
+///   （lib/screens/media_preview_screen.dart），不要就地再造黑底页；
+/// - 封面/头像/缩略类传 `boxFit: BoxFit.cover`（无全屏角标）；阅读类用
+///   默认 contain（右下角全屏角标，onTap 接 MediaPreviewScreen）；
+/// - 父级必须给 **bounded 约束**：默认分支内部 Stack(fit: expand)，纵轴
+///   unbounded 会抛 infinite height（见 media_gallery_card.dart 的槽位注释）；
+/// - 加载/miss 占位由本组件负责，调用方不要再叠占位层——例外是文字游戏
+///   的同步生图 shimmer 卡（GameSceneImageView），那是工具级进度反馈，
+///   MediaView 只在出图后才上场。
 library;
 
 import 'dart:io';

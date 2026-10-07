@@ -1,7 +1,8 @@
 /// 书馆美学 · 字体令牌
 ///
-/// 项目内嵌 Noto Serif SC / Noto Sans SC（已子集化打包于 assets/fonts/），
-/// 跨平台衬线/无衬线质感稳定，与 GitHub Pages 介绍页同源。
+/// 字体不是随 APK 打包的（pubspec 无 assets 段）：Noto Serif SC / Noto Sans SC
+/// 源码字体在 assets/fonts/ 供子集化发布，运行时由 AppResourceManager 下载
+/// 清单里的子集并经 FontLoader 注册，跨平台衬线/无衬线质感稳定。
 /// - 标题/书名/章名用 Noto Serif SC（书卷气）
 /// - UI 正文用 Noto Sans SC
 /// fallback 链保留，兜底极少数子集未覆盖的生僻字（人名/古字等）。

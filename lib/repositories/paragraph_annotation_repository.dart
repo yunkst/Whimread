@@ -28,21 +28,6 @@ class ParagraphAnnotationRepository extends BaseRepository
     });
   }
 
-  @override
-  Future<ParagraphAnnotation?> getForParagraph(
-      String chapterUrl, int paragraphIndex) {
-    return guard('paragraph_annotation.getForParagraph', () async {
-      final db = await database;
-      final maps = await db.query(
-        _table,
-        where: 'chapterUrl = ? AND paragraphIndex = ?',
-        whereArgs: [chapterUrl, paragraphIndex],
-        limit: 1,
-      );
-      if (maps.isEmpty) return null;
-      return ParagraphAnnotation.fromMap(maps.first);
-    });
-  }
 
   @override
   Future<int> upsert(ParagraphAnnotation annotation) {

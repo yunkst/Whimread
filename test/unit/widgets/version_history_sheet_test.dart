@@ -76,17 +76,6 @@ class _RecordingVersionRepo implements IChapterVersionRepository {
   Future<List<ChapterVersion>> getVersions(String chapterUrl) async => versions;
 
   @override
-  Future<int> getVersionCount(String chapterUrl) async => versions.length;
-
-  @override
-  Future<ChapterVersion?> getVersionById(int id) async {
-    for (final v in versions) {
-      if (v.id == id) return v;
-    }
-    return null;
-  }
-
-  @override
   Future<int> deleteVersion(int id) async {
     deletedIds.add(id);
     return 1;

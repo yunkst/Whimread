@@ -7,7 +7,6 @@
 /// - cancelFor 清空队列（通过"二次注入不会看到旧消息"间接验证）
 library;
 
-import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

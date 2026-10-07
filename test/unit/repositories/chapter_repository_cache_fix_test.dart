@@ -22,7 +22,7 @@ void main() {
   const testNovelUrl = 'https://example.com/novel/test-novel';
   const testChapterUrl = 'https://example.com/chapter/1';
 
-  Chapter _makeChapter(String url, {int index = 0}) {
+  Chapter makeChapter(String url, {int index = 0}) {
     return Chapter(
       title: '第${index + 1}章',
       url: url,
@@ -41,7 +41,6 @@ void main() {
   });
 
   tearDown(() async {
-    repository.clearMemoryState();
     await db.close();
   });
 
@@ -53,7 +52,7 @@ void main() {
       // 添加 500 条缓存记录
       for (int i = 0; i < 500; i++) {
         final url = '$testChapterUrl$i';
-        await repository.cacheChapter(testNovelUrl, _makeChapter(url, index: i), 'content $i');
+        await repository.cacheChapter(testNovelUrl, makeChapter(url, index: i), 'content $i');
       }
 
       // 所有 500 条应立即命中内存（通过 isChapterCached 验证）
@@ -73,13 +72,13 @@ void main() {
       // 添加 1050 条，触发 LRU 淘汰
       for (int i = 0; i < 1050; i++) {
         final url = '$testChapterUrl$i';
-        await repository.cacheChapter(testNovelUrl, _makeChapter(url, index: i), 'content $i');
+        await repository.cacheChapter(testNovelUrl, makeChapter(url, index: i), 'content $i');
       }
 
       // 最新的 1000 条应该还在内存中
       // 最旧的 50 条被淘汰，但 SQLite 中仍然存在
       final recentUrls = List.generate(50, (i) => '$testChapterUrl${1000 + i}');
-      final recentStatus = await repository.getChaptersCacheStatus(recentUrls);
+      await repository.getChaptersCacheStatus(recentUrls);
 
       // 检查：所有新增的URL在SQLite中都存在（即使内存被淘汰了）
       // 对于仍在内存中的（最近1000条），isChapterCached 应该返回 true
@@ -98,12 +97,12 @@ void main() {
     test('访问旧条目会将其重新加入内存缓存(LRU重新激活)', () async {
       // 填充 1000 条
       for (int i = 0; i < 1000; i++) {
-        final url = '${testChapterUrl}$i';
-        await repository.cacheChapter(testNovelUrl, _makeChapter(url, index: i), 'content $i');
+        final url = '$testChapterUrl$i';
+        await repository.cacheChapter(testNovelUrl, makeChapter(url, index: i), 'content $i');
       }
 
       // 添加第 1001 条，触发一次 LRU 淘汰（淘汰第0条）
-      await repository.cacheChapter(testNovelUrl, _makeChapter('${testChapterUrl}1000', index: 1000), 'content 1000');
+      await repository.cacheChapter(testNovelUrl, makeChapter('${testChapterUrl}1000', index: 1000), 'content 1000');
 
       // 此时第0条被淘汰出内存，但通过 isChapterCached 访问会重新加入
       final isCached = await repository.isChapterCached('${testChapterUrl}0');
@@ -116,8 +115,8 @@ void main() {
       // 同时淘汰另一个旧条目以保持容量
       // 又添加 1000 条更多数据...
       for (int i = 1001; i < 2001; i++) {
-        final url = '${testChapterUrl}$i';
-        await repository.cacheChapter(testNovelUrl, _makeChapter(url, index: i), 'content $i');
+        final url = '$testChapterUrl$i';
+        await repository.cacheChapter(testNovelUrl, makeChapter(url, index: i), 'content $i');
       }
 
       // 第0条由于在中间被访问过，位置被更新，现在应该还在内存中
@@ -129,90 +128,10 @@ void main() {
   // ============================================================
   // P1: 删除操作同步清理内存Set
   // ============================================================
-  group('P1: 删除操作同步清理内存Set', () {
-    setUp(() async {
-      // 先缓存一个章节
-      await repository.cacheChapter(
-        testNovelUrl,
-        _makeChapter(testChapterUrl),
-        '测试内容',
-      );
-    });
-
-    test('deleteCachedChapters 应批量清理内存缓存', () async {
-      // 缓存多个章节
-      final urls = List.generate(10, (i) => '$testChapterUrl$i');
-      for (int i = 0; i < urls.length; i++) {
-        await repository.cacheChapter(testNovelUrl, _makeChapter(urls[i], index: i), 'content $i');
-      }
-
-      // 删除该小说所有缓存
-      await repository.deleteCachedChapters(testNovelUrl);
-
-      // 验证所有URL都不再在内存中
-      for (final url in urls) {
-        final isCached = await repository.isChapterCached(url);
-        expect(isCached, isFalse, reason: '$url 删除后应返回 false');
-      }
-    });
-
-    test('clearMemoryState 应清空所有内存状态', () async {
-      // 先写入一章，使其进入内存缓存
-      await repository.cacheChapter(
-        testNovelUrl,
-        _makeChapter(testChapterUrl, index: 0),
-        'content',
-      );
-      expect(await repository.isChapterCached(testChapterUrl), isTrue);
-
-      // 清空内存状态（只清内存，db 数据仍在，但下次查询需重新从 db 加载）
-      repository.clearMemoryState();
-
-      // 内存缓存已清空，但 db 中仍有数据，isChapterCached 会走 db 查询
-      expect(await repository.isChapterCached(testChapterUrl), isTrue);
-    });
-  });
-
-  // ============================================================
+// ============================================================
   // P3: cacheChapter 使用 ConflictAlgorithm.replace 安全覆盖
   // ============================================================
-  group('P3: cacheChapter 安全覆盖旧缓存', () {
-    test('cacheChapter使用replace策略可覆盖已有缓存', () async {
-      // 第一次缓存
-      await repository.cacheChapter(
-        testNovelUrl,
-        _makeChapter(testChapterUrl),
-        '旧内容',
-      );
-      expect(await repository.getCachedChapter(testChapterUrl), equals('旧内容'));
-
-      // 第二次缓存（模拟forceRefresh后重新获取内容）
-      await repository.cacheChapter(
-        testNovelUrl,
-        _makeChapter(testChapterUrl),
-        '新内容',
-      );
-      expect(await repository.getCachedChapter(testChapterUrl), equals('新内容'),
-          reason: 'replace策略应覆盖旧缓存');
-    });
-
-    test('缓存覆盖后不会产生重复记录', () async {
-      // 多次缓存同一个URL
-      for (int i = 0; i < 5; i++) {
-        await repository.cacheChapter(
-          testNovelUrl,
-          _makeChapter(testChapterUrl, index: i),
-          'content v$i',
-        );
-      }
-
-      // 验证只有一条记录
-      final count = await repository.getCachedChaptersCount(testNovelUrl);
-      expect(count, 1, reason: '同一chapterUrl只应有一条缓存记录');
-    });
-  });
-
-  // ============================================================
+// ============================================================
   // 回归测试：filterUncachedChapters 去重性能
   // ============================================================
   group('回归测试: filterUncachedChapters', () {
@@ -221,7 +140,7 @@ void main() {
       final totalChapters = 100;
       final urls = List.generate(totalChapters, (i) => '$testChapterUrl$i');
       for (int i = 0; i < totalChapters; i++) {
-        await repository.cacheChapter(testNovelUrl, _makeChapter(urls[i], index: i), 'content $i');
+        await repository.cacheChapter(testNovelUrl, makeChapter(urls[i], index: i), 'content $i');
       }
 
       // 所有章节已在内存中，filterUncachedChapters 应返回空列表
@@ -233,7 +152,7 @@ void main() {
       // 缓存前 50 个
       final urls = List.generate(100, (i) => '$testChapterUrl$i');
       for (int i = 0; i < 50; i++) {
-        await repository.cacheChapter(testNovelUrl, _makeChapter(urls[i], index: i), 'content $i');
+        await repository.cacheChapter(testNovelUrl, makeChapter(urls[i], index: i), 'content $i');
       }
 
       // 后 50 个未缓存

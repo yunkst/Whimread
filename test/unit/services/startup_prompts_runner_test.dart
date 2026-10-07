@@ -67,7 +67,7 @@ void main() {
       final executed = <String>[];
 
       final runner = StartupPromptsRunner(
-        canContinue: () => executed.length < 1,
+        canContinue: () => executed.isEmpty,
         crashReportStage: () async => executed.add('crash'),
         updateCheckStage: () async => executed.add('update'),
       );

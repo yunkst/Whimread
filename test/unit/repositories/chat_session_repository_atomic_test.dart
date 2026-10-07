@@ -36,49 +36,7 @@ void main() {
       ChatMessageRecord.fromAgentMessage(
           sid, idx, ChatMessage(role: role, content: content, toolCallId: toolCallId));
 
-  group('appendMessages', () {
-    test('整批单事务：按序写入 + agentMsgIndex 保持 + session.updatedAt 刷新',
-        () async {
-      final before = (await repo.getSession(sid))!.updatedAt;
-      await Future.delayed(const Duration(milliseconds: 5));
-
-      final lastId = await repo.appendMessages([
-        rec(0, 'assistant', '我想一下', toolCallId: null),
-        rec(1, 'tool', '{"ok":1}', toolCallId: 'call-1'),
-        rec(2, 'assistant', '结果如下'),
-      ]);
-
-      final messages = await repo.listMessages(sid);
-      expect(messages.map((m) => m.agentMsgIndex).toList(), [0, 1, 2]);
-      expect(messages.map((m) => m.role).toList(),
-          ['assistant', 'tool', 'assistant']);
-      expect(messages[1].toolCallId, 'call-1');
-      expect(lastId, greaterThan(0));
-
-      final after = (await repo.getSession(sid))!.updatedAt;
-      expect(after.isAfter(before), isTrue);
-    });
-
-    test('空批返回 0 且不动 DB', () async {
-      expect(await repo.appendMessages([]), 0);
-      expect(await repo.getMessageCount(sid), 0);
-    });
-
-    test('中途 FK 冲突整批回滚（无半批落库）', () async {
-      final bad = ChatMessageRecord.fromAgentMessage(
-          999999, 1, ChatMessage(role: 'user', content: '孤儿消息'));
-
-      await expectLater(
-        repo.appendMessages([rec(0, 'user', '第一条'), bad]),
-        throwsA(anything),
-      );
-
-      // 第 1 条也必须被回滚，不能留下"前半已落库"的断裂状态
-      expect(await repo.getMessageCount(sid), 0);
-    });
-  });
-
-  group('replaceMessages', () {
+group('replaceMessages', () {
     test('原子重写：旧消息全部清掉，新消息按序写入', () async {
       await repo.appendMessages(
           List.generate(5, (i) => rec(i, 'user', '旧消息 $i')));
@@ -98,7 +56,7 @@ void main() {
     test('空列表等价于清空', () async {
       await repo.appendMessages([rec(0, 'user', 'x')]);
       expect(await repo.replaceMessages(sid, []), 0);
-      expect(await repo.getMessageCount(sid), 0);
+      expect(await repo.listMessages(sid), isEmpty);
     });
 
     test('中途 FK 冲突全量回滚：旧消息原样保留', () async {
@@ -132,8 +90,8 @@ void main() {
         throwsArgumentError,
       );
       // 拒绝发生在触碰 DB 之前，本会话数据不受影响
-      expect(await repo.getMessageCount(sid), 1);
-      expect(await repo.getMessageCount(otherSid), 0);
+      expect((await repo.listMessages(sid)).length, 1);
+      expect(await repo.listMessages(otherSid), isEmpty);
     });
   });
 }

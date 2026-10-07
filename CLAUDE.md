@@ -4,6 +4,14 @@
 
 ## 变更记录 (Changelog)
 
+- **2026-10-05**: **死仓储方法清扫（16 个方法 / 44 处声明）+ test/verification 重复测试归并**。以「带接收者的调用点」重新核验（避免把声明行/类内裸调用误计为调用），确认 16 个方法零生产调用：clearMemoryState / countByScenario / findByContent / deleteAllCharacters / deleteMessagesBefore / getMessageCount / touchSession / getBookshelves / getNovelCountByBookshelf / getCachedChaptersCount / getForParagraph / getVersionById / getVersionCount / getAllRelationships / deleteRelationship / updateRelationship——接口+实现一并删除（44 处），连带清理 4 个随之失效的 import 与 1 个 `Random` 字段。对应测试按"保留行为断言、删除对已删方法的断言"改写（如 atomic 测试改用 `listMessages` 断言条数、版本测试改用 `getVersions`），而不是整块删文件。**一处重要修正**：初版把 `createRelationship` 也列入删除，执行前发现它是 `character_relationships` 表在 lib/ 里**唯一的写入口**（删后只剩 `getGraphSnapshot` 读路径，且区间重叠等核心逻辑将无法测试）——已恢复，保留「表可写 + 读路径可测」的完整性；`getChaptersCacheStatus` / `getRevision` / `upsertByDomain` 同样因存在类内裸调用而保留。另将 `test/verification/custom_novel_fix_verification_test.dart` 与 `test/bug/custom_novel_init_failure_test.dart` 的重复用例归并：两条存活的「空章节」用例移植进 bug 测试后删除整个 verification 目录（其中「普通小说走 API 路径」用例早已 skip——依赖已移除的 `ApiServiceWrapper.getChapters`）。analyze 0 告警。
+
+- **2026-10-05**: **同款病灶普查 + 四个实锤 bug 修复（竞速类系统性问题收口）**。按"锚点病灶"模式（多写入方竞速 / 双真理源 / 静默守卫 / 标志位管时序 / 注释性不变量 / 零覆盖 / 探针测试转正）普查 providers + services + controllers 六个子系统，修复四处实锤缺陷。①**上下文压缩预剪枝改写落点错一格**（`scenario_session_chain.dart`）：marker 插入头部使压缩后索引为 `压缩前 index - cut + 1`，代码误用 `- cut` —— 应裁剪的超长 tool 结果永远没裁，反而改坏它前一条消息；内存与 DB 同步写同一错值，测试长期不可见（代码注释曾自述该 off-by-one"属 P1 范围外不修"）。修复后补回归测试（构造 user+assistant+tool 链，断言两条 tool 被精确改写、assistant 不被波及），并**验证该测试在旧代码下确实失败**（`期望'精简后的 T1' / 实际'原始超长工具结果'`）。②**章节内容被过期抓取覆盖**（`reader_content_controller` + `reader_state_providers`）：loadChapter 的秒级抓取 await 期间滚动切章会写入新章内容，旧抓取落地后无条件 setContent 把 A 的正文写进 B 的状态（B 标题下显示 A 正文），下游守卫比较的是被污染后的 currentChapter 挡不住。新增**加载世代号**（`setCurrentContext` 自增并返回，异步回写经 `finishLoad`/`failLoad` 校验，过期世代直接丢弃），补 4 个 notifier 单测。③**拼接期间导航把旧章串进新视图**（`reader_concat_controller`）：append/prepend 的 await 之后只查 `_isMounted`（导航复用同一 State 恒真），旧章落地会拼进新视图并经当前章检测把旧章写成 lastReadChapterIndex（进度被污染）——新增导航世代号 `resetForNavigation` 自增、两个 await 后各校验一次。④**日志上报退后台崩溃**（`log_reporter_service`）：flush 上传期间 `setEnabled(false)` 清空缓冲区，恢复后 `removeRange(0, batch.length)` 越界抛 RangeError，异常经 unawaited 的 Timer 回调与退后台钩子逃逸——加长度守卫。⑤**PreloadService 丢失唤醒**：`_processQueue` 开头 `if (_isRunning) return` 静默丢弃再投递请求，resume 撞上在途抓取（返回 busy → 任务放回 → break 退出）后无人重启，队列整段会话搁浅——改为 `_wakePending` 记录并在循环退出时重投。⑥**测试债清理**：三个 preload 探针文件剥除 19 处 print 调试残留（保留其真实行为断言——它们并非纯化石，删掉会削掉安全网），其中两个"只验证不异常"的测试补上真断言；headless_webview 的"高优先级可抢占"假绿测试（只断言 `isNotNull`）改为显式 skip 并标注为已知覆盖缺口，让缺口在 CI 可见而非被绿灯掩盖。analyze 0 告警，全量 2190 测试通过。
+
+- **2026-10-05**: **章内阅读位置重构：几何层单一真理源 + 锚点写入时序修复（治"重进回到章首"）**。诊断确认偏差主因不在偏移计算，而在时序：重进章节的首帧（offset≈0，视口顶是分隔线）就会采样到「第 0 段 0 比例」，且控制器每次新建、节流时间戳为 epoch → 立即落库，与恢复的 DB 读竞速——读到覆盖值就"恢复"到章首；即使读赢，退出兜底也会把内存里的 p=0 写回。修复分两层。**① 采样窗口**：进入页面后窗口关闭，直到用户真实滚动（offset>0 且非恢复跳转）或恢复成功落位才打开；窗口关闭期间不采样不落库，重进不滚动就退出 = 零写入，离开时存好的锚点原样保留；显式切章（`resetForNavigation`）同样关窗并清内存锚点，退出兜底不会把旧章位置写进新章会话。**② 几何层单一真理源**：新建纯 Dart `ReadingGeometry`（`lib/utils/reading_geometry.dart`），把散落三处的换算收口——段落高表（逐章逐段实测高 + 分隔线高，块形状同步时同 URL 同段数保留实测、段数变化/内容替换/字号变化失效）、扁平索引 ↔ (章节, 段落) 映射（替代控制器三份手写游标循环）、锚点 → 全局内容偏移（表驱动前缀和累加，未实测段按块内均高兜底）。滚动采样喂表（`_sampleListItems` 顺带 ingest），恢复第一跳从「相邻两三个样本的线性外推」（段落高度差异大时能差好几屏）改为按表累加；`estimateJumpOffset`/`_nearestOther` 及其测试随之外推路径一并删除。**新增 13 个几何层单测**（形状同步保留/失效语义、扁平映射与显示层序列一致、表驱动偏移精确可验、兜底与边界），补上此前阅读器几何逻辑零覆盖的最大缺口。已知边界（未动）：`_knownBlockHeights`/`_blockStartOffsets` 仍服务章检测与窗口回收（独立关注点，带采样/推导/兜底三层，合并进几何层留待下一步）；恢复首跳在整块零实测时仍用兜底高（首次校正后即精确）。analyze 0 告警，全量 2185 测试通过。
+
+- **2026-10-05**: **死代码与重复实现大清理（约 -3400 行）**。四个并行参考分析（UI 层 / 服务层 / 数据层 / 依赖·资产·测试）+ 全仓逐符号 grep 复核后删除：①**已下线的备份功能整链**——3.2.0-preview.6 删了备份管理页却遗留服务层（`BackupService` 815 行 + 4 个备份/恢复弹窗 + `ApiServiceWrapper` 4 个 `/api/backup/*` 方法 + `backupServiceProvider`），且私有仓后端已无对应端点；顺带 `novel_api` 生成包（70 文件）+ openapi 流水线（config/脚本/文档/regenerate-flutter-api 技能）成为孤儿一并移除，`novel_api` 全仓 0 import。②**失效入口与脚本**——两个 OCR PoC 调试入口（引用的 `tool/ocr_test_assets/` 已不存在，自 2026-09-08 起不可运行）、`tool/` 下 10 个一次性 codemod 与断链脚本（migrate_dify_* 指向已删除的 dify_service、convert_checkpoint/inspect_safetensors 指向已删除的 conversion 模块）、`test/helpers/safetensors_fixture.dart`、`assets/database/migration_v4.sql`。③**9 个 pubspec 依赖**（cupertino_icons/equatable/html/ffi/yaml/jinja/built_value/built_collection/built_value_generator + 未激活的 riverpod_lint），均 0 import。④**逐符号死代码**——chatForJson/chat 阻塞调用链（连带整个 json_utils.dart 失去唯一调用方）、`isRetryableStatus`、4 个仓储死方法对（getAllOutlines/deleteOutline/findMessageByToolCallId/updateRelationship/getRandomPromptText/getRandomTag/isLocalChapter 双副本）、`bookshelfCacheStats`、`localDreamEngineStateProvider`+`statusStream`、新手引导 4 个从未被读写/标记的 per-场景引导标记子功能（`mark*GuideShown`/`resetOnboarding`/`guide_*` 持久化键/字段）、惰性对话框动画配置机制（`DialogAnimationConfig` 全部字段存储后从未读取）、onboarding 之外的 20+ 个零引用方法/常量/getter、`SavedTagGroup` 模型。⑤**重复实现收口两处**——下载+SHA256+原子替换三函数在 `AppResourceManager` 与 `OcrModelDownloader` 逐行相同（收口为 `verified_downloader.dart`，重试与日志文案留在各自调用层）；关系图 `_NodeWidget`/`_EdgeWidget`/`GraphNode` 在整页与视图组件逐字重复（提升为公开 `GraphNodeWidget`/`GraphEdgeWidget`，整页复用）。⑥**test/** 重新纳入 analyze**——2026-08-05 的「39 error 死测试」早已修完，本次修复剩余 109 条 lint 后永久移除 `test/**` 排除项（CI `--no-fatal-infos` 全绿），未来死测试将直接被分析器拦截。⑦CLAUDE.md 与 pubspec 中指向已删代码的失实段落同步修正。analyze 0 告警，全量测试通过。
+
 - **2026-10-04**: **文字游戏打字机「吞字」修复：流结束后补发被节流扣住的尾字**。用户反馈「文本游戏存在吞字现象，完整内容要等本轮 loop 结束才能正常展示」，怀疑是参数流式提前显示、完整调用后未正确渲染。先用探针用例走真实链路坐实（分片 LLM 流 → 对比最后一次 `ToolArgDeltaEvent` 与工具完整参数）：**第一帧后追加 8 字的末块被 12 字符节流扣住，打字机停在半句**——机制：`emitStreamableToolArgDeltas` 按「≥12 字符增量」节流且只在 delta chunk 里调用，**流结束后无补发**，末块（不足阈值的一截，最多 11 字符或整块）永远发不出去；而工具执行后到回合结束之间没有任何机制用完整参数回填直播画面（pending 段按设计跳过 narrate/speak），只能等 AgentDone 定稿投影——与用户观察完全吻合。修复：新增 `flushStreamableToolArgs`，在**工具执行前**（assistant 消息入链后）按流结束后的完整参数补发一次（仅在确有缺口时 emit），打字机即时完整；同时记 `流式参数收尾: <工具>, 流式期间已发 X 字, 完整 Y 字`（tag `arg_stream_flush`）——现场反馈日志从此可直接佐证这类问题（此前该路径零日志，现有日志无法作证，这是用户「日志能否有线索」的答案）。测试：探针转正为 `agent_loop_arg_flush_test` 4 用例（末块不足阈值补齐 / 参数整块在收尾帧才到、流式期间一字未发 / 已发全不重复发 / speak 同享），并验证了修复摘除后测试失败（回归有效）；顺带确认未破坏既有增量流式契约（`agent_loop_tool_arg_delta_test` 等 116 用例通过）。analyze 0 告警。
 
 - **2026-10-04**: **文字游戏「AI 模型」入口改为选模型（不再是点开就一个说明弹窗）**。用户反馈「AI 模型配置好奇怪，点开就一个弹窗，按道理应该是让用户选择模型的」。根因：该入口（游玩页「更多」菜单 + 管理页 AppBar 调参图标）挂的是**场景级自配 LLM 覆盖**弹窗（`AgentScenarioConfigDialog`），而发布包注入 `BACKEND_BASE_URL` 走托管模式——API Key 在服务端、场景级自配机制不生效，弹窗只能显示一段「托管模式已启用」说明，用户点开什么都选不了，是条死胡同（与设置页已有的「AI 模型选择」、Agent Chat 里的模型切换 chip 割裂）。修复：两个入口改为直开 `showAgentModelPickerSheet` 模型切换抽屉（目录来自 `GET /v1/models`，选中写 `managed_model_selection`，全局单值对所有 Agent 场景生效），入口文案从「AI 模型配置」改为「AI 模型选择」以免名不副实。方向上与并行进行中的「用户自配 AI 供应商模式整体移除」重构一致（managed-only），因此未保留按 `kHasBundledBackend` 分流的自配分支。配套：`AgentModelPickerSheet` 由私有类转公开（便于测试直接驱动），新增 `model_picker_sheet_test` 3 用例（目录渲染含相对基准消耗倍数与选中态 / 点选写入并关抽屉 / 目录不可达的空态与重试）。analyze 0 告警，文字游戏 + agent_chat 组件 104 用例通过。
@@ -166,7 +174,6 @@ Flutter移动应用是Whimread 平台的前端客户端，提供跨平台的小�
 - `services/` - 业务服务层（48+ 个文件）
   - `chapter_history_service.dart` - 章节历史服务
   - `chapter_search_service.dart` - 章节搜索服务
-  - `backup_service.dart` - 备份服务
   - `preferences_service.dart` - 偏好设置服务
   - `reader_settings_service.dart` - 阅读器设置服务
   - `novel_context_service.dart` - 小说上下文服务
@@ -204,7 +211,6 @@ Flutter移动应用是Whimread 平台的前端客户端，提供跨平台的小�
 dependencies:
   flutter_riverpod: ^2.4.9        # Riverpod核心
   riverpod_annotation: ^2.3.3     # 注解支持
-  equatable: ^2.0.5                # 对象比较
 
 dev_dependencies:
   riverpod_generator: ^2.3.9      # 代码生成器
@@ -325,15 +331,12 @@ final apiService = ref.watch(apiServiceProvider);
 flutter:
   sdk: flutter
 flutter_markdown: ^0.6.14    # Markdown渲染
-video_player: ^2.8.0          # 视频播放
-visibility_detector: ^0.4.0+2 # 可见性检测
 ```
 
 #### 状态管理
 ```yaml
 flutter_riverpod: ^2.4.9      # Riverpod状态管理
 riverpod_annotation: ^2.3.3   # Riverpod注解
-equatable: ^2.0.5             # 对象比较
 ```
 
 #### 网络请求
@@ -344,8 +347,6 @@ dio: ^5.4.0                   # Dio HTTP客户端
 
 #### 数据序列化
 ```yaml
-built_value: ^8.9.0           # 不可变值类型
-built_collection: ^5.1.1      # 不可变集合
 json_annotation: ^4.8.0       # JSON注解
 ```
 
@@ -354,11 +355,6 @@ json_annotation: ^4.8.0       # JSON注解
 sqflite: ^2.3.0               # SQLite数据库
 path_provider: ^2.1.1         # 文件路径
 shared_preferences: ^2.2.2    # 键值存储
-```
-
-#### HTML解析
-```yaml
-html: ^0.15.4                 # HTML解析
 ```
 
 #### 图片与媒体
@@ -385,12 +381,6 @@ flutter_force_directed_graph: ^1.0.8  # 力导向图
 crypto: ^3.0.7                # 加密算法
 ```
 
-#### OpenAPI生成代码
-```yaml
-novel_api:
-  path: generated/api         # 本地路径依赖
-```
-
 ### 开发工具依赖
 
 ```yaml
@@ -411,18 +401,15 @@ dev_dependencies:
   # 代码生成
   build_runner: ^2.4.7        # 代码生成工具
   json_serializable: ^6.7.0   # JSON序列化生成
-  built_value_generator: ^8.9.0  # built_value生成
 
   # Riverpod代码生成
   riverpod_generator: ^2.3.9  # Provider生成器
-  riverpod_lint: ^2.3.7       # Riverpod Lint
 ```
 
 ### 配置文件
 
 - **pubspec.yaml** - 项目依赖和配置
 - **analysis_options.yaml** - 代码分析配置
-- **openapi-config.yaml** - API客户端生成配置
 - **dart_test.yaml** - Dart测试配置
 - **coverage_config.yaml** - 覆盖率配置
 
@@ -838,15 +825,6 @@ class NovelListScreen extends ConsumerWidget {
 - 小说封面媒体化（v36 `coverMediaId`，`NovelCover` 命中走 `MediaView`）
 - 角色头像镜像媒体化（v34 `avatar_media_id`）
 
-### 9. 备份与恢复
-
-**Service**: `lib/services/backup_service.dart`
-
-**功能**:
-- 数据库备份
-- 恢复功能
-- 备份文件管理
-
 ## 缓存系统
 
 ### 章节内容缓存
@@ -856,14 +834,13 @@ class NovelListScreen extends ConsumerWidget {
 - Repository: `ChapterRepository`
 - 特性：用户插入章节保护（`is_user_inserted`）、`is_accompanied` 标记是否带 AI 特写
 
-**后端兜底已移除**（2026-07-08）：`/api/cache/*` 等服务端接口已删除，前端不再依赖服务端缓存。如需重新跨设备同步，使用备份（`lib/services/backup_service.dart`）+ 后端 `/api/backup/upload|list|download` 链路。
+**后端兜底已移除**（2026-07-08）：`/api/cache/*` 等服务端接口已删除，前端不再依赖服务端缓存。如需重新跨设备同步，需另建方案（旧的备份链路已随 3.2.0-preview.6 的备份管理页下线而整体移除，含 `BackupService` 与 `/api/backup/*` 客户端）。
 
 ### 缓存策略
 
 - **章节内容**: 本地 SQLite（`chapter_cache` 表，无服务端兜底）
 - **搜索结果**: 内存缓存
-- **图片资源**: 文件系统缓存（`utils/image_cache_manager.dart`，写穿 `media_items`）
-- **视频资源**: 文件系统缓存（`utils/video_cache_manager.dart`，写穿 `media_items`）
+- **图片/视频资源**: 统一媒体代理 `MediaProxy` + `media_items` 表（`lib/services/media/`）
 
 ### 缓存相关服务
 
@@ -1019,13 +996,6 @@ flutter pub outdated              # 检查过时依赖
 
 ### 开发工具
 
-**API生成**:
-```bash
-# 生成OpenAPI客户端代码
-dart run tool/generate_api.dart
-flutter pub get
-```
-
 **数据库工具**:
 ```bash
 # 清理测试数据库
@@ -1035,14 +1005,8 @@ dart run tool/clean_test_database.dart
 dart run tool/force_rebuild_database.dart
 ```
 
-**Python迁移脚本**:
-- `tool/migrate_database_log.py` - 数据库日志迁移
-- `tool/migrate_dify_log.py` - Dify日志迁移
-- `tool/migrate_api_log.py` - API日志迁移
-- `tool/fix_logger_calls.py` - 修复Logger调用
-- `tool/fix_screen_toast_calls.py` - 修复Screen Toast调用
-- `tool/extract_repository.py` - 提取Repository代码
-- `tool/fix_import_paths.py` - 修复导入路径
+**字体子集化脚本**:
+- `tool/subset_fonts.py` / `tool/subset_fonts_tight.py` - 发布用字体裁剪
 
 ## 构建与部署
 
@@ -1097,20 +1061,11 @@ flutter build web                              # Web应用
 - 不会被爬虫更新
 - 保留用户编辑内容
 
-### Q: 如何更新API客户端代码？
+### Q: 后端接口变更后，客户端要改哪里？
 
-**A**:
-```bash
-# 1. 确保后端服务运行
-# 2. 运行生成工具
-dart run tool/generate_api.dart
-
-# 3. 更新依赖
-flutter pub get
-
-# 4. 验证生成代码
-flutter analyze lib/generated/api/
-```
+**A**: 直接改 `ApiServiceWrapper`（`lib/services/api_service_wrapper.dart`）——
+本仓不生成 API 客户端代码（OpenAPI 流水线已随 2026-10 的死代码清理整体移除），
+后端请求一律手写 Dio 调用。
 
 ### Q: Riverpod vs Provider，应该用哪个？
 
@@ -1175,26 +1130,19 @@ flutter analyze lib/generated/api/
 - `.gitignore` - Git忽略规则
 - `dart_test.yaml` - Dart测试配置
 - `coverage_config.yaml` - 覆盖率配置
-- `openapi-config.yaml` - API生成配置
 
 ### 工具和脚本
 
 **Dart工具**:
-- `tool/generate_api.dart` - API代码生成
 - `tool/clean_test_database.dart` - 清理测试数据库
 - `tool/force_rebuild_database.dart` - 重建数据库
 
 **Python脚本**:
-- `tool/migrate_database_log.py` - 数据库日志迁移
-- `tool/migrate_dify_log.py` - Dify日志迁移
-- `tool/migrate_api_log.py` - API日志迁移
-- `tool/fix_logger_calls.py` - 修复Logger调用
-- `tool/fix_screen_toast_calls.py` - 修复Toast调用
-- `tool/extract_repository.py` - 提取Repository
-- `tool/fix_import_paths.py` - 修复导入路径
+- `tool/subset_fonts.py` / `tool/subset_fonts_tight.py` - 字体子集化
+- `tool/publish_resources.dart` - 资源发布（字体/引擎/QNN 运行库）
 
 **Shell脚本**:
-- `tool/fix_logger_error_param.sh` - 修复Logger错误参数
+- `tool/run_all_tests.sh` / `tool/run_unit_tests.sh` / `tool/run_integration_tests.sh` - 测试批处理
 
 ### 测试文件
 
@@ -1210,7 +1158,7 @@ flutter analyze lib/generated/api/
 ### 构建产物
 
 - `build/` - 构建输出（忽略提交）
-- `lib/generated/` - API生成代码（忽略提交）
+- （OpenAPI 生成代码已整体移除，见「FAQ: 后端接口变更后，客户端要改哪里」）
 
 ### 平台配置
 
@@ -1272,25 +1220,13 @@ flutter analyze lib/generated/api/
 
 ### API集成更新
 
-1. **确保后端服务运行**
-   ```bash
-   # 启动后端服务
-   cd ../backend
-   python -m uvicorn app.main:app --reload
-   ```
+1. **确认后端接口契约**（后端在本仓之外：`../whimread-admin`）
 
-2. **重新生成API客户端**
-   ```bash
-   dart run tool/generate_api.dart
-   flutter pub get
-   ```
+2. **更新API包装器**（如需要）
+   - 修改 `lib/services/api_service_wrapper.dart`（手写 Dio 调用，无生成客户端）
 
-3. **更新API包装器**（如需要）
-   - 修改 `lib/services/api_service_wrapper.dart`
-   - 适配新的API变更
-
-4. **添加转换方法**（如需要）
-   - 在 API 模型类中添加便捷转换方法
+3. **添加转换方法**（如需要）
+   - 在对应 model 的 `fromJson` 中适配新字段
    - 方便API模型转换
 
 5. **测试集成功能**

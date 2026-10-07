@@ -13,7 +13,6 @@
 /// - [ai_service_providers.dart] - AI相关 Providers
 /// - [network_service_providers.dart] - 网络相关 Providers
 /// - [database_service_providers.dart] - 数据库相关 Providers
-/// - [cache_service_providers.dart] - 缓存相关 Providers
 library;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -22,7 +21,6 @@ import '../../../services/logger_service.dart';
 import '../../../services/llm_logger/llm_logger.dart';
 import '../../../services/log_reporter_service.dart';
 import '../../../services/preferences_service.dart';
-import '../../../services/backup_service.dart';
 
 part 'core_service_providers.g.dart';
 
@@ -102,34 +100,6 @@ LlmLogger llmLogger(Ref ref) {
 @riverpod
 PreferencesService preferencesService(Ref ref) {
   return PreferencesService.instance;
-}
-
-/// BackupService Provider
-///
-/// 提供数据库备份服务实例，用于备份和恢复数据库。
-///
-/// **功能**:
-/// - 数据库文件获取
-/// - 上传备份到服务器
-/// - 备份时间记录
-///
-/// **依赖**:
-/// - 无（单例服务）
-///
-/// **使用示例**:
-/// ```dart
-/// final backupService = ref.watch(backupServiceProvider);
-/// final dbFile = await backupService.getDatabaseFile();
-/// await backupService.uploadBackup(dbFile: dbFile);
-/// ```
-///
-/// **注意事项**:
-/// - 使用 `BackupService()` 单例模式
-/// - 上传操作需要网络连接
-/// - 备份文件存储在服务器
-@riverpod
-BackupService backupService(Ref ref) {
-  return BackupService();
 }
 
 /// LogReporterService Provider

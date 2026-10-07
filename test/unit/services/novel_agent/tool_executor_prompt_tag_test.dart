@@ -87,10 +87,6 @@ class _FakePromptTagRepo implements IPromptTagRepository {
   @override
   Future<List<TagGroup>> getGroupedByCategory(int categoryId) async => [];
   @override
-  Future<String?> getRandomPromptText(int categoryId, String name) async => null;
-  @override
-  Future<PromptTag?> getRandomTag(int categoryId, String name) async => null;
-  @override
   Future<void> moveToCategory(int tagId, int newCategoryId) async {}
   @override
   Future<int> getNextSortOrder(int categoryId) async =>

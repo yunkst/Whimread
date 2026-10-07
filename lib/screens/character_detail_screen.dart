@@ -22,6 +22,7 @@ import '../widgets/common/confirm_dialog.dart';
 import '../widgets/media/media_view.dart';
 import 'character_edit_screen.dart';
 import 'character_revision_history_screen.dart';
+import 'media_preview_screen.dart';
 
 /// 人物卡详情页
 ///
@@ -134,7 +135,9 @@ class _CharacterDetailScreenState
           genderColor: genderColor,
           borderRadius: 14,
           fontSize: 72,
-          onTap: hasMedia ? () => _showFullScreenAvatar(mediaId) : null,
+          onTap: hasMedia
+              ? () => MediaPreviewScreen.open(context, mediaId)
+              : null,
         ),
       ),
     );
@@ -457,7 +460,8 @@ class _CharacterDetailScreenState
                   itemBuilder: (context, i) {
                     final image = images[i];
                     return GestureDetector(
-                      onTap: () => _showFullScreenAvatar(image.mediaId),
+                      onTap: () =>
+                          MediaPreviewScreen.open(context, image.mediaId),
                       onLongPress: () => _showGalleryItemActions(image),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
@@ -604,15 +608,6 @@ class _CharacterDetailScreenState
 
   // ─── 辅助 ───────────────────────────────────────────────────
 
-  void _showFullScreenAvatar(String mediaId) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        opaque: false,
-        pageBuilder: (_, __, ___) => _FullScreenAvatar(mediaId: mediaId),
-      ),
-    );
-  }
-
   // ─── 编辑 / 删除 ────────────────────────────────────────────
 
   Future<void> _onEdit() async {
@@ -683,23 +678,4 @@ class _AppearanceRow {
   final String label;
   final String? value;
   const _AppearanceRow(this.label, this.value);
-}
-
-/// 全屏查看头像媒体（图片缩放 / 视频循环播放，点击关闭）
-class _FullScreenAvatar extends StatelessWidget {
-  final String mediaId;
-  const _FullScreenAvatar({required this.mediaId});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black.withValues(alpha: 0.9),
-      body: GestureDetector(
-        onTap: () => Navigator.pop(context),
-        child: Center(
-          child: MediaView(mediaId: mediaId, fullscreen: true),
-        ),
-      ),
-    );
-  }
 }

@@ -23,11 +23,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:novel_app/core/providers/service_providers.dart';
 import 'package:novel_app/core/providers/theme_provider.dart';
 import 'package:novel_app/screens/feedback_submit_screen.dart';
 import 'package:novel_app/screens/settings_screen.dart';
-import 'package:novel_app/services/backup_service.dart';
 import 'package:novel_app/services/logger_service.dart';
 
 /// mock 掉 PackageInfo 的 platform channel,避免测试环境 MissingPluginException。
@@ -50,26 +48,10 @@ void _mockPackageInfoChannel() {
   });
 }
 
-/// 测试用 BackupService stub,getLastBackupTimeText 返回空字符串,跳过文件 IO。
-///
-/// SettingsScreen._loadLastBackupTime() 会 ref.read(backupServiceProvider)
-/// .getLastBackupTimeText(); 不 stub 会真实读路径抛异常。
-class _FakeBackupService implements BackupService {
-  @override
-  Future<String> getLastBackupTimeText() async => '';
-
-  // 其余方法测试不关心,noSuchMethod 兜底。
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
 Widget _wrap(Widget child) {
   // ThemeNotifier.build() 走 PreferencesService.instance 单例读 'theme_mode';
   // setUp 里的 setMockInitialValues({}) 能穿透到它,故无需 override themeNotifierProvider。
   return ProviderScope(
-    overrides: [
-      backupServiceProvider.overrideWithValue(_FakeBackupService()),
-    ],
     child: MaterialApp(
       // 用 ThemeState.light 的主题数据,它已含 AppColors.light extension,
       // 保证 SettingsScreen 内 context.appColors.neutral 命中真实扩展。
@@ -131,9 +113,6 @@ void main() {
     final observer = _RecordingNavigatorObserver(onPushed: pushedRoutes.add);
 
     await tester.pumpWidget(ProviderScope(
-      overrides: [
-        backupServiceProvider.overrideWithValue(_FakeBackupService()),
-      ],
       child: MaterialApp(
         theme:
             const ThemeState(themeMode: AppThemeMode.light).getLightTheme(),

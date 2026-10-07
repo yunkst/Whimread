@@ -18,11 +18,11 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'logger_service.dart';
+import 'verified_downloader.dart';
 
 class OcrModelManifest {
   final String modelVersion;
@@ -174,8 +174,8 @@ class OcrModelDownloader {
     final dictFile = await _localDictFile();
     final modelExists = await modelFile.exists();
     final dictExists = await dictFile.exists();
-    final modelLocalSha = modelExists ? await _sha256Of(modelFile) : null;
-    final dictLocalSha = dictExists ? await _sha256Of(dictFile) : null;
+    final modelLocalSha = modelExists ? await sha256OfFile(modelFile) : null;
+    final dictLocalSha = dictExists ? await sha256OfFile(dictFile) : null;
 
     // 3. 决策
     final needModel = !modelExists
@@ -271,46 +271,14 @@ class OcrModelDownloader {
     String expectSha256,
     File dest,
     void Function(int received, int total)? onProgress,
-  ) async {
-    final tmp = File('${dest.path}.tmp');
-    if (await tmp.exists()) await tmp.delete();
-
-    final resp = await _dio.get<ResponseBody>(
-      url,
-      options: Options(responseType: ResponseType.stream),
+  ) {
+    return downloadVerified(
+      dio: _dio,
+      url: url,
+      expectSha256: expectSha256,
+      dest: dest,
+      onProgress: onProgress,
     );
-    final total = int.tryParse(
-            resp.headers.value(HttpHeaders.contentLengthHeader) ?? '') ??
-        -1;
-    var received = 0;
-    final sink = tmp.openWrite();
-    try {
-      await for (final chunk in resp.data!.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, total);
-      }
-    } finally {
-      await sink.close();
-    }
-
-    // SHA256 校验
-    final actual = await _sha256Of(tmp);
-    if (actual != expectSha256) {
-      await tmp.delete();
-      throw StateError(
-          'SHA256 不一致: 期望 $expectSha256, 实际 $actual ($url)');
-    }
-
-    // 原子替换
-    if (await dest.exists()) await dest.delete();
-    await tmp.rename(dest.path);
-  }
-
-  // ---- 工具 ----
-  Future<String> _sha256Of(File f) async {
-    final bytes = await f.readAsBytes();
-    return sha256.convert(bytes).toString();
   }
 
   void _logProgress(String label, int received, int total) {

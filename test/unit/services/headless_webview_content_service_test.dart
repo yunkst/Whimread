@@ -11,11 +11,9 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:novel_app/services/headless_webview_content_service.dart';
 import 'package:novel_app/services/crawler/crawl_request_resolver.dart';
-import 'package:novel_app/services/headless_webview_errors.dart';
 import 'package:novel_app/repositories/site_script_repository.dart';
 import 'package:novel_app/models/site_script.dart';
 import 'package:novel_app/services/logger_service.dart';
@@ -231,19 +229,14 @@ void main() {
       expect(result.isNoScript, isTrue);
     }, skip: '需要 flutter_inappwebview 平台实现（纯 Dart 测试环境不可用）');
 
-    test('_isFetching 为 true 时 → 高优先级可抢占', () async {
-      // 这个测试验证并发保护：当已有请求在进行中时，新请求直接返回 null
-      // 由于 _isFetching 是私有字段，通过连续两次调用间接验证
-      final script = _makeScript(domain: 'www.example.com');
-      when(mockScriptRepo.findByUrlHost('www.example.com'))
-          .thenAnswer((_) async => script);
-
-      // 第一次调用会设置 _isFetching = true，然后因 WebView 失败重置
-      // 在单测环境中，由于没有真正的 WebView，_isFetching 会在异常后重置
-      // 这个测试主要验证字段存在且逻辑正确（编译期保证）
-      // 并发保护现已升级为优先级抢占机制：high 可抢占 low
-      expect(service, isNotNull); // 服务正常创建
-    });
+    // 已知覆盖缺口：优先级抢占（_shouldYield / _yieldedSignal）依赖真实
+    // WebView 时序，纯 Dart 测试环境无法驱动。此处曾有一个只断言
+    // `expect(service, isNotNull)` 的「假绿」测试（自述靠编译期保证），
+    // 已改为显式 skip —— 让缺口在 CI 报告里可见，而不是被绿灯掩盖。
+    // 待补：带 in-app-webview 平台桩的集成测试覆盖 high 抢占 low。
+    test('高优先级可抢占进行中的低优先级抓取', () async {
+      fail('需 in-app-webview 平台桩：抢占时序无法在纯 Dart 环境验证');
+    }, skip: '已知覆盖缺口：需 in-app-webview 平台桩（抢占时序依赖真实 WebView）');
   });
 
   // ================================================================

@@ -7,7 +7,6 @@
 /// - 生成 error 事件 → LocalDreamException
 library;
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -15,7 +14,6 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/database/database_connection.dart';
 import 'package:novel_app/models/image_model.dart';
-import 'package:novel_app/services/api_service_wrapper.dart';
 import 'package:novel_app/services/image_generation/image_generation_backend.dart';
 import 'package:novel_app/services/image_generation/local_dream_client.dart';
 import 'package:novel_app/services/image_generation/local_dream_embedded_backend.dart';
@@ -56,9 +54,6 @@ class _FakeEngineManager implements LocalDreamEngineManager {
 
   @override
   Future<String?> nativeLibDir() async => '/unused';
-
-  @override
-  Stream<LocalDreamEngineStatus> get statusStream => const Stream.empty();
 
   @override
   void dispose() {}

@@ -360,7 +360,7 @@ void main() {
           ],
         ),
         ChatMessage(role: 'tool', content: '{"ok":true}', toolCallId: 'c1'),
-        ChatMessage(role: 'tool', content: '${'b' * 300}', toolCallId: 'c2'),
+        ChatMessage(role: 'tool', content: 'b' * 300, toolCallId: 'c2'),
       ];
 
       final result = compactor.compact(

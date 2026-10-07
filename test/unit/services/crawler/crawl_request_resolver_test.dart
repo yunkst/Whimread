@@ -5,7 +5,6 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/database/database_connection.dart';
-import 'package:novel_app/models/site_script.dart';
 import 'package:novel_app/repositories/site_script_repository.dart';
 import 'package:novel_app/services/crawler/browser_mode.dart';
 import 'package:novel_app/services/crawler/crawl_request.dart';

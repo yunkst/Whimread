@@ -196,7 +196,6 @@ void main() {
       final loop = AgentLoop(llm: llm, scenario: scenario);
 
       // 用一个共享队列模拟：第 1 轮前空，第 1 轮 LLM 调用后填入新消息
-      final queue = <String>[];
       int drainCount = 0;
 
       final events = <AgentEvent>[];

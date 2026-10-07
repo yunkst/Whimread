@@ -17,7 +17,6 @@ void main() {
         String initialParagraph = '初始段落内容';
         String updatedParagraph = '更新后的段落内容';
         int onContentChangedCallCount = 0;
-        String? lastChangedContent;
 
         await tester.pumpWidget(
           MaterialApp(
@@ -27,9 +26,8 @@ void main() {
                 index: 0,
                 fontSize: 18.0,
                 isEditMode: true,
-                onContentChanged: (newContent) {
+                onContentChanged: (_) {
                   onContentChangedCallCount++;
-                  lastChangedContent = newContent;
                 },
               ),
             ),
@@ -48,9 +46,8 @@ void main() {
                 index: 0,
                 fontSize: 18.0,
                 isEditMode: true,
-                onContentChanged: (newContent) {
+                onContentChanged: (_) {
                   onContentChangedCallCount++;
-                  lastChangedContent = newContent;
                 },
               ),
             ),

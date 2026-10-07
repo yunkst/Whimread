@@ -37,6 +37,6 @@ void main() {
     }
 
     expect(predictor!.isLoaded, isTrue);
-    await predictor!.dispose();
+    await predictor.dispose();
   });
 }

@@ -25,20 +25,7 @@ abstract class IOutlineRepository {
   /// - 找到的大纲对象，如果不存在则返回 null
   Future<Outline?> getOutlineByNovelUrl(String novelUrl);
 
-  /// 获取所有大纲
-  ///
-  /// 返回：
-  /// - 所有大纲的列表，按更新时间降序排列（最近更新的在前）
-  Future<List<Outline>> getAllOutlines();
 
-  /// 删除大纲
-  ///
-  /// 参数：
-  /// - [novelUrl] 要删除大纲的小说URL
-  ///
-  /// 返回：
-  /// - 受影响的行数，如果大纲不存在则返回 0
-  Future<int> deleteOutline(String novelUrl);
 
   /// 更新大纲内容
   ///

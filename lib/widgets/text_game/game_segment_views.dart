@@ -9,6 +9,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../screens/media_preview_screen.dart';
 import '../../screens/text_game/game_transcript_projector.dart';
 import '../character/avatar_media.dart';
 import '../media/media_view.dart';
@@ -321,21 +322,12 @@ class _GameSceneImageViewState extends State<GameSceneImageView>
           child: MediaView(
             key: ValueKey('scene_img_${mediaIds.first}'),
             mediaId: mediaIds.first,
-            onTap: () => _openFullscreen(context, mediaIds.first),
+            onTap: () =>
+                MediaPreviewScreen.open(context, mediaIds.first),
           ),
         ),
       ),
     );
-  }
-
-  void _openFullscreen(BuildContext context, String mediaId) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0),
-        body: Center(child: MediaView(mediaId: mediaId, fullscreen: true)),
-      ),
-    ));
   }
 
   /// 生成中占位：shimmer 流光扫过 + 转圈 + 文案
