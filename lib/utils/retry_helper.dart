@@ -136,6 +136,15 @@ final _rand = Random();
 class RetryPolicy {
   final Duration maxDelay;
   final Duration initialDelay;
+
+  /// 4xx 客户端错误（400–499，排除 429/408）的退避基准。默认 2s。
+  ///
+  /// 实测（2026-10-05 反馈 #15）：上游网关间歇 400 的恢复窗口在 10–25s，
+  /// 默认 500ms 起步的退避在流式 3 次预算内 ~3.5s 就烧完，ride 不过去。
+  /// 4xx 一律秒级起步；429 例外（走服务端 Retry-After 权威指示），
+  /// 408 例外（本身就是超时语义，保持普通节奏）。
+  final Duration initialDelay4xx;
+
   final double multiplier;
   final double jitterFactor;
   final Random? random;
@@ -143,6 +152,7 @@ class RetryPolicy {
   const RetryPolicy({
     this.maxDelay = const Duration(seconds: 60),
     this.initialDelay = const Duration(milliseconds: 500),
+    this.initialDelay4xx = const Duration(seconds: 2),
     this.multiplier = 2.0,
     this.jitterFactor = 0.25,
     this.random,
@@ -153,16 +163,28 @@ class RetryPolicy {
   /// [attempt] 1-based（第 1 次为首次失败、即将第一次重试）。
   /// [retryAfterMs] 可选：服务端 Retry-After 指示，优先于指数退避；
   ///   0 或 null 回退指数退避。
-  int computeDelayMs({required int attempt, int? retryAfterMs}) {
+  /// [statusCode] 可选：HTTP 状态码。4xx（非 429/408）用 [initialDelay4xx]
+  ///   作指数基准——确定性 4xx 重试本就是自愈性质的对冲，多等无妨；
+  ///   5xx 与网络错误维持 [initialDelay] 的常规节奏。
+  int computeDelayMs({
+    required int attempt,
+    int? retryAfterMs,
+    int? statusCode,
+  }) {
     // 服务端 Retry-After 优先（权威指示）。clamp 到 maxDelay 防恶意大值。
     // 0 视为无指导意义，回退指数退避（防雷鸣群）。
     if (retryAfterMs != null && retryAfterMs > 0) {
       return retryAfterMs.clamp(0, maxDelay.inMilliseconds).toInt();
     }
+    final use4xxBase = statusCode != null &&
+        statusCode >= 400 &&
+        statusCode < 500 &&
+        statusCode != 429 &&
+        statusCode != 408;
+    final base = use4xxBase ? initialDelay4xx : initialDelay;
     // 否则指数退避 + 抖动
     final rng = random ?? _rand;
-    final raw =
-        initialDelay.inMilliseconds * pow(multiplier, attempt - 1);
+    final raw = base.inMilliseconds * pow(multiplier, attempt - 1);
     final capped = raw.clamp(0, maxDelay.inMilliseconds).toInt();
     final jitterRange = (capped * jitterFactor).toInt();
     final jitter =
@@ -227,6 +249,7 @@ Future<T> withRetry<T>(
         attempt: attempt,
         config: config,
         retryAfterMs: e is RetryableHttpException ? e.retryAfterMs : null,
+        statusCode: e is RetryableHttpException ? e.statusCode : null,
       );
       LoggerService.instance.w(
         '$label 第 $attempt 次失败 (${e.runtimeType}: $e)，'
@@ -254,13 +277,14 @@ int _computeDelayMs({
   required int attempt,
   required RetryConfig config,
   int? retryAfterMs,
+  int? statusCode,
 }) {
   return RetryPolicy(
     maxDelay: config.maxDelay,
     initialDelay: config.initialDelay,
     multiplier: config.multiplier,
     jitterFactor: config.jitterFactor,
-  ).computeDelayMs(attempt: attempt, retryAfterMs: retryAfterMs);
+  ).computeDelayMs(attempt: attempt, retryAfterMs: retryAfterMs, statusCode: statusCode);
 }
 
 /// 解析 HTTP Retry-After 头。返回毫秒数；失败返回 null。

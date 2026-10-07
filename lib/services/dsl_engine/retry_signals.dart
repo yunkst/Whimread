@@ -170,3 +170,25 @@ extension RetryErrorCategoryLabel on RetryErrorCategory {
     }
   }
 }
+
+/// LLM 链路异常 → 面向用户的中文终态文案。
+///
+/// AgentErrorEvent 的文本会直接渲染进聊天流；原始 `toString()`
+/// （如 `RetryableHttpException(status=400, url=...)`）对用户不可读
+/// （2026-10-05 反馈 #15：重试预算烧完后用户看到的是裸异常串）。
+/// 重试预算内过程态仍走 RetryBanner / [RetryErrorCategoryLabel]；
+/// 本函数只负责预算耗尽后的终态。
+String llmErrorUserMessage(Object e) {
+  if (e is QuotaExhaustedException) return e.toString(); // 已是中文文案
+  if (e is RetryableHttpException) {
+    if (e.statusCode == 429) return 'AI 请求过于频繁，请稍等片刻再试';
+    if (e.statusCode >= 500) {
+      return 'AI 服务暂时不可用（服务端错误 ${e.statusCode}），请稍后重试';
+    }
+    return 'AI 请求失败（错误 ${e.statusCode}），请稍后重试；若持续失败，请尝试新建会话';
+  }
+  if (e is SocketException || e is HandshakeException || e is TimeoutException) {
+    return 'AI 服务暂时不可用，请检查网络后重试';
+  }
+  return e.toString();
+}

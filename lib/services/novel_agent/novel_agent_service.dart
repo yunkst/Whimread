@@ -17,6 +17,7 @@ import 'package:novel_app/services/llm_config_service.dart';
 
 import '../../utils/cancellation_token.dart';
 import '../dsl_engine/llm_provider.dart' show LlmProvider;
+import '../dsl_engine/retry_signals.dart' show llmErrorUserMessage;
 import 'agent_event.dart';
 import 'agent_loop.dart';
 import 'agent_scenario.dart';
@@ -292,7 +293,7 @@ class NovelAgentService {
           stackTrace: stack.toString(),
           category: LogCategory.ai,
           tags: ['agent', 'service', 'error', scenarioId]);
-      _controller.add(AgentErrorEvent(e.toString()));
+      _controller.add(AgentErrorEvent(llmErrorUserMessage(e)));
     } finally {
       // 只清理仍属于本次运行的条目：cancelFor 后新 run 可能已换上自己的
       // token/队列，旧 run 的 finally 不能把新 run 的一并清掉
@@ -381,7 +382,7 @@ class NovelAgentService {
           stackTrace: stack.toString(),
           category: LogCategory.ai,
           tags: ['agent', 'service', 'resume_error', scenarioId]);
-      _controller.add(AgentErrorEvent(e.toString()));
+      _controller.add(AgentErrorEvent(llmErrorUserMessage(e)));
     } finally {
       // 身份守卫用途同 sendMessage（旧 run finally 不得清新 run 的条目）
       if (identical(_tokensByScenario[scenarioId], token)) {

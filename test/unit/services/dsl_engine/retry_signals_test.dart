@@ -149,4 +149,46 @@ void main() {
       expect(RetryErrorCategory.networkDisconnected.label, '网络断开');
     });
   });
+
+  group('llmErrorUserMessage', () {
+    test('RetryableHttpException 429 → 限流文案', () {
+      const e = RetryableHttpException(429, '', '');
+      expect(llmErrorUserMessage(e), 'AI 请求过于频繁，请稍等片刻再试');
+    });
+
+    test('RetryableHttpException 5xx → 服务端错误文案(带状态码)', () {
+      const e = RetryableHttpException(502, '', '');
+      expect(llmErrorUserMessage(e), contains('502'));
+      expect(llmErrorUserMessage(e), contains('AI 服务暂时不可用'));
+    });
+
+    test('RetryableHttpException 400 → 请求失败文案(带状态码,无裸 url)', () {
+      const e = RetryableHttpException(400, '', 'https://secret.example.com');
+      final msg = llmErrorUserMessage(e);
+      expect(msg, contains('400'));
+      expect(msg, isNot(contains('secret.example.com')), reason: '不得泄漏 url');
+      expect(msg, isNot(contains('RetryableHttpException')),
+          reason: '不得裸 toString');
+    });
+
+    test('网络类异常 → 不可用文案', () {
+      expect(
+        llmErrorUserMessage(const SocketException('x')),
+        contains('AI 服务暂时不可用'),
+      );
+      expect(
+        llmErrorUserMessage(TimeoutException('x', const Duration(seconds: 1))),
+        contains('AI 服务暂时不可用'),
+      );
+    });
+
+    test('QuotaExhaustedException → 保留原中文文案', () {
+      const e = QuotaExhaustedException('{}', '');
+      expect(llmErrorUserMessage(e), contains('免费额度已用完'));
+    });
+
+    test('未知异常 → 原样透传(保留诊断信息)', () {
+      expect(llmErrorUserMessage(StateError('boom')), contains('boom'));
+    });
+  });
 }

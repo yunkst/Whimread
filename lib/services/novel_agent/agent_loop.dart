@@ -701,6 +701,9 @@ class AgentLoop {
           final delayMs = _config.retryPolicy.computeDelayMs(
             attempt: roundRetryCount,
             retryAfterMs: retryAfterMs,
+            // 4xx（间歇网关 400 实测恢复窗口 10–25s）用秒级退避基准,
+            // 与传输层 withRetry 同一策略,避免两层节奏漂移。
+            statusCode: e is RetryableHttpException ? e.statusCode : null,
           );
           final delay = Duration(milliseconds: delayMs);
           LoggerService.instance.w(
@@ -761,7 +764,8 @@ class AgentLoop {
             stackTrace: stack.toString(),
             category: LogCategory.ai,
             tags: ['agent', 'loop', 'error', _scenario.id]);
-        emit(AgentErrorEvent(e.toString()));
+        // 终态文案:异常串直接渲染进聊天流,裸 toString() 对用户不可读
+        emit(AgentErrorEvent(llmErrorUserMessage(e)));
         RetrySignals.instance.clear();
         return;
       }

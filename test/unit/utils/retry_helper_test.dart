@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/utils/retry_helper.dart';
@@ -439,6 +440,53 @@ void main() {
       expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(50),
           reason: 'retryAfterMs=0 应回退指数退避而非立即重试');
       expect(sw.elapsedMilliseconds, lessThan(500));
+    });
+  });
+
+  group('4xx 秒级退避(2026-10-05 #15:网关间歇 400 恢复窗口 10–25s)', () {
+    test('computeDelayMs: statusCode=400 → 基准 2s(attempt 1,±25% jitter)', () {
+      final policy = RetryPolicy(random: Random(42));
+      for (var i = 0; i < 20; i++) {
+        final ms = policy.computeDelayMs(attempt: 1, statusCode: 400);
+        expect(ms, inInclusiveRange(1500, 2500), reason: '实际 $ms');
+      }
+    });
+
+    test('computeDelayMs: statusCode=500 → 维持 500ms 常规基准', () {
+      final policy = RetryPolicy(random: Random(42));
+      for (var i = 0; i < 20; i++) {
+        final ms = policy.computeDelayMs(attempt: 1, statusCode: 500);
+        expect(ms, inInclusiveRange(375, 625), reason: '实际 $ms');
+      }
+    });
+
+    test('computeDelayMs: 429/408 不走 4xx 秒级基准', () {
+      final policy = RetryPolicy(random: Random(42));
+      for (final code in [429, 408]) {
+        for (var i = 0; i < 20; i++) {
+          final ms = policy.computeDelayMs(attempt: 1, statusCode: code);
+          expect(ms, inInclusiveRange(375, 625), reason: 'code=$code 实际 $ms');
+        }
+      }
+    });
+
+    test('withRetry 端到端:400 首次重试等待 ≥1.5s', () async {
+      var calls = 0;
+      final sw = Stopwatch()..start();
+      try {
+        await withRetry(
+          () async {
+            calls++;
+            throw const RetryableHttpException(400, '', '');
+          },
+          config: const RetryConfig(maxAttempts: 2),
+          label: 'http400_backoff_test',
+        );
+      } catch (_) {}
+      sw.stop();
+      expect(calls, 2);
+      expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(1500),
+          reason: '400 应用 2s 秒级基准,实际 ${sw.elapsedMilliseconds}ms');
     });
   });
 
