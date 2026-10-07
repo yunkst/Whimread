@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../core/theme/app_typography.dart';
+import 'reader/paragraph_metrics.dart';
 
 class ParagraphWidget extends StatefulWidget {
   final String paragraph;
@@ -51,7 +52,13 @@ class ParagraphWidget extends StatefulWidget {
 
 class _ParagraphWidgetState extends State<ParagraphWidget>
     with SingleTickerProviderStateMixin {
-  late TextEditingController _controller;
+  /// 编辑控制器：懒创建——阅读模式从不编辑，旧实现每段都 new 一个
+  /// controller（滚动中每个新上屏段落一次分配 + 全文拷贝），纯浪费
+  TextEditingController? _controller;
+
+  TextEditingController get _editableController =>
+      _controller ??= TextEditingController(text: widget.paragraph);
+
   AnimationController? _fadeController;
   Timer? _typingTimer;
   String _displayedNew = '';
@@ -70,7 +77,6 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.paragraph);
     _maybeStartReveal();
   }
 
@@ -80,10 +86,11 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
     // 编辑器路径：程序更新不应覆盖用户输入（保留原有逻辑）
     if (widget.isEditMode) {
       if (oldWidget.paragraph != widget.paragraph &&
-          _controller.text != widget.paragraph) {
-        _controller.value = TextEditingValue(
+          _editableController.text != widget.paragraph) {
+        _editableController.value = TextEditingValue(
           text: widget.paragraph,
-          selection: TextSelection.collapsed(offset: widget.paragraph.length),
+          selection:
+              TextSelection.collapsed(offset: widget.paragraph.length),
         );
       }
       return;
@@ -156,7 +163,7 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
   void dispose() {
     _typingTimer?.cancel();
     _fadeController?.dispose();
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -184,7 +191,7 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
         borderRadius: BorderRadius.circular(8),
       ),
       child: TextField(
-        controller: _controller,
+        controller: _editableController,
         onChanged: widget.onContentChanged,
         decoration: const InputDecoration(
           border: InputBorder.none,
@@ -209,6 +216,27 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
     final reveal = widget.revealNewText;
     final isRevealing = reveal != null && _hasStartedReveal;
 
+    // 快路径：无揭示动画且无标注 → 单 Text 直出。Text.rich + WidgetSpan
+    // 嵌套只为承载揭示动画子文本与标注图标，却让每个段落多排一整遍
+    // 文本，是滚动/拼接帧的主要排版开销。结构与测高器
+    // （ChapterBlockMeasurer）严格同构：body 样式 + 容器 padding。
+    if (!isRevealing && !hasAnnotation) {
+      return GestureDetector(
+        onLongPress: widget.onLongPress,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            vertical: ParagraphMetrics.containerPaddingV,
+            horizontal: ParagraphMetrics.containerPaddingH,
+          ),
+          child: Text(
+            widget.paragraph.trim(),
+            style: ParagraphMetrics.bodyStyle(widget.fontSize)
+                .copyWith(color: effectiveColor),
+          ),
+        ),
+      );
+    }
+
     // 揭示动画期间：fadeOut<1 显示旧文本（淡出）；fadeOut≥1 显示新文本（打字机增长）。
     // 非揭示期间：直接显示 paragraph。
     Widget textChild;
@@ -221,18 +249,14 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
           if (fadeOut < 1.0) {
             return Text(
               _fadingOutOldText ?? widget.paragraph.trim(),
-              style: AppTypography.bodyProse.copyWith(
-                fontSize: widget.fontSize,
-                color: effectiveColor,
-              ),
+              style: ParagraphMetrics.bodyStyle(widget.fontSize)
+                  .copyWith(color: effectiveColor),
             );
           }
           return Text(
             _displayedNew,
-            style: AppTypography.bodyProse.copyWith(
-              fontSize: widget.fontSize,
-              color: effectiveColor,
-            ),
+            style: ParagraphMetrics.bodyStyle(widget.fontSize)
+                .copyWith(color: effectiveColor),
           );
         },
       );
@@ -241,18 +265,14 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
       // 极少发生的瞬态：fadeController 已 dispose 但仍在揭示态 → 直接显示打字机当前字符
       textChild = Text(
         _displayedNew,
-        style: AppTypography.bodyProse.copyWith(
-          fontSize: widget.fontSize,
-          color: effectiveColor,
-        ),
+        style: ParagraphMetrics.bodyStyle(widget.fontSize)
+            .copyWith(color: effectiveColor),
       );
     } else {
       textChild = Text(
         widget.paragraph.trim(),
-        style: AppTypography.bodyProse.copyWith(
-          fontSize: widget.fontSize,
-          color: effectiveColor,
-        ),
+        style: ParagraphMetrics.bodyStyle(widget.fontSize)
+            .copyWith(color: effectiveColor),
       );
     }
 
@@ -286,8 +306,10 @@ class _ParagraphWidgetState extends State<ParagraphWidget>
         GestureDetector(
           onLongPress: widget.onLongPress,
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(vertical: 6.0, horizontal: 8.0),
+            padding: const EdgeInsets.symmetric(
+              vertical: ParagraphMetrics.containerPaddingV,
+              horizontal: ParagraphMetrics.containerPaddingH,
+            ),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               color: hasAnnotation

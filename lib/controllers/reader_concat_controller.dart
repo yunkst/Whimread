@@ -3,7 +3,7 @@
 /// 自 reader_screen.dart 的 `_ReaderScreenState` 抽离，职责：
 /// - 章节块列表（[ReaderChapterBlock]）与块起点 GlobalKey 登记
 /// - 块几何缓存：实测块高 / 起点偏移（采样、推导、失效）
-/// - 滚到顶/底自动拼接前/后章节（冷却 / 方向互斥 / Offstage 测高 / 滚动补偿）
+/// - 滚到顶/底自动拼接前/后章节（冷却 / 方向互斥 / TextPainter 测高 / 同帧补偿）
 /// - 视口当前章检测 + 章节块窗口回收（长会话内存治理）
 /// - 章内阅读位置锚点：滚动采样 + 节流落库 + 重开恢复跳转
 ///
@@ -33,6 +33,7 @@ import '../services/logger_service.dart';
 import '../utils/reading_anchor_math.dart';
 import '../utils/reading_geometry.dart';
 import '../widgets/reader/reader_chapter_segment.dart';
+import '../widgets/reader/reader_scroll_controller.dart';
 
 /// 已拼接进阅读视图的章节内容块
 class ReaderChapterBlock {
@@ -55,7 +56,7 @@ enum ReaderConcatDirection { none, next, prev }
 class ReaderConcatController {
   // ========== 注入依赖 ==========
   final WidgetRef _ref;
-  final ScrollController _scrollController;
+  final ReaderScrollController _scrollController;
 
   /// 阅读页挂载判断（对应原 State.mounted）
   final bool Function() _isMounted;
@@ -82,9 +83,13 @@ class ReaderConcatController {
   /// 下一章拼接上屏（extent 增长）后的回调：接续自动滚动
   final VoidCallback _onAppendApplied;
 
+  /// 章节块纯计算测高（TextPainter）：阅读页注入——需要 BuildContext 取
+  /// 主题样式/屏宽/字体缩放，本控制器按约定不持 BuildContext。
+  final double Function(ReaderChapterBlock block) _measureBlockHeight;
+
   ReaderConcatController({
     required WidgetRef ref,
-    required ScrollController scrollController,
+    required ReaderScrollController scrollController,
     required bool Function() isMounted,
     required void Function(VoidCallback fn) setState,
     required Chapter Function() currentChapter,
@@ -93,6 +98,7 @@ class ReaderConcatController {
     required Future<String> Function(Chapter chapter) loadBlockContent,
     required void Function(Chapter chapter) onCurrentChapterDetected,
     required VoidCallback onAppendApplied,
+    required double Function(ReaderChapterBlock block) measureBlockHeight,
   })  : _ref = ref,
         _scrollController = scrollController,
         _isMounted = isMounted,
@@ -102,7 +108,8 @@ class ReaderConcatController {
         _novelUrl = novelUrl,
         _loadBlockContent = loadBlockContent,
         _onCurrentChapterDetected = onCurrentChapterDetected,
-        _onAppendApplied = onAppendApplied;
+        _onAppendApplied = onAppendApplied,
+        _measureBlockHeight = measureBlockHeight;
 
   // ========== 章节块与拼接状态（自 _ReaderScreenState 迁入） ==========
 
@@ -114,10 +121,6 @@ class ReaderConcatController {
 
   /// 拼接进行中的方向（两方向互斥，进行中不再触发新拼接）
   ReaderConcatDirection _concatDirection = ReaderConcatDirection.none;
-
-  /// 待插入的上一章块（先 Offstage 测高，再插入 + 滚动补偿）
-  ReaderChapterBlock? _pendingPrependBlock;
-  final GlobalKey _prependMeasureKey = GlobalKey();
 
   /// 拼接失败标记（正文区显示重试入口）
   bool _prevConcatFailed = false;
@@ -222,12 +225,6 @@ class ReaderConcatController {
   /// 拼接进行中的方向（正文区据其显示「正在加载下一章…」提示）
   ReaderConcatDirection get concatDirection => _concatDirection;
 
-  /// 待插入的上一章块（非 null 时正文区渲染 Offstage 测高层）
-  ReaderChapterBlock? get pendingPrependBlock => _pendingPrependBlock;
-
-  /// 上一章 Offstage 测量层 key
-  GlobalKey get prependMeasureKey => _prependMeasureKey;
-
   /// 拼接失败标记（正文区显示重试入口）
   bool get prevConcatFailed => _prevConcatFailed;
   bool get nextConcatFailed => _nextConcatFailed;
@@ -278,7 +275,6 @@ class ReaderConcatController {
     _knownBlockHeights.clear();
     _blockStartOffsets.clear();
     _concatDirection = ReaderConcatDirection.none;
-    _pendingPrependBlock = null;
     _prevConcatFailed = false;
     _nextConcatFailed = false;
     // 新章节是新的阅读会话：上滑意图归零，重新由真实上滑置位
@@ -373,7 +369,6 @@ class ReaderConcatController {
   /// 视口贴近顶部 → 拼接上一章；贴近底部 → 拼接下一章
   void _maybeTriggerConcat() {
     if (_concatDirection != ReaderConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
     // 恢复跳转是估算→校正的迭代程序滚动，任一方向的拼接都会移动内容、
     // 干扰收敛校正，恢复结束前一律不触发
     if (_isRestoringAnchor) return;
@@ -537,6 +532,12 @@ class ReaderConcatController {
           _knownBlockHeights.remove(b.chapter.url);
           _blockStartOffsets.remove(b.chapter.url);
         }
+        // 同帧补偿（与顶部拼接插入同机制，替代旧 postFrame jumpTo——
+        // 有单帧闪烁且会打断惯性滚动）：先平移滚动像素再重建
+        _scrollController.shiftBy(-removedHeight);
+        // 剩余块整体上移被回收区域的高度，起点偏移同步平移
+        // （新首块的采样起点恰为补偿量，平移后回到顶部 padding）
+        _blockStartOffsets.updateAll((_, off) => off - removedHeight);
         LoggerService.instance.d(
           '回收顶部章节块: ${_blocks.sublist(0, headTo).map((b) => b.chapter.title).join("、")} '
           '(补偿 ${removedHeight.round()}px)',
@@ -544,14 +545,6 @@ class ReaderConcatController {
           tags: ['reader', 'concat', 'trim'],
         );
         _blocks = _blocks.sublist(headTo);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_isMounted()) return;
-          // 剩余块整体上移被回收区域的高度，起点偏移同步平移
-          // （新首块的采样起点恰为补偿量，平移后回到顶部 padding）
-          _blockStartOffsets.updateAll((_, off) => off - removedHeight);
-          if (!_scrollController.hasClients) return;
-          _scrollController.jumpTo(_scrollController.offset - removedHeight);
-        });
       }
     }
 
@@ -564,7 +557,6 @@ class ReaderConcatController {
   /// 无需补偿。
   Future<void> appendNextChapter({bool force = false}) async {
     if (_concatDirection != ReaderConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
     if (!force && DateTime.now().difference(_lastConcatAt) < _concatCooldown) {
       return;
     }
@@ -622,13 +614,13 @@ class ReaderConcatController {
 
   /// 拼接上一章（滚动接近顶部触发）。
   ///
-  /// 顶部插入会推挤下方内容，直接重建会让视野跳变。这里分两步：
-  /// 1. 先把上一章段落放进与正文同宽同构的 Offstage 测量层，测出总高度；
-  /// 2. 插入章节块，布局完成后把滚动位置等量下移该高度——
-  ///    视野内的段落纹丝不动，实现真正"无限上滚"。
+  /// 顶部插入会推挤下方内容，直接重建会让视野跳变，须等量补偿：
+  /// TextPainter 纯计算测出插入高度后，先同帧平移滚动像素再重建——
+  /// 插入帧直接以正确 offset 布局绘制，视野内段落纹丝不动，且不打断
+  /// 进行中的惯性滚动。旧方案的 Offstage 全章测高（单帧数百毫秒）与
+  /// postFrame jumpTo（单帧闪烁 + 杀 fling）均已废弃。
   Future<void> prependPreviousChapter({bool force = false}) async {
     if (_concatDirection != ReaderConcatDirection.none) return;
-    if (_pendingPrependBlock != null) return;
     if (!force && DateTime.now().difference(_lastConcatAt) < _concatCooldown) {
       return;
     }
@@ -645,35 +637,29 @@ class ReaderConcatController {
     try {
       final content = await _loadBlockContent(prevChapter);
       if (epoch != _navigationEpoch || !_isMounted()) return; // 导航切换，放弃旧章拼接
-      _setState(() {
-        _pendingPrependBlock =
-            ReaderChapterBlock(chapter: prevChapter, rawContent: content);
-      });
-
-      final height = await _measurePendingPrependBlock();
+      final block = ReaderChapterBlock(chapter: prevChapter, rawContent: content);
+      // 纯计算测高：无 widget 挂载、不等帧，同步拿到补偿量
+      final height = _measureBlockHeight(block);
       if (!_isMounted()) return;
-      final block = _pendingPrependBlock;
-      if (block == null) return;
+      // 同帧补偿：先平移滚动像素（不发通知、不换 activity）再重建，
+      // 插入帧直接以新 offset 布局绘制
+      if (_scrollController.hasClients) {
+        _scrollController.shiftBy(height);
+      }
       _setState(() {
         _blocks = [block, ..._blocks];
-        _pendingPrependBlock = null;
         _prevConcatFailed = false;
         _lastConcatAt = DateTime.now();
       });
-      // 布局完成后补偿滚动位置（插入高度 = 视野下移量）；
-      // 已采样的起点偏移同步整体平移，新首块起点回到顶部 padding
-      final prependedUrl = block.chapter.url;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_isMounted()) return;
-        _blockStartOffsets.updateAll((_, off) => off + height);
-        _blockStartOffsets[prependedUrl] = _contentTopPadding;
-        if (!_scrollController.hasClients) return;
-        _scrollController.jumpTo(_scrollController.offset + height);
-      });
+      // 已采样起点偏移整体平移，新首块起点回到顶部 padding；
+      // 块高缓存以测高值播种，当前章检测/回收补偿立即可用
+      _blockStartOffsets.updateAll((_, off) => off + height);
+      _blockStartOffsets[prevChapter.url] = _contentTopPadding;
+      _knownBlockHeights[prevChapter.url] = height;
       // 拼接后窗口外章节块可回收
       trimDistantBlocks();
       LoggerService.instance.i(
-        '已拼接上一章: ${prevChapter.title} (补偿 ${height.round()}px)',
+        '已拼接上一章: ${prevChapter.title} (TextPainter 测高补偿 ${height.round()}px)',
         category: LogCategory.ui,
         tags: ['reader', 'concat', 'prepend'],
       );
@@ -686,33 +672,12 @@ class ReaderConcatController {
       );
       _lastConcatAt = DateTime.now();
       if (_isMounted()) {
-        _setState(() {
-          _pendingPrependBlock = null;
-          _prevConcatFailed = true;
-        });
+        _setState(() => _prevConcatFailed = true);
       }
     } finally {
       _concatDirection = ReaderConcatDirection.none;
       if (_isMounted()) _setState(() {});
     }
-  }
-
-  /// 测量 Offstage 测量层中待插入上一章的总高度
-  Future<double> _measurePendingPrependBlock() {
-    final completer = Completer<double>();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_isMounted()) {
-        completer.completeError(Exception('阅读页已销毁，测量中止'));
-        return;
-      }
-      final renderBox = _prependMeasureKey.currentContext?.findRenderObject();
-      if (renderBox is RenderBox && renderBox.hasSize) {
-        completer.complete(renderBox.size.height);
-      } else {
-        completer.completeError(Exception('上一章高度测量失败'));
-      }
-    });
-    return completer.future;
   }
 
   // ========== 章内阅读位置锚点（采样保存 + 重开恢复） ==========

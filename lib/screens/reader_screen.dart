@@ -31,8 +31,10 @@ import '../models/chapter.dart';
 import '../models/search_result.dart';
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../mixins/reader/auto_scroll_mixin.dart';
-import '../widgets/paragraph_widget.dart'; // 拼接章节的 Offstage 高度测量
 import '../widgets/reader/reader_chapter_segment.dart'; // 正文分段/扁平布局
+import '../widgets/reader/paragraph_metrics.dart'; // 段落排版度量（测高取宽）
+import '../widgets/reader/chapter_block_measurer.dart'; // 拼接章节 TextPainter 测高
+import '../widgets/reader/reader_scroll_controller.dart'; // 同帧滚动补偿
 import '../widgets/reader_settings_dialog.dart'; // 阅读设置合并对话框（字体大小/文字亮度/滚动速度）
 import '../widgets/theme_mode_dialog.dart'; // 主题模式选择对话框（亮色/暗色/跟随系统）
 import '../widgets/reader_action_buttons.dart'; // 新增导入
@@ -87,7 +89,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     with
         TickerProviderStateMixin,
         AutoScrollMixin {
-  final ScrollController _scrollController = ScrollController();
+  final ReaderScrollController _scrollController = ReaderScrollController();
 
   // ========== 新增：ReaderContentController ==========
   late ReaderContentController _contentController;
@@ -200,6 +202,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       loadBlockContent: _loadBlockContent,
       onCurrentChapterDetected: _setCurrentChapter,
       onAppendApplied: resumeAutoScrollIfIntended,
+      measureBlockHeight: _measureConcatBlockHeight,
     );
 
     // 初始化自动滚动控制器
@@ -1284,9 +1287,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         ? MediaQuery.paddingOf(context).bottom + 88
         : 88.0;
 
-    // 拼接控制器状态的只读快照（帧内取一次，供下方覆盖层/测高层使用）
-    final pendingPrepend = _concat.pendingPrependBlock;
-
     return Stack(
       children: [
         content,
@@ -1328,41 +1328,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                 setState(() => _concat.clearNextConcatFailure());
                 _concat.appendNextChapter(force: true);
               }),
-            ),
-          ),
-        // 上一章的 Offstage 测量层（与正文同宽同构，测高后插入 + 滚动补偿）
-        if (pendingPrepend != null)
-          Positioned(
-            left: 0,
-            top: 0,
-            width: MediaQuery.sizeOf(context).width - 32,
-            child: Offstage(
-              child: SizedBox(
-                key: _concat.prependMeasureKey,
-                width: MediaQuery.sizeOf(context).width - 32,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 与正文列表同构：分隔线也计入插入高度
-                    ReaderChapterDivider(
-                      title: pendingPrepend.chapter.title,
-                    ),
-                    for (var i = 0; i < pendingPrepend.paragraphs.length; i++)
-                      ParagraphWidget(
-                        paragraph: pendingPrepend.paragraphs[i],
-                        index: i,
-                        fontSize: _fontSize,
-                        textBrightness: _textBrightness,
-                        isEditMode: false,
-                        hasAnnotation: _annotationsByChapter[
-                                pendingPrepend.chapter.url]
-                            ?.containsKey(i) ??
-                            false,
-                      ),
-                  ],
-                ),
-              ),
             ),
           ),
         // 底部章节切换栏（悬浮覆盖层，随沉浸显隐淡入淡出，不推动正文）
@@ -1545,6 +1510,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     } finally {
       preloadService.resume();
     }
+  }
+
+  /// 拼接章节块测高（TextPainter 纯计算，注入给拼接控制器）。
+  ///
+  /// 取代旧 Offstage 测量层：不再为测高挂载整章段落组件。
+  /// 内容宽与 ListView 一致（屏宽 - 左右 16 padding）。
+  double _measureConcatBlockHeight(ReaderChapterBlock block) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    return ChapterBlockMeasurer.blockHeight(
+      context: context,
+      dividerTitle: block.chapter.title,
+      paragraphs: block.paragraphs,
+      fontSize: _fontSize,
+      contentWidth: ParagraphMetrics.listContentWidth(screenWidth),
+    );
   }
 
   /// 组装正文分段（阅读模式 = 全部章节块；编辑模式 = 仅当前章）
