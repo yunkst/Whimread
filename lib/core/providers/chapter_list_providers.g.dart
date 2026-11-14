@@ -184,7 +184,7 @@ class _PreloadProgressProviderElement
   Novel get novel => (origin as PreloadProgressProvider).novel;
 }
 
-String _$chapterListHash() => r'81f7220cbc7146da040c5a4ffa83fdbce127a857';
+String _$chapterListHash() => r'4152d644c603e69f035558eb531eadfe28554d2f';
 
 abstract class _$ChapterList
     extends BuildlessAutoDisposeNotifier<ChapterListState> {

@@ -76,18 +76,20 @@ class BookshelfRepository extends BaseRepository
 
     final db = await database;
 
+    // 番外行（isSideStory=1）不入书架：三个分类统一排除（v58 番外撰写）
     final List<Map<String, dynamic>> maps;
     switch (kind) {
       case BookshelfKind.all:
         maps = await db.query(
           'bookshelf',
+          where: 'isSideStory = 0',
           orderBy: 'lastReadTime DESC, addedAt DESC',
         );
         break;
       case BookshelfKind.original:
         maps = await db.query(
           'bookshelf',
-          where: 'url LIKE ?',
+          where: 'url LIKE ? AND isSideStory = 0',
           whereArgs: ['$_originalPrefix%'],
           orderBy: 'lastReadTime DESC, addedAt DESC',
         );
@@ -95,7 +97,7 @@ class BookshelfRepository extends BaseRepository
       case BookshelfKind.online:
         maps = await db.query(
           'bookshelf',
-          where: _onlineWhere,
+          where: '($_onlineWhere) AND isSideStory = 0',
           whereArgs: ['$_originalPrefix%'],
           orderBy: 'lastReadTime DESC, addedAt DESC',
         );
@@ -118,7 +120,7 @@ class BookshelfRepository extends BaseRepository
     final db = await database;
     final maps = await db.query(
       'bookshelf',
-      where: _onlineWhere,
+      where: '($_onlineWhere) AND isSideStory = 0',
       whereArgs: ['$_originalPrefix%'],
       orderBy: 'lastReadTime DESC, addedAt DESC',
     );
@@ -140,7 +142,7 @@ class BookshelfRepository extends BaseRepository
     final maps = await db.query(
       'bookshelf',
       columns: ['url'],
-      where: _onlineWhere,
+      where: '($_onlineWhere) AND isSideStory = 0',
       whereArgs: ['$_originalPrefix%'],
       orderBy: 'lastReadTime DESC, addedAt DESC',
     );

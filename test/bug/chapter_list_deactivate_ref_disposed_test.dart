@@ -26,6 +26,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:novel_app/core/providers/chapter_list_providers.dart';
 import 'package:novel_app/core/providers/reading_context_providers.dart';
+import 'package:novel_app/core/providers/side_story_providers.dart';
 import 'package:novel_app/models/novel.dart';
 import 'package:novel_app/screens/chapter_list_screen_riverpod.dart';
 
@@ -72,6 +73,12 @@ void main() {
         ProviderScope(
           overrides: [
             chapterListProvider(novel).overrideWith(() => _FakeChapterList()),
+            // v58 起章节列表页 build 会 watch sideStoryCountsProvider（番外
+            // 徽标）——必须钉死：真实实现走 DB，在 testWidgets 的 fake_async
+            // 区等不到 ffi isolate 的真实事件（pumpAndSettle 卡死）；报错
+            // 路径又会经 LoggerService 安排持久化 Timer，留下 pending Timer。
+            sideStoryCountsProvider(novel.url)
+                .overrideWith((ref) async => const <String, int>{}),
           ],
           child: child,
         ),

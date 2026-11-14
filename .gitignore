@@ -90,3 +90,21 @@ tool/app_resources/dist/
 
 # 应用图标设计候选稿（评审中，暂不入库）
 assets/icon/
+
+# ===== 本地工作区遗留（不入库）=====
+# 2026-09 仓库重构后旧工程目录残留（含 build 产物；已确认可删后整目录移除）
+novel_app/
+# 工具会话产物
+.playwright-mcp/
+.superpowers/
+_preflight_test.txt
+# OCR 模型文件（按 ocr_model_manifest.json 在构建/运行时获取，体积大不入库）
+inference.onnx
+ppocr_keys_v1.txt
+ppocrv6_dict.txt
+# 本地设计/宣传/文章草稿
+app_icons/
+design_preview/
+promo_covers/
+shelf-preview
+zhihu_article.md

@@ -8,6 +8,7 @@ import '../../models/chapter.dart';
 ///
 /// 职责：
 /// - 显示章节标题和编辑模式状态
+/// - 显示本章番外角标（当前章有番外时）并提供进入入口
 /// - 提供编辑模式切换
 /// - 更多功能菜单
 ///
@@ -21,6 +22,14 @@ class ReaderAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool isEditMode;
   final VoidCallback onToggleEditMode;
   final VoidCallback onSaveAndExitEditMode;
+
+  /// 当前章挂载的番外数量（null 或 0 = 不显示角标）。
+  /// 阅读页按 [_currentChapter.url]（动态检测值）传入，无限滚动跨章时自动更新。
+  final int? sideStoryCount;
+
+  /// 点击番外角标 → 打开本章番外列表
+  final VoidCallback? onSideStoryTap;
+
   final Function(String) onMenuAction;
 
   const ReaderAppBar({
@@ -31,6 +40,8 @@ class ReaderAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.isEditMode,
     required this.onToggleEditMode,
     required this.onSaveAndExitEditMode,
+    this.sideStoryCount,
+    this.onSideStoryTap,
     required this.onMenuAction,
   });
 
@@ -47,6 +58,43 @@ class ReaderAppBar extends StatelessWidget implements PreferredSizeWidget {
               maxLines: 2,
             ),
           ),
+          // 本章番外角标（当前章有番外时显示，点击进入本章番外列表）
+          if (!isEditMode && sideStoryCount != null && sideStoryCount! > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: InkWell(
+                onTap: onSideStoryTap,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: context.appColors.agentAccent.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: context.appColors.agentAccent.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bookmark,
+                          size: 12, color: context.appColors.agentAccent),
+                      const SizedBox(width: 3),
+                      Text(
+                        '番外 $sideStoryCount',
+                        style: AppTypography.metaItalic.copyWith(
+                          fontSize: 12,
+                          fontFamily: AppTypography.sans,
+                          fontStyle: FontStyle.normal,
+                          color: context.appColors.agentAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           // 编辑模式状态指示器
           if (isEditMode)
             Container(
@@ -144,6 +192,17 @@ class ReaderAppBar extends StatelessWidget implements PreferredSizeWidget {
                   Icon(Icons.tune, size: 18),
                   SizedBox(width: 12),
                   Text('阅读设置'),
+                ],
+              ),
+            ),
+            // 本章番外（任何时候可点：有番外进列表，没有进空态引导创建）
+            const PopupMenuItem(
+              value: 'side_story',
+              child: Row(
+                children: [
+                  Icon(Icons.auto_stories, size: 18),
+                  SizedBox(width: 12),
+                  Text('本章番外'),
                 ],
               ),
             ),

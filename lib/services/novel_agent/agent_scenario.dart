@@ -68,6 +68,13 @@ class AgentScenarioContext {
   /// 非 annotation_rewrite 场景忽略此字段（保持 null）。
   final AnnotationRewriteTarget? rewriteTarget;
 
+  /// 番外创作的目标绑定（仅 side_story 场景使用）
+  ///
+  /// 携带宿主小说/锚点章 url、标题与用户需求。ScenarioSession 在启动番外
+  /// 创作前将其塞入 context，factory 据此构造 `SideStoryScenario`。
+  /// 非 side_story 场景忽略此字段（保持 null）。
+  final SideStoryTarget? sideStoryTarget;
+
   const AgentScenarioContext({
     this.scenarioId,
     this.readingContext,
@@ -77,8 +84,42 @@ class AgentScenarioContext {
     this.currentNovelId,
     this.currentNovelTitle,
     this.rewriteTarget,
+    this.sideStoryTarget,
     this.textGameId,
     this.chatSessionId,
+  });
+}
+
+/// 番外创作场景的目标绑定
+///
+/// 由创建番外弹层在启动创作时构造，注入 [AgentScenarioContext.sideStoryTarget]。
+/// SideStoryScenario 用它构造 system prompt + 锁定工具的宿主上下文。
+class SideStoryTarget {
+  /// 宿主小说 URL（主线或父番外——父番外即「番外套番外」）
+  final String anchorNovelUrl;
+
+  /// 宿主小说标题（system prompt 中展示给 LLM）
+  final String anchorNovelTitle;
+
+  /// 锚点章节 URL（番外挂载点；read_chapter_content 只读这一章）
+  final String anchorChapterUrl;
+
+  /// 锚点章节标题（system prompt 中展示）
+  final String anchorChapterTitle;
+
+  /// 用户对番外的需求描述（来自创建弹层，唯一必填输入）
+  final String requirement;
+
+  /// 期望章节数（null = 由 AI 决定）
+  final int? desiredChapterCount;
+
+  const SideStoryTarget({
+    required this.anchorNovelUrl,
+    required this.anchorNovelTitle,
+    required this.anchorChapterUrl,
+    required this.anchorChapterTitle,
+    required this.requirement,
+    this.desiredChapterCount,
   });
 }
 
@@ -509,6 +550,12 @@ abstract final class ScenarioIds {
   /// 工具面被锁死（仅 read/update_chapter_content/list_chapters，且
   /// update_chapter_content 物理上只能改当前章节），改写过程进入对话窗口。
   static const annotationRewrite = 'annotation_rewrite';
+
+  /// 番外创作 — 从创建番外弹层发起：AI 通读锚点章正文/人物卡/写作技巧，
+  /// 先 create_side_story 建番外（不入书架的 bookshelf 行），再逐章
+  /// create_chapter 生成正文。工具面锁定宿主上下文，不在通用聊天场景
+  /// 菜单出现（showInChatMenu=false）。
+  static const sideStory = 'side_story';
 
   /// 文字游戏 — 一个游戏对应本场景下的一个 chat_session（text_games 行关联）。
   /// 剧情内容经 narrate/speak 工具输出（参数流式打字机），present_choices

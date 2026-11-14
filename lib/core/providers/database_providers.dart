@@ -8,6 +8,7 @@ import '../../repositories/chapter_repository.dart';
 import '../../repositories/chapter_version_repository.dart';
 import '../../repositories/outline_repository.dart';
 import '../../repositories/bookshelf_repository.dart';
+import '../../repositories/side_story_repository.dart';
 import '../../repositories/prompt_tag_category_repository.dart';
 import '../../repositories/prompt_tag_repository.dart';
 import '../../repositories/site_script_repository.dart';
@@ -153,6 +154,17 @@ IPromptTagRepository promptTagRepository(Ref ref) {
 IBookshelfRepository bookshelfRepository(Ref ref) {
   final dbConnection = ref.watch(databaseConnectionProvider);
   return BookshelfRepository(dbConnection: dbConnection);
+}
+
+/// SideStoryRepository Provider
+///
+/// 番外行的读写与级联删除；写操作须经 [SideStoryMutationNotifier] 收口
+/// （bump sideStorySignalProvider 驱动徽标/列表刷新），普通调用方只应
+/// 使用其读方法。
+@riverpod
+SideStoryRepository sideStoryRepository(Ref ref) {
+  final dbConnection = ref.watch(databaseConnectionProvider);
+  return SideStoryRepository(dbConnection: dbConnection);
 }
 
 /// SiteScriptRepository Provider

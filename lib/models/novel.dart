@@ -32,6 +32,19 @@ class Novel {
   /// 阅读进度，由调用方基于 lastReadTime 等派生，非表列
   final double? readingProgress;
 
+  /// 是否为番外行（v58）。番外 = 一条「不入书架」的 bookshelf 行：
+  /// 书架/搜索/分类查询统一排除本标记，只能经章节徽标/阅读器角标/
+  /// 番外列表页进入。章节列表与阅读器对番外完全复用。
+  final bool isSideStory;
+
+  /// 番外挂载的小说 URL（宿主小说，可以是主线也可以是另一部番外——
+  /// 后者即「番外套番外」）。非番外行为 null。
+  final String? anchorNovelUrl;
+
+  /// 番外挂载的具体章节 URL（宿主章）。宿主章被删除后本引用保留，
+  /// 展示层回退为「原章节已移除」。非番外行为 null。
+  final String? anchorChapterUrl;
+
   Novel({
     this.id,
     required this.title,
@@ -44,6 +57,9 @@ class Novel {
     this.coverMediaId,
     this.lastReadChapterIndex,
     this.readingProgress,
+    this.isSideStory = false,
+    this.anchorNovelUrl,
+    this.anchorChapterUrl,
   });
 
   /// 序列化为 bookshelf 表行。
@@ -61,6 +77,9 @@ class Novel {
       'description': description,
       'backgroundSetting': backgroundSetting,
       'coverMediaId': coverMediaId,
+      'isSideStory': isSideStory ? 1 : 0,
+      'anchorNovelUrl': anchorNovelUrl,
+      'anchorChapterUrl': anchorChapterUrl,
     };
   }
 
@@ -82,6 +101,10 @@ class Novel {
       coverMediaId: map['coverMediaId'] as String?,
       lastReadChapterIndex: map['lastReadChapter'] as int?,
       readingProgress: lastReadTime?.toDouble(),
+      // v58 前/非番外行两列均为 null → false；兼容缺列的 Map（测试夹具）。
+      isSideStory: (map['isSideStory'] as int? ?? 0) == 1,
+      anchorNovelUrl: map['anchorNovelUrl'] as String?,
+      anchorChapterUrl: map['anchorChapterUrl'] as String?,
     );
   }
 
@@ -97,6 +120,9 @@ class Novel {
     String? coverMediaId,
     int? lastReadChapterIndex,
     double? readingProgress,
+    bool? isSideStory,
+    String? anchorNovelUrl,
+    String? anchorChapterUrl,
   }) {
     return Novel(
       id: id ?? this.id,
@@ -111,6 +137,9 @@ class Novel {
       lastReadChapterIndex:
           lastReadChapterIndex ?? this.lastReadChapterIndex,
       readingProgress: readingProgress ?? this.readingProgress,
+      isSideStory: isSideStory ?? this.isSideStory,
+      anchorNovelUrl: anchorNovelUrl ?? this.anchorNovelUrl,
+      anchorChapterUrl: anchorChapterUrl ?? this.anchorChapterUrl,
     );
   }
 }

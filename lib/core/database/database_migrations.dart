@@ -11,7 +11,7 @@ import '../../services/logger_service.dart';
 /// 设计原则：单一数据源，避免迁移逻辑重复维护
 class DatabaseMigrations {
   /// 当前数据库版本
-  static const int currentVersion = 57;
+  static const int currentVersion = 58;
 
   /// ========== v1 基础表创建 ==========
   /// 新安装时调用，与 _onUpgrade(1) 共同构建完整数据库
@@ -1166,6 +1166,23 @@ class DatabaseMigrations {
             "UPDATE media_items SET source = 'ai_generated' "
             "WHERE genParams IS NOT NULL AND source = 'local_upload'");
         _log('迁移 v56 → v57: 按 genParams 把 AI 生成图归回 ai_generated 来源');
+        break;
+
+      // ========== 版本 58：番外撰写（bookshelf 行承载番外元数据） ==========
+      case 58:
+        // 番外 = 一条「不入书架」的 bookshelf 行（isSideStory=1，URL 为
+        // custom://sidestory/<ts>），其章节就是 novel_chapters/chapter_cache
+        // 里该番外 novelUrl 下的普通章节行——章节列表页/阅读器/AI 写章工具
+        // 全部直接复用，且番外章节的重排/删除与主线天然隔离（各自 novelUrl）。
+        // anchorNovelUrl/anchorChapterUrl 指向宿主章节，支持番外套番外
+        // （anchorNovelUrl 可以是另一个番外的 URL）。书架/搜索/分类查询
+        // 统一排除 isSideStory=1 的行。
+        await _addColumnIfNotExists(
+            db, 'bookshelf', 'isSideStory', 'INTEGER DEFAULT 0');
+        await _addColumnIfNotExists(db, 'bookshelf', 'anchorNovelUrl', 'TEXT');
+        await _addColumnIfNotExists(db, 'bookshelf', 'anchorChapterUrl', 'TEXT');
+        _log('迁移 v57 → v58: bookshelf 加 isSideStory/anchorNovelUrl/'
+            'anchorChapterUrl 三列（番外撰写）');
         break;
     }
   }

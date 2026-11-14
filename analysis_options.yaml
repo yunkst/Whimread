@@ -26,6 +26,8 @@ analyzer:
     - "**/*.freezed.dart"
     # 排除工具脚本目录
     - tool/**
+    # 旧工程残留目录（2026-09 重构后已从仓库移除，仅本地磁盘遗留）
+    - novel_app/**
 
 linter:
   # The lint rules applied to this project can be customized in the

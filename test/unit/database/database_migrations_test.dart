@@ -812,6 +812,10 @@ void main() {
 
       test('存量库升级（无 genParams 列）→ 补列且旧数据保留', () async {
         final db = await createEmptyDb();
+        // v58+ 的迁移链会补 bookshelf 的番外列（v58 case），存量库夹具
+        // 需含 v1 基础表；createV1Tables 不含 media_items（v51 才建），
+        // 与下方手搓的 v55 期 media_items DDL 不冲突。
+        await DatabaseMigrations.createV1Tables(db);
         await db.execute('''
         CREATE TABLE media_items (
           mediaId TEXT PRIMARY KEY,

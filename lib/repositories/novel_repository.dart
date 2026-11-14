@@ -168,7 +168,7 @@ class NovelRepository extends BaseRepository
     );
   }
 
-  /// 获取所有小说
+  /// 获取所有小说（书架可见的主线小说；番外行 isSideStory=1 不在列）
   @override
   Future<List<Novel>> getNovels() async {
     if (isWebPlatform) {
@@ -178,6 +178,7 @@ class NovelRepository extends BaseRepository
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'novels',
+      where: 'isSideStory = 0',
       orderBy: 'lastReadTime DESC, addedAt DESC',
     );
 

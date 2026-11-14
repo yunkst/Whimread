@@ -4,6 +4,8 @@ import '../models/novel.dart';
 import '../models/chapter.dart';
 import '../core/providers/chapter_list_providers.dart';
 import '../core/providers/chapter_mutation_provider.dart';
+import '../core/providers/database_providers.dart';
+import '../core/providers/side_story_providers.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_typography.dart';
 import '../widgets/agent_chat/agent_floating_button.dart';
@@ -22,6 +24,7 @@ import 'background_setting_screen.dart';
 import 'character_list_screen.dart';
 import 'outline_screen.dart';
 import 'insert_chapter_screen.dart';
+import 'side_story_list_screen.dart';
 import '../core/providers/reading_context_providers.dart';
 
 /// 章节列表页面 - Riverpod版本
@@ -48,6 +51,12 @@ class _ChapterListScreenRiverpodState
   // 标记是否已经自动滚动到上次阅读位置
   bool _hasScrolledToLastRead = false;
 
+  // 番外模式的锚点章标题（AppBar 副标题用；锚点已删除/解析失败为 null）
+  String? _anchorChapterTitle;
+
+  // 各章节挂载的番外数量（章节徽标数据源；build 中由 provider 刷新）
+  Map<String, int> _sideStoryCounts = const {};
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +67,8 @@ class _ChapterListScreenRiverpodState
         novelUrl: widget.novel.url,
       );
     });
+    // 番外模式：解析锚点章标题（一次性 DB 读，custom:// 宿主不触网）
+    _resolveAnchorChapterTitle();
   }
 
   @override
@@ -118,6 +129,11 @@ class _ChapterListScreenRiverpodState
     final state = ref.watch(chapterListProvider(widget.novel));
     final notifier = ref.read(chapterListProvider(widget.novel).notifier);
 
+    // 本章番外徽标数据：番外创建/删除后 sideStorySignalProvider bump 自动重查
+    final sideStoryCountsAsync =
+        ref.watch(sideStoryCountsProvider(widget.novel.url));
+    _sideStoryCounts = sideStoryCountsAsync.valueOrNull ?? const {};
+
     // 首次加载完成时，自动滚动到上次阅读位置（通过 ref.listen 副作用驱动，
     // 不在 build 体内直接写 _hasScrolledToLastRead + 调度 postFrameCallback）
     ref.listen(chapterListProvider(widget.novel), (previous, next) {
@@ -136,7 +152,13 @@ class _ChapterListScreenRiverpodState
       child: Scaffold(
         appBar: LibraryAppBar(
           title: widget.novel.title,
+          // 番外模式：副标题标注挂载点 + 品牌方块换「番」字（与主线目录区分）
+          subtitle: widget.novel.isSideStory
+              ? '番外 · 挂载于「${_anchorChapterTitle ?? '原章节已移除'}」'
+              : null,
+          brandMark: widget.novel.isSideStory ? '番' : '卷',
           actions: [
+            if (widget.novel.isSideStory) _buildBackToMainButton(),
             _buildReorderButton(state, notifier),
             _buildSearchButton(),
             _buildPopupMenu(state, notifier, context),
@@ -200,6 +222,63 @@ class _ChapterListScreenRiverpodState
         ],
       ),
     );
+  }
+
+  /// 构建番外模式的「返回主线」按钮
+  Widget _buildBackToMainButton() {
+    return IconButton(
+      icon: const Icon(Icons.home_outlined),
+      tooltip: '返回主线目录',
+      onPressed: _goBackToMainNovel,
+    );
+  }
+
+  /// 番外目录页跳回宿主小说的目录页
+  Future<void> _goBackToMainNovel() async {
+    final anchorUrl = widget.novel.anchorNovelUrl;
+    if (anchorUrl == null) return;
+    try {
+      final mainNovel =
+          await ref.read(novelRepositoryProvider).getNovelByUrl(anchorUrl);
+      if (!mounted) return;
+      if (mainNovel == null) {
+        ToastUtils.show('宿主小说不存在（可能已删除）');
+        return;
+      }
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChapterListScreenRiverpod(novel: mainNovel),
+        ),
+      );
+    } catch (e) {
+      ToastUtils.show('返回主线失败: $e');
+    }
+  }
+
+  /// 解析番外的锚点章标题（AppBar 副标题用）；宿主章已删除时保持 null
+  Future<void> _resolveAnchorChapterTitle() async {
+    final anchorNovelUrl = widget.novel.anchorNovelUrl;
+    final anchorChapterUrl = widget.novel.anchorChapterUrl;
+    if (!widget.novel.isSideStory ||
+        anchorNovelUrl == null ||
+        anchorChapterUrl == null) {
+      return;
+    }
+    try {
+      final chapters = await ref
+          .read(chapterRepositoryProvider)
+          .getCachedNovelChapters(anchorNovelUrl);
+      for (final c in chapters) {
+        if (c.url == anchorChapterUrl) {
+          if (mounted) setState(() => _anchorChapterTitle = c.title);
+          return;
+        }
+      }
+      // 未命中 = 锚点章已被删除；保持 null（AppBar 显示「原章节已移除」）
+    } catch (_) {
+      // 解析失败不阻断页面，副标题回退为「原章节已移除」
+    }
   }
 
   /// 构建重排按钮
@@ -292,6 +371,16 @@ class _ChapterListScreenRiverpodState
               ),
             );
             break;
+          case 'side_stories':
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => SideStoryListScreen(
+                  novel: widget.novel,
+                ),
+              ),
+            );
+            break;
         }
       },
       itemBuilder: (context) {
@@ -359,6 +448,16 @@ class _ChapterListScreenRiverpodState
               ],
             ),
           ),
+          const PopupMenuItem(
+            value: 'side_stories',
+            child: Row(
+              children: [
+                Icon(Icons.auto_stories),
+                SizedBox(width: 8),
+                Text('番外列表'),
+              ],
+            ),
+          ),
         ];
       },
     );
@@ -385,6 +484,8 @@ class _ChapterListScreenRiverpodState
           isUserChapter: isUserChapter,
           isCached: chapter.isCached,
           isRead: chapter.isRead,
+          sideStoryCount: _sideStoryCounts[chapter.url] ?? 0,
+          onSideStoryTap: () => _openChapterSideStories(chapter),
           onTap: () => _navigateToReader(chapter, state),
           onLongPress: () => ref
               .read(chapterListProvider(widget.novel).notifier)
@@ -635,6 +736,20 @@ class _ChapterListScreenRiverpodState
       // 滚动到上次阅读位置
       _scrollToLastReadChapter();
     }
+  }
+
+  /// 打开某章的番外列表（章节徽标入口；点击章节行其余区域仍是进入阅读）
+  Future<void> _openChapterSideStories(Chapter chapter) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SideStoryListScreen(
+          novel: widget.novel,
+          anchorChapterUrl: chapter.url,
+          anchorChapterTitle: chapter.title,
+        ),
+      ),
+    );
   }
 
   /// 滚动到上次阅读章节

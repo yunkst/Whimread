@@ -9,6 +9,7 @@ import 'package:novel_app/core/providers/scenario_sessions_provider.dart';
 import 'package:novel_app/models/agent_chat_message.dart';
 import 'package:novel_app/services/novel_agent/agent_event.dart';
 import 'chapter_rewrite_entry_card.dart';
+import 'side_story_entry_card.dart';
 import 'ask_user_card.dart';
 import 'media_gallery_card.dart';
 import 'text_game_entry_card.dart';
@@ -498,6 +499,14 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: TextGameEntryCard(data: _textGameEntry!),
             ),
+          // create_side_story 成功时，渲染番外目录跳转入口
+          if (call.name == 'create_side_story' &&
+              call.status == AgentToolStatus.completed &&
+              _sideStoryEntry != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: SideStoryEntryCard(data: _sideStoryEntry!),
+            ),
         ],
       ),
     );
@@ -506,6 +515,10 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
   /// 解析工具结果中的重写成功信息（缓存，避免每次 build 重复解析）
   ChapterRewriteEntryData? get _rewriteEntry =>
       parseRewriteEntry(widget.call.result);
+
+  /// 解析工具结果中的番外入口数据（create_side_story 成功时非空）
+  SideStoryEntryData? get _sideStoryEntry =>
+      parseSideStoryEntry(widget.call.result);
 
   /// 解析工具结果中的媒体画廊数据（图片或视频，缓存）
   MediaGalleryData? get _mediaGallery =>

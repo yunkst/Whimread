@@ -304,5 +304,30 @@ final bookshelfRepositoryProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BookshelfRepositoryRef = AutoDisposeProviderRef<IBookshelfRepository>;
+String _$sideStoryRepositoryHash() =>
+    r'a25e6259801eb055fe05b26d634cd9eff0773cea';
+
+/// SideStoryRepository Provider
+///
+/// 番外行的读写与级联删除；写操作须经 [SideStoryMutationNotifier] 收口
+/// （bump sideStorySignalProvider 驱动徽标/列表刷新），普通调用方只应
+/// 使用其读方法。
+///
+/// Copied from [sideStoryRepository].
+@ProviderFor(sideStoryRepository)
+final sideStoryRepositoryProvider =
+    AutoDisposeProvider<SideStoryRepository>.internal(
+  sideStoryRepository,
+  name: r'sideStoryRepositoryProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$sideStoryRepositoryHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef SideStoryRepositoryRef = AutoDisposeProviderRef<SideStoryRepository>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

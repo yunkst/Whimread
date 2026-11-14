@@ -4,13 +4,19 @@ import 'chapter_title.dart';
 import 'chapter_badge.dart';
 
 /// 章节列表项组件（正常模式）
-/// 显示章节标题、缓存状态、插入和删除操作按钮
+/// 显示章节标题、缓存状态、番外徽标、插入和删除操作按钮
 class ChapterListItem extends StatelessWidget {
   final Chapter chapter;
   final bool isLastRead;
   final bool isUserChapter;
   final bool isCached; // 改为直接接收状态
   final bool isRead; // 是否已读
+
+  /// 该章挂载的番外数量（0 = 不显示徽标）
+  final int sideStoryCount;
+
+  /// 点击番外徽标 → 打开本章番外列表（不进入阅读）
+  final VoidCallback? onSideStoryTap;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final VoidCallback onInsert;
@@ -22,6 +28,8 @@ class ChapterListItem extends StatelessWidget {
     required this.isUserChapter,
     required this.isCached,
     this.isRead = false,
+    this.sideStoryCount = 0,
+    this.onSideStoryTap,
     required this.onTap,
     required this.onLongPress,
     required this.onInsert,
@@ -57,6 +65,46 @@ class ChapterListItem extends StatelessWidget {
                 isRead: isRead,
               ),
             ),
+            // 本章番外徽标（有番外才显示；点击进本章番外列表，不影响
+            // 章节行其余区域的进阅读行为）
+            if (sideStoryCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: InkWell(
+                  onTap: onSideStoryTap,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: colorScheme.primary.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.auto_stories,
+                            size: 11, color: colorScheme.primary),
+                        const SizedBox(width: 3),
+                        Text(
+                          '番外 $sideStoryCount',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (isUserChapter) const ChapterBadge(),
           ],
         ),

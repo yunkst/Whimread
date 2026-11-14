@@ -29,6 +29,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/novel.dart';
 import '../models/chapter.dart';
 import '../models/search_result.dart';
+import '../core/providers/side_story_providers.dart'; // 本章番外角标计数
+import '../screens/side_story_list_screen.dart'; // 本章番外列表页
 import '../services/novel_agent/agent_scenario.dart'; // ScenarioIds：FAB 显式声明 writing 场景
 import '../mixins/reader/auto_scroll_mixin.dart';
 import '../widgets/reader/reader_chapter_segment.dart'; // 正文分段/扁平布局
@@ -128,6 +130,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   /// 当前章节的段落标注（key = 章内段落序号）
   Map<int, ParagraphAnnotation> get _annotations =>
       _annotationsByChapter[_currentChapter.url] ?? const {};
+
+  /// 各章节挂载的番外数量（本章番外角标数据源）。
+  /// build 中由 sideStoryCountsProvider 刷新（valueOrNull 为空时保持旧值）。
+  Map<String, int> _sideStoryCounts = const {};
 
   // ========== 沉浸模式（点击正文切换 UI 显隐） ==========
   bool _isChromeVisible = true;
@@ -584,7 +590,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       case 'create_snapshot':
         _createSnapshot();
         break;
+      case 'side_story':
+        _openSideStoryList();
+        break;
     }
+  }
+
+  /// 打开本章番外列表（菜单入口；角标入口同样落到这里）。
+  ///
+  /// 用 [_currentChapter]（动态检测值）而非 widget.chapter（仅初始值）：
+  /// 无限滚动拼接下用户滚到哪章，「本章」就是哪章。
+  Future<void> _openSideStoryList() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SideStoryListScreen(
+          novel: widget.novel,
+          anchorChapterUrl: _currentChapter.url,
+          anchorChapterTitle: _currentChapter.title,
+        ),
+      ),
+    );
   }
 
   // 显示主题模式选择对话框（应用全局生效并持久化）
@@ -1182,6 +1208,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     // 对话窗口查看过程）；无标注时保持默认「打开写作对话」行为。
     final hasAnnotations = _annotations.isNotEmpty;
 
+    // 本章番外角标数据：按宿主小说分桶的章 → 番外数映射（番外创建/删除后
+    // sideStorySignalProvider bump 自动重查）。用动态 [_currentChapter.url]
+    // 取数，无限滚动跨章时角标跟随。
+    final sideStoryCountsAsync =
+        ref.watch(sideStoryCountsProvider(widget.novel.url));
+    _sideStoryCounts = sideStoryCountsAsync.valueOrNull ?? const {};
+
     return AgentFloatingShell(
       scenarioId: ScenarioIds.writing,
       showFloatingButton: _isChromeVisible,
@@ -1367,6 +1400,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                 currentChapter: _currentChapter,
                 chapters: widget.chapters,
                 isEditMode: isEditMode,
+                sideStoryCount:
+                    _sideStoryCounts[_currentChapter.url] ?? 0,
+                onSideStoryTap: _openSideStoryList,
                 onToggleEditMode: () =>
                     ref.read(readerEditModeProvider.notifier).toggle(),
                 onSaveAndExitEditMode: () async {

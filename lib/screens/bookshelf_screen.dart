@@ -23,6 +23,7 @@ import '../core/providers/bookshelf_providers.dart';
 import '../core/providers/bookshelf_mutation_provider.dart';
 import '../core/providers/database_providers.dart';
 import '../core/providers/scenario_sessions_provider.dart';
+import '../core/providers/side_story_mutation_provider.dart';
 import '../core/providers/service_providers.dart';
 import '../core/providers/text_game_providers.dart';
 import '../core/providers/webview_providers.dart';
@@ -168,6 +169,11 @@ class _BookshelfScreenState extends ConsumerState<BookshelfScreen>
           }
           ref.invalidate(textGamesProvider);
         }
+        // 级联删除该书挂载的全部番外（含番外的番外）——番外入口随宿主小说
+        // 消失，保留只会成为孤儿数据。宿主自身的章节/缓存不受影响。
+        await ref
+            .read(sideStoryMutationProvider.notifier)
+            .deleteSideStoriesOfNovel(novel.url);
         // 从数据库中删除小说（这会删除bookshelf表中的记录）
         // 写路径经 BookshelfMutationNotifier，自动 invalidate bookshelfNovelsProvider
         await ref

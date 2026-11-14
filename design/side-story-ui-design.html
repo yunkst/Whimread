@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番外撰写 · UI 设计稿 — Whimread 随心阅读</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ================= 主题变量（晨读书馆 / 暗夜书馆） ================= */
+:root, [data-theme="light"] {
+  --page-bg: #F4EFE3;
+  --page-ink: #2B2620;
+  --bg: #FFFDF8;          /* 暖白纸 */
+  --paper: #FFFDF8;
+  --paper-2: #F7F1E3;
+  --ink: #2B2620;
+  --ink-soft: #6B6358;
+  --accent: #8C5A1F;      /* 琥珀强调（亮色深一档） */
+  --accent-2: #B8843A;    /* 琥珀主色 */
+  --chip-bg: rgba(184, 132, 58, .14);
+  --chip-ink: #8C5A1F;
+  --divider: #E5DDCC;
+  --card-shadow: 0 1px 3px rgba(43,38,32,.08), 0 8px 28px rgba(43,38,32,.10);
+  --phone-shadow: 0 2px 6px rgba(43,38,32,.12), 0 20px 48px rgba(43,38,32,.18);
+  --reader-bg: #FBF7EC;
+  --ok: #5E7A3C; --ok-bg: #E0E8CF;
+  --err: #B23A2E; --err-bg: #F3DAD5;
+}
+[data-theme="dark"] {
+  --page-bg: #17130D;
+  --page-ink: #E8DCC4;
+  --bg: #1C1812;
+  --paper: #241F16;       /* 炭纸 */
+  --paper-2: #2C261B;
+  --ink: #E8DCC4;         /* 羊皮纸字 */
+  --ink-soft: #B5A482;
+  --accent: #B8843A;
+  --accent-2: #D9A05B;
+  --chip-bg: rgba(217, 160, 91, .18);
+  --chip-ink: #E8C891;
+  --divider: #3A3128;
+  --card-shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.5);
+  --phone-shadow: 0 2px 6px rgba(0,0,0,.5), 0 20px 48px rgba(0,0,0,.6);
+  --reader-bg: #241F16;
+  --ok: #7A9A55; --ok-bg: #2A3A14;
+  --err: #D9685A; --err-bg: #4A1A14;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--page-bg);
+  color: var(--page-ink);
+  transition: background .35s, color .35s;
+  line-height: 1.6;
+}
+.serif { font-family: "Noto Serif SC", Georgia, "STSong", "SimSun", serif; }
+
+/* ================= 顶栏 ================= */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--divider);
+  padding: 14px 28px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.topbar h1 { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+.topbar h1 small { font-weight: 400; color: var(--ink-soft); font-size: 13px; margin-left: 10px; }
+.topbar .spacer { flex: 1; }
+.screen-nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.screen-nav button {
+  border: 1px solid var(--divider); background: var(--paper);
+  color: var(--ink-soft); padding: 4px 12px; border-radius: 999px;
+  font-size: 12.5px; cursor: pointer; transition: all .15s;
+}
+.screen-nav button:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ================= 布局 ================= */
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 80px; }
+.section { margin-bottom: 72px; scroll-margin-top: 90px; }
+.section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+.section-head .no {
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  border: 1.5px solid var(--accent); border-radius: 8px; padding: 1px 9px;
+  letter-spacing: 1px; flex-shrink: 0;
+}
+.section-head h2 { font-size: 22px; font-weight: 700; }
+.section-head .route { color: var(--ink-soft); font-size: 13px; }
+.section-sub { color: var(--ink-soft); font-size: 14px; margin-bottom: 22px; }
+.card {
+  background: var(--bg); border: 1px solid var(--divider);
+  border-radius: 18px; box-shadow: var(--card-shadow);
+  padding: 26px; transition: box-shadow .3s;
+}
+.card.flash { animation: flash 1.4s ease; }
+@keyframes flash {
+  0% { box-shadow: 0 0 0 3px var(--accent-2), var(--card-shadow); }
+  100% { box-shadow: var(--card-shadow); }
+}
+.duo { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-start; }
+.duo .mock-area { flex: 0 0 auto; }
+.duo .notes { flex: 1 1 340px; min-width: 300px; }
+
+/* ================= 交互说明 ================= */
+.notes h3 { font-size: 15px; color: var(--accent); margin: 18px 0 8px; letter-spacing: .5px; }
+.notes h3:first-child { margin-top: 0; }
+.notes ol { padding-left: 20px; font-size: 14px; color: var(--ink); }
+.notes ol li { margin-bottom: 7px; }
+.notes ol li b { color: var(--accent); }
+.notes .tip {
+  background: var(--chip-bg); border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; color: var(--ink-soft); margin-top: 14px;
+}
+.notes .tip b { color: var(--chip-ink); }
+
+/* ================= 手机框 ================= */
+.phone-row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+.phone {
+  width: 330px; height: 648px; border-radius: 30px; overflow: hidden;
+  border: 1px solid var(--divider); background: var(--bg);
+  box-shadow: var(--phone-shadow); position: relative; flex-shrink: 0;
+  display: flex; flex-direction: column;
+}
+.phone .statusbar {
+  height: 26px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; font-size: 11px; color: var(--ink-soft); background: var(--paper);
+  flex-shrink: 0;
+}
+.phone .screen-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+.phone.mini { width: 300px; height: 560px; transform-origin: top left; }
+.phone-label {
+  text-align: center; font-size: 12.5px; color: var(--ink-soft); margin-top: 10px;
+  letter-spacing: 1px;
+}
+.phone-label b { color: var(--accent); }
+
+/* ================= App Bar（应用内） ================= */
+.appbar {
+  height: 52px; background: var(--paper); border-bottom: 1px solid var(--divider);
+  display: flex; align-items: center; padding: 0 8px; gap: 2px; flex-shrink: 0;
+}
+.appbar .icon {
+  width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; color: var(--ink-soft); font-size: 17px; cursor: pointer;
+  flex-shrink: 0; user-select: none;
+}
+.appbar .icon:hover { background: var(--chip-bg); color: var(--accent); }
+.appbar .title {
+  flex: 1; min-width: 0; font-size: 16.5px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 8px;
+}
+.appbar .subtitle { font-size: 11px; color: var(--ink-soft); font-weight: 400; display: block; }
+
+/* ================= 番外徽标 chip ================= */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--chip-bg); color: var(--chip-ink);
+  font-size: 11.5px; font-weight: 600; border-radius: 999px;
+  padding: 2.5px 9px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  transition: transform .12s;
+  font-family: "Noto Sans SC", sans-serif;
+}
+.chip:hover { transform: scale(1.06); }
+.chip:active { transform: scale(.97); }
+.chip.sm { font-size: 10.5px; padding: 1.5px 7px; }
+
+/* ================= 目录页 ================= */
+.chapter-list { flex: 1; overflow-y: auto; background: var(--bg); }
+.ch-row {
+  display: flex; align-items: center; padding: 13px 10px 13px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--divider) 55%, transparent);
+  cursor: pointer; transition: background .15s;
+}
+.ch-row:hover { background: var(--chip-bg); }
+.ch-row .ch-title { flex: 1; min-width: 0; font-size: 14.5px; color: var(--ink); }
+.ch-row .ch-title .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.ch-row.last-read .ch-title .t { color: var(--accent); font-weight: 700; }
+.ch-row.last-read { border-left: 3px solid var(--accent-2); padding-left: 13px; }
+.ch-row.user-ch { border-left: 3px solid color-mix(in srgb, var(--accent-2) 35%, transparent); padding-left: 13px; background: var(--chip-bg); }
+.ch-row .trailing { display: flex; align-items: center; gap: 2px; color: var(--ink-soft); font-size: 15px; }
+.ch-row .trailing .ic { padding: 4px; opacity: .75; }
+.ch-row .trailing .cached { color: var(--accent); opacity: .9; }
+.menu {
+  position: absolute; top: 46px; right: 10px; z-index: 30;
+  background: var(--paper); border: 1px solid var(--divider); border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.22); padding: 7px; min-width: 172px;
+}
+.menu .mi {
+  display: flex; align-items: center; gap: 11px; padding: 9px 14px;
+  font-size: 13.5px; color: var(--ink); border-radius: 9px; cursor: pointer;
+  transition: background .12s;
+}
+.menu .mi:hover { background: var(--chip-bg); }
+.menu .mi .mic { font-size: 15px; color: var(--ink-soft); width: 18px; text-align: center; }
+.menu .mi.new { color: var(--chip-ink); font-weight: 700; }
+.menu .mi.new .mic { color: var(--accent-2); }
+.menu .sep { height: 1px; background: var(--divider); margin: 5px 8px; }
+.menu-tag {
+  position: absolute; top: 8px; right: 10px; z-index: 31;
+  font-size: 10px; color: var(--page-bg); background: var(--accent);
+  padding: 2px 8px; border-radius: 999px; font-weight: 700;
+}
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.28); z-index: 20; }
+
+/* ================= 阅读器 ================= */
+.reader-body { flex: 1; background: var(--reader-bg); padding: 22px 26px; overflow: hidden; }
+.reader-body p { font-size: 14.5px; color: var(--ink); margin-bottom: 15px; text-align: justify; }
+.reader-body p.indent { text-indent: 2em; }
+.reader-bottom {
+  height: 52px; background: var(--paper); border-top: 1px solid var(--divider);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 22px;
+  font-size: 13px; color: var(--ink-soft); flex-shrink: 0;
+}
+.reader-bottom .nav { cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.reader-bottom .nav:hover { color: var(--accent); }
+
+/* ================= 番外列表页 ================= */
+.banner {
+  margin: 14px 16px 6px; background: var(--chip-bg); border-radius: 12px;
+  padding: 11px 15px; font-size: 13px; color: var(--ink-soft);
+  border: 1px dashed color-mix(in srgb, var(--accent-2) 40%, transparent);
+}
+.banner b { color: var(--chip-ink); }
+.ss-list { flex: 1; overflow-y: auto; padding: 10px 14px 80px; }
+.ss-card {
+  background: var(--paper); border: 1px solid var(--divider); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 12px; cursor: pointer;
+  display: flex; align-items: center; gap: 13px; transition: all .15s;
+}
+.ss-card:hover { border-color: var(--accent-2); transform: translateY(-1px); box-shadow: var(--card-shadow); }
+.ss-card .cover {
+  width: 44px; height: 58px; border-radius: 6px; flex-shrink: 0;
+  background: linear-gradient(150deg, var(--accent-2), color-mix(in srgb, var(--accent-2) 55%, #6b4423));
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 21px; box-shadow: 0 2px 6px rgba(0,0,0,.18);
+}
+.ss-card .info { flex: 1; min-width: 0; }
+.ss-card .info .name { font-size: 15.5px; font-weight: 700; color: var(--ink); }
+.ss-card .info .meta { font-size: 12px; color: var(--ink-soft); margin-top: 3px; }
+.ss-card .info .anchor { font-size: 11.5px; color: var(--chip-ink); margin-top: 4px; }
+.ss-card .info .anchor.anchor-gone { color: var(--err); }
+.ss-card .del { color: var(--ink-soft); font-size: 16px; padding: 6px; cursor: pointer; border-radius: 8px; }
+.ss-card .del:hover { color: var(--err); background: var(--err-bg); }
+.progress-mini { height: 4px; background: var(--divider); border-radius: 999px; margin-top: 7px; overflow: hidden; }
+.progress-mini i { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; }
+.create-btn {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #fff; border: none; border-radius: 999px; padding: 13px 30px;
+  font-size: 14.5px; font-weight: 700; cursor: pointer; z-index: 10;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent-2) 45%, transparent);
+  display: flex; align-items: center; gap: 8px; letter-spacing: 1px;
+  font-family: "Noto Sans SC", sans-serif;
+}
+.create-btn:hover { transform: translateX(-50%) translateY(-2px); }
+.empty-state { text-align: center; padding: 70px 30px 0; color: var(--ink-soft); }
+.empty-state .glyph { font-size: 46px; margin-bottom: 14px; opacity: .5; }
+.empty-state .t1 { font-size: 15.5px; color: var(--ink); font-weight: 600; }
+.empty-state .t2 { font-size: 13px; margin: 6px 0 22px; }
+
+/* ================= 底部弹层（创建番外） ================= */
+.sheet-wrap { position: absolute; inset: 0; z-index: 40; display: flex; align-items: flex-end; }
+.sheet {
+  background: var(--paper); border-radius: 22px 22px 0 0; width: 100%;
+  padding: 18px 22px 26px; box-shadow: 0 -10px 40px rgba(0,0,0,.3);
+  animation: up .25s ease;
+}
+@keyframes up { from { transform: translateY(60px); opacity: .4; } }
+.sheet .grab { width: 36px; height: 4px; border-radius: 999px; background: var(--divider); margin: 0 auto 14px; }
+.sheet h4 { font-size: 17px; color: var(--ink); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.field { margin-bottom: 14px; }
+.field label { font-size: 12.5px; color: var(--ink-soft); display: block; margin-bottom: 6px; }
+.field .ro-box {
+  background: var(--paper-2); border: 1px solid var(--divider); border-radius: 10px;
+  padding: 10px 13px; font-size: 13.5px; color: var(--ink); display: flex; align-items: center; gap: 8px;
+}
+.field textarea {
+  width: 100%; background: var(--paper-2); border: 1px solid var(--divider);
+  border-radius: 10px; padding: 10px 13px; font-size: 13.5px; color: var(--ink);
+  min-height: 88px; resize: none; font-family: inherit; line-height: 1.6;
+}
+.field textarea:focus { outline: none; border-color: var(--accent-2); }
+.chip-row { display: flex; gap: 8px; }
+.chip-opt {
+  border: 1px solid var(--divider); background: var(--paper-2); color: var(--ink-soft);
+  padding: 5px 14px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
+}
+.chip-opt.sel { background: var(--chip-bg); border-color: var(--accent-2); color: var(--chip-ink); font-weight: 700; }
+.sheet .hint { font-size: 12px; color: var(--ink-soft); display: flex; gap: 6px; align-items: flex-start; margin: 4px 0 16px; }
+.sheet .go {
+  width: 100%; background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #fff; border: none; border-radius: 12px; padding: 13px; font-size: 15px;
+  font-weight: 700; cursor: pointer; letter-spacing: 1px;
+  font-family: "Noto Sans SC", sans-serif;
+}
+
+/* ================= Agent 对话窗（AI 生成过程） ================= */
+.agent-dlg { position: absolute; inset: 0; z-index: 40; background: var(--bg); display: flex; flex-direction: column; }
+.agent-head {
+  height: 50px; background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #fff; display: flex; align-items: center; padding: 0 16px; gap: 10px; flex-shrink: 0;
+}
+.agent-head .dot { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.agent-head .nm { flex: 1; font-size: 14.5px; font-weight: 700; }
+.agent-head .st { font-size: 11px; background: rgba(255,255,255,.2); padding: 2px 9px; border-radius: 999px; }
+.agent-body { flex: 1; overflow-y: auto; padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+.bubble {
+  max-width: 86%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.6;
+}
+.bubble.user { align-self: flex-end; background: var(--chip-bg); color: var(--ink); border: 1px solid color-mix(in srgb, var(--accent-2) 30%, transparent); border-bottom-right-radius: 4px; }
+.bubble.agent { align-self: flex-start; background: var(--paper-2); color: var(--ink); border: 1px solid var(--divider); border-bottom-left-radius: 4px; }
+.tool-card {
+  align-self: stretch; background: var(--paper); border: 1px solid var(--divider);
+  border-radius: 12px; padding: 10px 13px; font-size: 12.5px;
+}
+.tool-card .tc-head { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink); }
+.tool-card .tc-head .badge {
+  font-family: "JetBrains Mono", Consolas, monospace; font-size: 10.5px; font-weight: 600;
+  background: var(--chip-bg); color: var(--chip-ink); padding: 1.5px 7px; border-radius: 6px;
+}
+.tool-card .tc-body { color: var(--ink-soft); margin-top: 4px; padding-left: 2px; }
+.tool-card.done { border-left: 3px solid var(--ok); }
+.tool-card.done .tc-head .st-ic { color: var(--ok); }
+.tool-card.running { border-left: 3px solid var(--accent-2); }
+.tool-card.pending { border-left: 3px solid var(--divider); opacity: .6; }
+.pbar { height: 4px; background: var(--divider); border-radius: 999px; margin-top: 8px; overflow: hidden; }
+.pbar i { display: block; height: 60%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); border-radius: 999px; animation: pw 1.6s ease-in-out infinite; }
+@keyframes pw { 0%,100% { width: 55%; } 50% { width: 82%; } }
+.typing { display: inline-flex; gap: 3px; align-items: center; }
+.typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-soft); animation: ty 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .18s; } .typing i:nth-child(3) { animation-delay: .36s; }
+@keyframes ty { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+.jump-card {
+  align-self: stretch; display: flex; align-items: center; gap: 12px;
+  background: var(--chip-bg); border: 1.5px solid var(--accent-2); border-radius: 13px;
+  padding: 12px 14px; cursor: pointer; transition: transform .15s;
+}
+.jump-card:hover { transform: translateY(-1px); }
+.jump-card .jc-ic { font-size: 22px; }
+.jump-card .jc-t { font-size: 13.5px; font-weight: 700; color: var(--chip-ink); }
+.jump-card .jc-m { font-size: 11.5px; color: var(--ink-soft); margin-top: 1px; }
+.jump-card .jc-go { margin-left: auto; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); padding: 6px 13px; border-radius: 999px; white-space: nowrap; }
+
+/* ================= 总览：设计原则 + 流程图 ================= */
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 20px; }
+.principle { background: var(--bg); border: 1px solid var(--divider); border-radius: 14px; padding: 18px; box-shadow: var(--card-shadow); }
+.principle .pic { font-size: 24px; margin-bottom: 8px; }
+.principle h4 { font-size: 15px; color: var(--ink); margin-bottom: 6px; }
+.principle p { font-size: 13px; color: var(--ink-soft); }
+.flowmap {
+  margin-top: 26px; background: var(--bg); border: 1px solid var(--divider);
+  border-radius: 16px; padding: 22px; box-shadow: var(--card-shadow);
+}
+.flowmap h3 { font-size: 15px; color: var(--accent); margin-bottom: 16px; }
+.flow-lanes { display: flex; flex-direction: column; gap: 12px; }
+.flow-lane { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.flow-lane .stage {
+  font-size: 11.5px; color: var(--ink-soft); width: 64px; flex-shrink: 0; text-align: right;
+}
+.flow-node {
+  border: 1.5px solid var(--divider); background: var(--paper); color: var(--ink);
+  font-size: 12.5px; padding: 7px 14px; border-radius: 10px; cursor: pointer; transition: all .15s;
+}
+.flow-node:hover { border-color: var(--accent-2); color: var(--accent); }
+.flow-node.hot { border-color: var(--accent-2); background: var(--chip-bg); color: var(--chip-ink); font-weight: 700; }
+.flow-arrow { color: var(--ink-soft); opacity: .6; font-size: 13px; }
+.flow-loop { color: var(--accent); font-size: 12px; margin-left: 8px; }
+
+/* ================= 数据说明 / 确认点 ================= */
+.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 800px) { .meta-grid { grid-template-columns: 1fr; } }
+.meta-box { background: var(--bg); border: 1px solid var(--divider); border-radius: 14px; padding: 20px; box-shadow: var(--card-shadow); }
+.meta-box h3 { font-size: 15px; color: var(--accent); margin-bottom: 12px; }
+.meta-box ul { padding-left: 18px; font-size: 13.5px; color: var(--ink-soft); }
+.meta-box ul li { margin-bottom: 8px; }
+.meta-box ul li b { color: var(--ink); }
+kbd {
+  background: var(--paper-2); border: 1px solid var(--divider); border-radius: 5px;
+  padding: 1px 6px; font-size: 12px; color: var(--ink);
+}
+</style>
+</head>
+<body data-theme="light">
+
+<div class="topbar">
+  <h1>番外撰写 · UI 设计稿<small>Whimread 随心阅读 — 交互式原型，点击画面中的琥珀色元素可跳转</small></h1>
+  <div class="spacer"></div>
+  <div class="screen-nav">
+    <button data-goto="s1">目录页</button>
+    <button data-goto="s2">阅读器</button>
+    <button data-goto="s3">本章番外</button>
+    <button data-goto="s4">创建弹层</button>
+    <button data-goto="s5">AI 生成</button>
+    <button data-goto="s6">番外目录</button>
+    <button data-goto="s7">番外阅读</button>
+    <button data-goto="s8">番外总列表</button>
+  </div>
+  <button class="theme-toggle" id="themeBtn">🌙 暗夜书馆</button>
+</div>
+
+<div class="wrap">
+
+  <!-- ================= 总览 ================= -->
+  <div class="section" id="overview">
+    <div class="section-head">
+      <span class="no">总览</span>
+      <h2>设计原则与交互流程</h2>
+    </div>
+    <p class="section-sub">番外 = 一本「不入书架的迷你小说」：有自己的章节列表与完整阅读体验，挂载在主线某章之下；书架、书架搜索、书架分类均不可见。</p>
+
+    <div class="principles">
+      <div class="principle">
+        <div class="pic">🔖</div>
+        <h4>挂载而非插入</h4>
+        <p>番外绑定在锚点章上，主线章节序号、上一章/下一章、目录序完全不受影响。主线章删除后番外保留（标注「原章节已移除」）。</p>
+      </div>
+      <div class="principle">
+        <div class="pic">📖</div>
+        <h4>完整阅读体验</h4>
+        <p>番外的章节列表与阅读器与主线完全同构：字体主题、自动滚动、阅读进度、继续阅读、版本历史全部一致——唯一的差别是入口不在书架。</p>
+      </div>
+      <div class="principle">
+        <div class="pic">✨</div>
+        <h4>AI 一次成稿</h4>
+        <p>用户只需描述番外需求，AI 自动通读锚点章与人物卡，生成番外标题与全部章节；对话窗内实时展示每章生成进度，可随时关闭后台继续。</p>
+      </div>
+      <div class="principle">
+        <div class="pic">🪆</div>
+        <h4>番外套番外</h4>
+        <p>番外的章节同样可以挂载番外（如「番外主角的一段往事」），层数不限；小说级番外总列表会展示整棵挂载树。</p>
+      </div>
+    </div>
+
+    <div class="flowmap">
+      <h3>交互流程图（点击节点跳到对应画面）</h3>
+      <div class="flow-lanes">
+        <div class="flow-lane">
+          <span class="stage">入口</span>
+          <button class="flow-node" data-goto="s1">目录页徽标</button><span class="flow-arrow">／</span>
+          <button class="flow-node" data-goto="s2">阅读器角标</button><span class="flow-arrow">／</span>
+          <button class="flow-node" data-goto="s2">顶栏菜单「本章番外」</button><span class="flow-arrow">／</span>
+          <button class="flow-node" data-goto="s8">目录页菜单「番外列表」</button>
+        </div>
+        <div class="flow-lane">
+          <span class="stage">番外列表</span>
+          <button class="flow-node" data-goto="s3">本章番外（章级）</button><span class="flow-arrow">→</span>
+          <button class="flow-node" data-goto="s8">全书番外（小说级）</button>
+        </div>
+        <div class="flow-lane">
+          <span class="stage">创作</span>
+          <button class="flow-node hot" data-goto="s4">创建弹层（需求表单）</button><span class="flow-arrow">→</span>
+          <button class="flow-node" data-goto="s5">AI 生成（对话窗实时进度）</button>
+        </div>
+        <div class="flow-lane">
+          <span class="stage">阅读</span>
+          <button class="flow-node" data-goto="s6">番外章节列表</button><span class="flow-arrow">→</span>
+          <button class="flow-node" data-goto="s7">番外阅读页</button>
+          <span class="flow-loop">↺ 番外章节可再挂番外（递归）</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S1 目录页 ================= -->
+  <div class="section card" id="s1">
+    <div class="section-head">
+      <span class="no">画面 1</span>
+      <h2>主线目录页 — 章节番外徽标</h2>
+      <span class="route">入口 A</span>
+    </div>
+    <p class="section-sub">在现有章节列表上叠加番外信息：有番外的章节显示「番外 N」徽标；右上菜单新增「番外列表」。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+          <div class="screen-body">
+            <div class="appbar">
+              <div class="icon">←</div>
+              <div class="title serif">云海仙途</div>
+              <div class="icon">⇅</div>
+              <div class="icon">🔍</div>
+              <div class="icon" data-goto-note="menu">⋮</div>
+            </div>
+            <div class="chapter-list">
+              <div class="ch-row"><div class="ch-title"><span class="t serif">第10章 夜探藏经阁</span></div><div class="trailing"><span class="ic">＋</span><span class="ic cached">✓</span></div></div>
+              <div class="ch-row"><div class="ch-title"><span class="t serif">第11章 山雨欲来</span></div><div class="trailing"><span class="ic">＋</span><span class="ic cached">✓</span></div></div>
+              <div class="ch-row" style="background:var(--chip-bg)">
+                <div class="ch-title"><span class="t serif">第12章 女主与闺蜜登场</span></div>
+                <span class="chip" data-goto="s3">番外 2</span>
+                <div class="trailing"><span class="ic">＋</span><span class="ic cached">✓</span></div>
+              </div>
+              <div class="ch-row last-read"><div class="ch-title"><span class="t serif">第13章 剑试锋芒</span></div><div class="trailing"><span class="ic">＋</span></div></div>
+              <div class="ch-row"><div class="ch-title"><span class="t serif">第14章 故人重逢</span></div><div class="trailing"><span class="ic">＋</span></div></div>
+              <div class="ch-row user-ch"><div class="ch-title"><span class="t serif">第15章 云起（用户插入）</span></div><div class="trailing"><span class="ic">🗑</span><span class="ic">＋</span></div></div>
+            </div>
+            <div class="scrim"></div>
+            <div class="menu">
+              <span class="menu-tag">右上菜单 · 展开态</span>
+              <div class="mi"><span class="mic">🔄</span>刷新章节</div>
+              <div class="mi"><span class="mic">🧹</span>清除缓存</div>
+              <div class="mi"><span class="mic">🌌</span>背景设定</div>
+              <div class="mi"><span class="mic">👤</span>人物卡</div>
+              <div class="mi"><span class="mic">📝</span>大纲</div>
+              <div class="sep"></div>
+              <div class="mi new" data-goto="s8"><span class="mic">🔖</span>番外列表 <span style="margin-left:auto;font-size:10px;background:var(--accent);color:#fff;border-radius:999px;padding:1px 7px">3</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">目录页 · <b>「番外 2」徽标</b>与菜单新增项</div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>章节徽标</b>：章节行右侧显示「番外 N」chip（N = 挂载在该章的番外数量）。仅当 N ≥ 1 时显示，不打扰无番外的章节。</li>
+          <li><b>点击徽标</b> → 打开「本章番外列表」（画面 3），只看挂载在这一章的番外；点击章节行其余区域仍是进入阅读，行为不变。</li>
+          <li><b>菜单「番外列表」</b>（新增，带总数角标）→ 打开「全书番外总列表」（画面 8），可看到该书所有番外（含番外的番外）。</li>
+          <li>徽标样式与现有「用户插入」徽标体系一致（琥珀 chip），不新增视觉噪音。</li>
+        </ol>
+        <div class="tip"><b>说明</b>：长按重排、插入章节、搜索等现有能力完全不变；番外永远不会混进这个列表。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S2 阅读器 ================= -->
+  <div class="section card" id="s2">
+    <div class="section-head">
+      <span class="no">画面 2</span>
+      <h2>主线阅读器 — 顶栏番外角标</h2>
+      <span class="route">入口 B / C</span>
+    </div>
+    <p class="section-sub">阅读时随手可达：当前章有番外时，顶栏标题旁出现「番外 N」角标；右上菜单同步新增「本章番外」。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+          <div class="screen-body">
+            <div class="appbar">
+              <div class="icon">←</div>
+              <div class="title serif"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">第12章 女主与闺蜜登场</span><span class="chip sm" data-goto="s3">番外 2</span></div>
+              <div class="icon">✎</div>
+              <div class="icon" data-goto-note="menu2">⋮</div>
+            </div>
+            <div class="reader-body">
+              <p class="indent serif">山门外的雾气还未散尽，林晚便瞧见了那个立在石阶上的身影。苏晴提着一盏纸灯，火光在雾里晕出一小团暖黄。</p>
+              <p class="indent serif">"你可算来了。"苏晴把灯递过来，指尖冰凉，"掌门让我在这儿等你——试剑大会提前了。"</p>
+              <p class="indent serif">林晚接过纸灯，忽然想起许多年前，也是这样一个起雾的清晨，两人第一次在天南的集市上撞见彼此……</p>
+            </div>
+            <div class="reader-bottom">
+              <span class="nav">‹ 上一章</span>
+              <span>12 / 48</span>
+              <span class="nav">下一章 ›</span>
+            </div>
+            <div class="scrim"></div>
+            <div class="menu">
+              <span class="menu-tag">右上菜单 · 展开态</span>
+              <div class="mi"><span class="mic">🔄</span>刷新章节</div>
+              <div class="mi"><span class="mic">🕘</span>版本历史</div>
+              <div class="mi"><span class="mic">📸</span>创建快照</div>
+              <div class="mi"><span class="mic">🌓</span>主题模式</div>
+              <div class="mi"><span class="mic">🎛</span>阅读设置</div>
+              <div class="sep"></div>
+              <div class="mi new" data-goto="s3"><span class="mic">🔖</span>本章番外 <span style="margin-left:auto;font-size:10px;background:var(--accent);color:#fff;border-radius:999px;padding:1px 7px">2</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">阅读器 · <b>标题旁角标</b> + 菜单新增「本章番外」</div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>顶栏角标</b>：跟随<b>当前正在阅读的章节</b>动态变化（无限滚动跨章时自动更新）。有番外才出现，点击直达本章番外列表。</li>
+          <li><b>菜单「本章番外」</b>：任何时候都可点，进入本章番外列表；当前章没有番外时进入空态引导页（见画面 3 右侧变体）。</li>
+          <li>两个入口通向同一页面，保证「阅读时想看番外」与「想给本章挂番外」都只需要一次点击。</li>
+        </ol>
+        <div class="tip"><b>角标零侵入</b>：不改变顶栏布局结构，仅在标题文字后追加 chip；沉浸模式下随工具栏一起淡出。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S3 本章番外列表 ================= -->
+  <div class="section card" id="s3">
+    <div class="section-head">
+      <span class="no">画面 3</span>
+      <h2>本章番外列表（章级）</h2>
+      <span class="route">徽标 / 菜单的落点</span>
+    </div>
+    <p class="section-sub">展示挂载在当前章的全部番外；从这里进入某个番外的章节列表，或创建新番外。</p>
+    <div class="duo">
+      <div class="mock-area phone-row">
+        <div>
+          <div class="phone">
+            <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+            <div class="screen-body">
+              <div class="appbar">
+                <div class="icon">←</div>
+                <div class="title serif">本章番外<span class="subtitle">第12章 女主与闺蜜登场</span></div>
+              </div>
+              <div class="banner">🔖 本章节共挂载 <b>2 部番外</b>，点击进入阅读</div>
+              <div class="ss-list">
+                <div class="ss-card" data-goto="s6">
+                  <div class="cover serif">闺</div>
+                  <div class="info">
+                    <div class="name serif">闺蜜往事</div>
+                    <div class="meta">共 3 章 · 已读 1 章 · 约 6,400 字</div>
+                    <div class="progress-mini"><i style="width:33%"></i></div>
+                  </div>
+                  <div class="del">⋮</div>
+                </div>
+                <div class="ss-card">
+                  <div class="cover serif">童</div>
+                  <div class="info">
+                    <div class="name serif">女主的童年</div>
+                    <div class="meta">共 1 章 · 未读 · 约 2,100 字</div>
+                    <div class="progress-mini"><i style="width:0%"></i></div>
+                  </div>
+                  <div class="del">⋮</div>
+                </div>
+              </div>
+              <button class="create-btn" data-goto="s4">✨ 创建番外</button>
+            </div>
+          </div>
+          <div class="phone-label">章级列表 · <b>有番外</b></div>
+        </div>
+        <div>
+          <div class="phone mini">
+            <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+            <div class="screen-body">
+              <div class="appbar">
+                <div class="icon">←</div>
+                <div class="title serif">本章番外<span class="subtitle">第14章 故人重逢</span></div>
+              </div>
+              <div class="empty-state">
+                <div class="glyph">🔖</div>
+                <div class="t1 serif">本章还没有番外</div>
+                <div class="t2">想为「故人重逢」补一段支线往事？<br>告诉 AI 你的想法，一篇番外马上成稿。</div>
+                <button class="create-btn" style="position:static;transform:none" data-goto="s4">✨ 创建番外</button>
+              </div>
+            </div>
+          </div>
+          <div class="phone-label">空态变体 · <b>引导创建</b></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>番外卡片</b>：显示番外名（AI 起名或用户自定）、章数、已读进度与字数概要，带迷你进度条。点击 → 该番外的章节列表（画面 6）。</li>
+          <li><b>卡片 ⋮ 菜单</b>：删除此番外（弹确认框「将同时删除其全部 N 章正文与子番外，不可恢复」）。</li>
+          <li><b>创建番外</b>：底部常驻按钮；空态时升级为居中主按钮，配引导文案。</li>
+          <li>章级页 AppBar 副标题始终显示锚点章名，明确「我挂在哪一章」。</li>
+        </ol>
+        <div class="tip"><b>锚点章被删除时</b>：番外保留，副标题变为 <span style="color:var(--err)">「原章节已移除」</span>，内容仍可正常阅读。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S4 创建弹层 ================= -->
+  <div class="section card" id="s4">
+    <div class="section-head">
+      <span class="no">画面 4</span>
+      <h2>创建番外 — 需求弹层</h2>
+      <span class="route">创建流程 1/2</span>
+    </div>
+    <p class="section-sub">唯一需要用户填写的东西：番外需求。锚点章自动带入，其余全部交给 AI。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+          <div class="screen-body" style="background:var(--paper-2)">
+            <div class="appbar" style="opacity:.35">
+              <div class="icon">←</div>
+              <div class="title serif">本章番外</div>
+            </div>
+            <div class="scrim" style="opacity:.25"></div>
+            <div class="sheet-wrap">
+              <div class="sheet">
+                <div class="grab"></div>
+                <h4 class="serif">✨ 创建番外</h4>
+                <div class="field">
+                  <label>挂载章节（自动带入，不可改）</label>
+                  <div class="ro-box">📖 <span class="serif">第12章 女主与闺蜜登场</span></div>
+                </div>
+                <div class="field">
+                  <label>番外需求（必填）</label>
+                  <textarea>写林晚和苏晴在入山门之前的故事：两人在天南集市初遇，因一场误会结怨，又在瘟疫中互相扶持成为闺蜜。风格温暖，篇幅不要太长。</textarea>
+                </div>
+                <div class="field">
+                  <label>期望章节数（可选）</label>
+                  <div class="chip-row">
+                    <span class="chip-opt">AI 决定</span>
+                    <span class="chip-opt sel">3 章</span>
+                    <span class="chip-opt">5 章</span>
+                    <span class="chip-opt">8 章</span>
+                  </div>
+                </div>
+                <div class="hint"><span>💡</span><span>AI 将通读本章正文、前后章脉络与人物卡，自动拟定番外标题并逐章生成正文；过程中可随时关闭浮窗。</span></div>
+                <button class="go" data-goto="s5">开始创作</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">创建弹层 · <b>需求表单</b></div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>挂载章节</b>：只读展示（从哪个入口进来就挂在哪章；阅读器进来 = 当前章，目录徽标进来 = 徽标所在章）。</li>
+          <li><b>需求描述</b>：多行文本，唯一必填项。支持口语化描述，如「写女主和闺蜜曾经的故事」。</li>
+          <li><b>期望章节数</b>：可选 chip 快选（AI 决定 / 3 / 5 / 8），默认「AI 决定」。</li>
+          <li><b>提交</b> → 关闭弹层，打开 Agent 对话窗自动发送（画面 5）。生成过程中用户可以回到阅读器继续看书。</li>
+        </ol>
+        <div class="tip"><b>不做的东西</b>（保持轻量）：不让用户手填番外标题（AI 拟定，生成后可在番外里改）；不选「参考哪几章」（AI 自动取锚点章 + 前后章 + 人物卡）。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S5 AI 生成 ================= -->
+  <div class="section card" id="s5">
+    <div class="section-head">
+      <span class="no">画面 5</span>
+      <h2>AI 生成过程 — Agent 对话窗</h2>
+      <span class="route">创建流程 2/2</span>
+    </div>
+    <p class="section-sub">复用现有 Agent 对话窗：每一步工具调用实时可见，逐章生成、逐章报字数；完成后出跳转卡。</p>
+    <div class="duo">
+      <div class="mock-area phone-row">
+        <div>
+          <div class="phone">
+            <div class="statusbar"><span>9:41</span><span>▾ 🔋</span></div>
+            <div class="screen-body">
+              <div class="agent-dlg">
+                <div class="agent-head">
+                  <div class="dot">✦</div>
+                  <div class="nm">番外创作</div>
+                  <div class="st">生成中…</div>
+                  <div style="font-size:16px;cursor:pointer">✕</div>
+                </div>
+                <div class="agent-body">
+                  <div class="bubble user">写林晚和苏晴在入山门之前的故事：两人在天南集市初遇，因一场误会结怨，又在瘟疫中互相扶持成为闺蜜。风格温暖，篇幅不要太长。期望 3 章。</div>
+                  <div class="tool-card done">
+                    <div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_side_story</span>番外已建立</div>
+                    <div class="tc-body">《闺蜜往事》· 挂载于「第12章 女主与闺蜜登场」</div>
+                  </div>
+                  <div class="tool-card done">
+                    <div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_chapter</span>第1章 初遇</div>
+                    <div class="tc-body">已完成 · 2,143 字</div>
+                  </div>
+                  <div class="tool-card running">
+                    <div class="tc-head"><span class="typing"><i></i><i></i><i></i></span><span class="badge">create_chapter</span>第2章 同窗</div>
+                    <div class="tc-body">已生成 1,257 字…</div>
+                    <div class="pbar"><i></i></div>
+                  </div>
+                  <div class="tool-card pending">
+                    <div class="tc-head"><span class="st-ic">○</span><span class="badge">create_chapter</span>第3章 决裂与和解</div>
+                    <div class="tc-body">排队中</div>
+                  </div>
+                  <div class="bubble agent">第 1 章已完成，正在写第 2 章。整体按「初遇 → 同窗 → 决裂与和解」三段展开，均以天南市集与瘟疫线索衔接主线。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="phone-label">生成中 · <b>逐章进度</b></div>
+        </div>
+        <div>
+          <div class="phone mini">
+            <div class="statusbar"><span>9:44</span><span>▾ 🔋</span></div>
+            <div class="screen-body">
+              <div class="agent-dlg">
+                <div class="agent-head">
+                  <div class="dot">✦</div>
+                  <div class="nm">番外创作</div>
+                  <div class="st" style="background:rgba(122,154,85,.9)">已完成</div>
+                  <div style="font-size:16px;cursor:pointer">✕</div>
+                </div>
+                <div class="agent-body">
+                  <div class="tool-card done">
+                    <div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_side_story</span>《闺蜜往事》</div>
+                    <div class="tc-body">挂载于「第12章 女主与闺蜜登场」</div>
+                  </div>
+                  <div class="tool-card done"><div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_chapter</span>第1章 初遇 · 2,143 字</div></div>
+                  <div class="tool-card done"><div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_chapter</span>第2章 同窗 · 1,986 字</div></div>
+                  <div class="tool-card done"><div class="tc-head"><span class="st-ic">✓</span><span class="badge">create_chapter</span>第3章 决裂与和解 · 2,271 字</div></div>
+                  <div class="jump-card" data-goto="s6">
+                    <div class="jc-ic">📖</div>
+                    <div>
+                      <div class="jc-t serif">番外《闺蜜往事》已成稿</div>
+                      <div class="jc-m">共 3 章 · 约 6,400 字 · 挂载于第12章</div>
+                    </div>
+                    <div class="jc-go">去阅读</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="phone-label">完成态 · <b>跳转卡</b></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>过程全可视</b>：需求原文、建番外、逐章生成的工具卡与实时字数，全部复用现有 Agent 对话消息体系。</li>
+          <li><b>可中断</b>：随时 ✕ 关闭浮窗，生成在后台继续；再次打开可回到进度。</li>
+          <li><b>完成跳转卡</b>：显示番外名/章数/字数，「去阅读」直达番外章节列表（画面 6）。跳转卡长期留在对话记录里，随时可点。</li>
+          <li>生成中的番外在番外列表页也会出现（标注「生成中 N/M 章」），未完成的章不可读但已完成的可以。</li>
+        </ol>
+        <div class="tip"><b>失败恢复</b>：某章生成失败时该章标红可单独重试，已成功章节不受影响。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S6 番外章节列表 ================= -->
+  <div class="section card" id="s6">
+    <div class="section-head">
+      <span class="no">画面 6</span>
+      <h2>番外章节列表页</h2>
+      <span class="route">阅读入口</span>
+    </div>
+    <p class="section-sub">与主线目录页同一套组件：重排、插入、搜索、人物卡、大纲全部可用。差异仅在 AppBar 的番外标识与「返回主线」。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:45</span><span>▾ 🔋</span></div>
+          <div class="screen-body">
+            <div class="appbar" style="border-bottom:2px solid var(--accent-2)">
+              <div class="icon" data-goto="s3">←</div>
+              <div class="title serif">闺蜜往事<span class="subtitle">🔖 番外 · 挂载于「第12章 女主与闺蜜登场」</span></div>
+              <div class="icon" data-goto="s1" title="返回主线目录" style="font-size:13px;flex-direction:column;display:flex"><span>⌂</span></div>
+              <div class="icon">🔍</div>
+              <div class="icon">⋮</div>
+            </div>
+            <div class="chapter-list">
+              <div class="ch-row"><div class="ch-title"><span class="t serif">第1章 初遇</span></div><div class="trailing"><span class="ic">＋</span><span class="ic cached">✓</span></div></div>
+              <div class="ch-row last-read">
+                <div class="ch-title"><span class="t serif">第2章 同窗</span></div>
+                <span class="chip sm" data-goto="s3" title="番外的番外">番外 1</span>
+                <div class="trailing"><span class="ic">＋</span><span class="ic cached">✓</span></div>
+              </div>
+              <div class="ch-row"><div class="ch-title"><span class="t serif">第3章 决裂与和解</span></div><div class="trailing"><span class="ic">＋</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">番外目录 · <b>顶栏琥珀下划线 + 挂载点副标题</b></div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>AppBar 番外标识</b>：琥珀色下划线 + 书名 + 副标题「挂载于 第X章 章名」——一眼区分这是番外而非主线，也明确挂载点。</li>
+          <li><b>⌂ 返回主线</b>：一键跳回主线小说的目录页，不用逐层返回。</li>
+          <li><b>章节行完全同构</b>：已读标记、继续阅读定位、长按重排、插入章节、缓存状态、删除（用户章节）照常可用。</li>
+          <li><b>第2章 的「番外 1」徽标</b>：这就是<b>番外套番外</b>——点击进入「第2章 · 本章番外」列表（画面 3 的递归实例）。</li>
+          <li>人物卡 / 大纲 / 背景设定菜单照常可用（作用于番外自身；人物卡可从主线继承）。</li>
+        </ol>
+        <div class="tip"><b>与主线的隔离保证</b>：番外章节序号只在本番外内部生效，主线的「上一章/下一章」永远翻不到番外；反之亦然。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S7 番外阅读页 ================= -->
+  <div class="section card" id="s7">
+    <div class="section-head">
+      <span class="no">画面 7</span>
+      <h2>番外阅读页</h2>
+      <span class="route">正常阅读</span>
+    </div>
+    <p class="section-sub">与主线阅读器同一体验。顶栏同样有番外角标——在番外里也能继续挂番外（递归）。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:46</span><span>▾ 🔋</span></div>
+          <div class="screen-body">
+            <div class="appbar" style="border-bottom:2px solid var(--accent-2)">
+              <div class="icon" data-goto="s6">←</div>
+              <div class="title serif"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">第2章 同窗</span><span class="chip sm" data-goto="s3" title="本章番外（递归）">番外 1</span></div>
+              <div class="icon">✎</div>
+              <div class="icon">⋮</div>
+            </div>
+            <div class="reader-body">
+              <p class="indent serif">入山门的第三年，林晚和苏晴已经能在演武场上默契地背对背御敌。同门都笑称她们是"一体双生"。</p>
+              <p class="indent serif">只有她们自己知道，这份默契是被一场大雪冻出来的——那年冬季大考，两人被困后山冰窟三天三夜……</p>
+            </div>
+            <div class="reader-bottom">
+              <span class="nav">‹ 上一章</span>
+              <span>2 / 3</span>
+              <span class="nav">下一章 ›</span>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">番外阅读 · <b>与主线阅读完全一致</b></div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>完整阅读能力</b>：字体/主题/阅读设置、自动滚动、段落标注、版本历史、快照——与主线阅读器同一套组件，无阉割。</li>
+          <li><b>顶栏「番外 1」角标</b>：当前番外章节上挂载的子番外数量。点击 → 本章番外列表 → 可再创建（递归挂载）。</li>
+          <li><b>上一章/下一章</b>只在番外内部循环，到头即止，绝不串进主线。</li>
+          <li><b>继续阅读</b>：番外有自己的阅读进度记录，从番外列表或总列表进入都能续读。</li>
+        </ol>
+        <div class="tip"><b>递归深度</b>：设计上不限制层数；总列表（画面 8）按挂载树展示，避免迷失。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S8 小说级番外总列表 ================= -->
+  <div class="section card" id="s8">
+    <div class="section-head">
+      <span class="no">画面 8</span>
+      <h2>全书番外总列表（小说级）</h2>
+      <span class="route">入口 D · 目录页菜单</span>
+    </div>
+    <p class="section-sub">以挂载树视角展示这本小说的全部番外，包括番外的番外；也是盘点、清理番外的地方。</p>
+    <div class="duo">
+      <div class="mock-area">
+        <div class="phone">
+          <div class="statusbar"><span>9:47</span><span>▾ 🔋</span></div>
+          <div class="screen-body">
+            <div class="appbar">
+              <div class="icon" data-goto="s1">←</div>
+              <div class="title serif">云海仙途 · 番外列表</div>
+            </div>
+            <div class="ss-list" style="padding-top:4px">
+              <div style="font-size:12px;color:var(--ink-soft);margin:8px 2px 8px;font-weight:700">挂载于 第12章 女主与闺蜜登场</div>
+              <div class="ss-card" data-goto="s6">
+                <div class="cover serif">闺</div>
+                <div class="info">
+                  <div class="name serif">闺蜜往事</div>
+                  <div class="meta">共 3 章 · 已读 1 章</div>
+                </div>
+                <div class="del">⋮</div>
+              </div>
+              <div class="ss-card">
+                <div class="cover serif">童</div>
+                <div class="info">
+                  <div class="name serif">女主的童年</div>
+                  <div class="meta">共 1 章 · 未读</div>
+                </div>
+                <div class="del">⋮</div>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);margin:16px 2px 8px;font-weight:700">挂载于 番外《闺蜜往事》· 第2章 同窗 <span class="chip sm" style="margin-left:6px">子番外</span></div>
+              <div class="ss-card">
+                <div class="cover serif">日</div>
+                <div class="info">
+                  <div class="name serif">苏晴的日记</div>
+                  <div class="meta">共 1 章 · 未读</div>
+                  <div class="anchor"> ↳ 挂载链：云海仙途·第12章 → 闺蜜往事·第2章</div>
+                </div>
+                <div class="del">⋮</div>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);margin:16px 2px 8px">共 3 部番外 · 5 章 · 约 1.1 万字</div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label">总列表 · <b>按挂载树分组</b></div>
+      </div>
+      <div class="notes">
+        <h3>交互逻辑</h3>
+        <ol>
+          <li><b>按挂载点分组</b>：主线章与番外章的挂载各成一组，子番外组名前用「番外《…》」前缀 + 「子番外」chip 标识层级。</li>
+          <li><b>挂载链提示</b>：子番外卡片显示完整挂载链，防止多层递归后找不到出处。</li>
+          <li><b>底部统计</b>：全书番外总数/章数/字数一览。</li>
+          <li><b>⋮ 删除</b>：与章级列表一致；删除带子番外的番外时，确认框明确提示将级联删除子番外。</li>
+        </ol>
+        <div class="tip"><b>生命周期</b>：删除主线小说时，其全部番外（含所有层级的子番外）自动级联删除；番外数据随备份/恢复自然迁移。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 数据与确认点 ================= -->
+  <div class="section">
+    <div class="section-head">
+      <span class="no">附</span>
+      <h2>实现机制速览 & 请你确认的点</h2>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-box">
+        <h3>⚙️ 数据方案（为什么 UI 这样长）</h3>
+        <ul>
+          <li><b>番外 = 一条不入书架的小说行</b>：bookshelf 表加 <kbd>isSideStory</kbd> / <kbd>anchorNovelUrl</kbd> / <kbd>anchorChapterUrl</kbd> 三列（DB v58）。番外章节就是普通章节行，因此章节列表、阅读器、AI 写章、进度、版本历史<b>全部直接复用</b>。</li>
+          <li><b>书架过滤</b>：书架列表/搜索/分类查询统一排除番外行——番外只能从上述四个入口进入。</li>
+          <li><b>挂载与隔离</b>：番外章节挂在番外自己的命名空间下，主线重排/删除逻辑零改动、零风险。</li>
+          <li><b>递归</b>：子番外的 anchorNovelUrl 指向父番外，天然支持任意层级。</li>
+        </ul>
+      </div>
+      <div class="meta-box">
+        <h3>✅ 请你确认的三个点</h3>
+        <ul>
+          <li><b>入口布局</b>：目录页徽标 + 阅读器顶栏角标 + 两处菜单项（共 4 个入口）。是否还需要底部栏按钮？</li>
+          <li><b>创建表单字段</b>：目前只有「需求描述（必填）+ 期望章节数（可选）」。是否要加「番外标题（可选，默认 AI 拟定）」输入框？</li>
+          <li><b>视觉样式</b>：琥珀 chip 徽标、番外目录的琥珀下划线、总列表的挂载树分组——样式是否符合预期？（右上角可切换暗夜书馆预览暗色）</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// 主题切换
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => {
+  const body = document.body;
+  const dark = body.getAttribute('data-theme') === 'dark';
+  body.setAttribute('data-theme', dark ? 'light' : 'dark');
+  themeBtn.textContent = dark ? '🌙 暗夜书馆' : '☀️ 晨读书馆';
+});
+
+// 跳转：所有 [data-goto] 元素点击后滚动到目标画面并闪烁提示
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-goto]');
+  if (!el) return;
+  const target = document.getElementById(el.getAttribute('data-goto'));
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.classList.remove('flash');
+  void target.offsetWidth; // 重启动画
+  target.classList.add('flash');
+});
+</script>
+</body>
+</html>

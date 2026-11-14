@@ -12,6 +12,7 @@ import '../logger_service.dart';
 import 'agent_scenario.dart';
 import '../headless_webview_pool.dart';
 import 'scenarios/annotation_rewrite_scenario.dart';
+import 'scenarios/side_story_scenario.dart';
 import 'scenarios/text_game_scenario.dart';
 import 'scenarios/writing_scenario.dart';
 import 'scenarios/webview_extract_scenario.dart';
@@ -38,6 +39,20 @@ class AgentScenarioFactory {
               'annotation_rewrite 场景需要 AgentScenarioContext.rewriteTarget');
         }
         return AnnotationRewriteScenario(_ref, target);
+      case ScenarioIds.sideStory:
+        final target = context.sideStoryTarget;
+        if (target == null) {
+          throw ArgumentError(
+              'side_story 场景需要 AgentScenarioContext.sideStoryTarget');
+        }
+        // 宿主小说 id：SideStoryScenario 的工具经 resolveCurrentNovelUrl
+        // 按 id 解析目标，factory 在此查库补齐（创建番外后场景自行切换 id）。
+        final anchorNovel =
+            await _ref.read(novelRepositoryProvider).getNovelByUrl(target.anchorNovelUrl);
+        if (anchorNovel == null) {
+          throw StateError('番外宿主小说不存在: ${target.anchorNovelUrl}');
+        }
+        return SideStoryScenario(_ref, target)..bindAnchorNovelId(anchorNovel.id!);
       case ScenarioIds.textGame:
         final gameId = context.textGameId;
         if (gameId == null) {
@@ -135,6 +150,13 @@ class AgentScenarioFactory {
           displayName: '按标注重写',
           icon: '📝',
           supportsMemory: false,
+        ),
+        const ScenarioInfo(
+          id: ScenarioIds.sideStory,
+          displayName: '番外创作',
+          icon: '🔖',
+          supportsMemory: false,
+          showInChatMenu: false,
         ),
         const ScenarioInfo(
           id: ScenarioIds.textGame,
