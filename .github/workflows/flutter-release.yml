@@ -224,6 +224,16 @@ jobs:
           echo "✅ keystore 解码完成，key.properties 已生成"
           ls -la android/novel-app-release-key.jks
 
+      - name: Setup JDK 17
+        # 不固定 JDK 会在 runner 镜像更新后踩坑：ubuntu-latest 的默认 JDK
+        # 已漂到 25.0.5，AGP/Gradle 8.12 的 JavaVersion 解析在 "25.0.5" 上
+        # 直接崩（构建报错只有裸版本号一行）。Flutter 3.35 + AGP 8.x 的
+        # 官方支持区间是 JDK 17~21，钉 17（temurin LTS）。
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Build per-architecture release APKs
         # BACKEND_BASE_URL 经仓库 Variables 注入（vars.——该地址会编译进对外
         # 分发的 APK，本身非机密）。AI 托管模式（设备注册领额度 / Star 兑换 /
