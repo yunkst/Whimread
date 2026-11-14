@@ -470,16 +470,16 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
           ),
           // 展开内容
           if (_expanded) _buildExpandedBody(context, call),
-          // update_chapter_content / create_chapter 成功时，渲染跳转阅读器入口
-          if ((call.name == 'update_chapter_content' || call.name == 'create_chapter') &&
+          // update_chapter_content / save_chapter 成功时，渲染跳转阅读器入口
+          if ((call.name == 'update_chapter_content' || call.name == 'save_chapter') &&
               call.status == AgentToolStatus.completed &&
               _rewriteEntry != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: ChapterRewriteEntryCard(
                 data: _rewriteEntry!,
-                titleText: call.name == 'create_chapter'
-                    ? '查看新创建的章节'
+                titleText: call.name == 'save_chapter'
+                    ? '查看新保存的章节'
                     : '查看重写后的章节',
               ),
             ),

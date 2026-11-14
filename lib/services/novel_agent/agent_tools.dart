@@ -7,7 +7,10 @@
 ///   读 / 写 / 创建章节均通过 position 定位，不暴露真实 chapterId
 /// - 角色定位使用 `name`（list_characters 返回的名字），不暴露真实 characterId
 /// - 章节写入分两类：
-///   - create_chapter / rewrite_chapter 走 LLM 生成流程：组合「修改/创作要求 +
+///   - save_chapter 是「哑保存」工具：Agent 在回复中直接写出整章正文后调用它
+///     落库（带 300 字长度下限防截断）。正文生成发生在 Agent 会话内，天然
+///     携带完整上下文（锚点章/需求/人物卡/大纲/已写章节）。
+///   - rewrite_chapter 走 LLM 生成流程：组合「原文 + 修改要求 + 前一章末尾 +
 ///     人物卡 + 写作技巧 + AI 作家设定」为提示词，调用 LLM 产出整章正文后入库；
 ///     只回传元信息，并在聊天窗口渲染跳转入口。
 ///   - update_chapter_content 走精确字符串替换（oldString→newString，复用 9 重容错
@@ -28,7 +31,7 @@ class AgentTools {
     _listChapters,
     _searchInChapters,
     // ===== 章节写入 =====
-    _createChapter,
+    _saveChapter,
     _updateChapterContent,
     _rewriteChapter,
     _deleteChapter,
@@ -245,17 +248,18 @@ class AgentTools {
 
   // ===== 章节写入 =====
 
-  static const _createChapter = {
+  static const _saveChapter = {
     'type': 'function',
     'function': {
-      'name': 'create_chapter',
+      'name': 'save_chapter',
       'description':
-          '在指定位置创建新章节，由 AI 生成正文内容。\n'
-          '本工具会根据「创作要求」、「人物卡」和「写作技巧」组合成提示词调用 LLM 生成正文，'
-          '然后插入到指定位置（原有章节自动后移）。\n'
+          '保存一个新章节。你必须在调用本工具之前的回复中已经完整写出该章全部正文，'
+          '然后把同一段正文逐字作为 content 传入。\n'
+          '本工具只负责校验与落库（插入到指定位置，原有章节自动后移），不会生成任何内容。\n'
           'position 来自 list_chapters 返回的 position 字段（1-based）；'
           '若 position = N+1（N 为当前章节数），则追加到末尾。\n'
-          '生成完成后，聊天窗口会出现可点击的跳转入口。',
+          'content 低于 300 字会被拒绝（防截断）；正常章节正文应为 1500~3000 字。\n'
+          '保存成功后，聊天窗口会出现可点击的跳转入口。',
       'parameters': {
         'type': 'object',
         'properties': {
@@ -265,34 +269,19 @@ class AgentTools {
                 '新章节要插入的位置（1-based）。例如 position=3 表示插入为第 3 章，'
                 '原第 3 章及之后的章节自动后移。position = N+1 时追加到末尾。',
           },
-          'instruction': {
-            'type': 'string',
-            'description':
-                '创作要求（自然语言，尽量精简）。一两句话说明本章要写什么即可，'
-                '例如「主角在酒馆遇到神秘老人，获得关键线索」「写一段紧张的追逐戏」。'
-                '不要把具体台词、对话展开、逐段情节大纲或成文内容写进指令——'
-                '情节细节和对话由生成模型自由发挥，指令写得过细会束缚创作。',
-          },
           'title': {
             'type': 'string',
             'description': '章节标题。不传时默认使用「第 {position} 章」。',
           },
-          'characterNames': {
-            'type': 'array',
-            'items': {'type': 'string'},
+          'content': {
+            'type': 'string',
             'description':
-                '参与本章的角色名字列表（如 ["李明","张薇"]）。'
-                '这些人物的外貌、性格、背景设定将作为创作上下文。不传则不注入人物设定。',
-          },
-          'tagNames': {
-            'type': 'array',
-            'items': {'type': 'string'},
-            'description':
-                '要应用的写作技巧名称列表（如 ["赛博朋克","暗黑"]）。'
-                '系统会从每个技巧随机抽取一条 prompt 文本拼入提示词。不传则不注入技巧。',
+                '章节正文全文。必须与你在回复中已经写出的正文逐字一致'
+                '（含段落换行），不要缩写、不要用「同上/省略」占位，'
+                '不要混入标题或任何说明性文字。',
           },
         },
-        'required': ['position', 'instruction'],
+        'required': ['position', 'content'],
       },
     },
   };

@@ -343,7 +343,7 @@ void main() {
       'read_chapter_content': (file: 'chapter_read_executor.dart', method: 'readChapterContent'),
       'list_chapters': (file: 'chapter_read_executor.dart', method: 'listChapters'),
       'search_in_chapters': (file: 'chapter_read_executor.dart', method: 'searchInChapters'),
-      'create_chapter': (file: 'chapter_write_executor.dart', method: 'createChapter'),
+      'save_chapter': (file: 'chapter_write_executor.dart', method: 'saveChapter'),
       'update_chapter_content': (file: 'chapter_write_executor.dart', method: 'updateChapterContent'),
       'rewrite_chapter': (file: 'chapter_write_executor.dart', method: 'rewriteChapterContent'),
       'delete_chapter': (file: 'chapter_write_executor.dart', method: 'deleteChapter'),

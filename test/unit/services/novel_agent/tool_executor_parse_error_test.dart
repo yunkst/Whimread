@@ -56,18 +56,18 @@ void main() {
       final args = {
         kArgsParseErrorKey: true,
         kArgsParseErrorDetailKey: 'FormatException: 缺右括号',
-        kArgsRawPreviewKey: '{"position":1,"instruction":"未闭合',
+        kArgsRawPreviewKey: '{"position":1,"content":"未闭合',
       };
 
-      final result = await executor.execute('create_chapter', args);
+      final result = await executor.execute('save_chapter', args);
       final decoded = jsonDecode(result) as Map<String, dynamic>;
 
       expect(decoded['error'], 'args_parse_failed');
       expect(decoded['message'], contains('JSON'));
       expect(decoded['parse_error_detail'], 'FormatException: 缺右括号');
       expect(decoded['previous_args_preview'],
-          '{"position":1,"instruction":"未闭合');
-      expect(decoded['suggested_action'], contains('重新调用 create_chapter'));
+          '{"position":1,"content":"未闭合');
+      expect(decoded['suggested_action'], contains('重新调用 save_chapter'));
     });
 
     test('__parse_error + 未知工具名 → 仍走短路（而非 unknown_tool）', () async {

@@ -51,7 +51,7 @@ class ChapterRewriteEntryData {
 class ChapterRewriteEntryCard extends ConsumerStatefulWidget {
   final ChapterRewriteEntryData data;
   /// 入口卡片的主文案（默认"查看章节"）。由调用方按场景传入，
-  /// 如 update_chapter_content 传"查看重写后的章节"，create_chapter 传"查看新创建的章节"。
+  /// 如 update_chapter_content 传"查看重写后的章节"，save_chapter 传"查看新保存的章节"。
   final String titleText;
 
   const ChapterRewriteEntryCard({

@@ -129,7 +129,7 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
       _syncCurrentContext(result);
       return result;
     }
-    // 其余工具（含 create_chapter / update_chapter_content 的流式进度）透传 onProgress
+    // 其余工具（含 rewrite_chapter / update_chapter_content 的流式进度）透传 onProgress
     return await _executor.execute(
       name,
       args,

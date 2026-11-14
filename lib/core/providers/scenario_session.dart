@@ -1286,7 +1286,8 @@ class ScenarioSession with ScenarioSessionMessageChain {
         '番外需求：\n$requirement\n\n'
         '$countHint\n'
         '请按流程完成：read_chapter_content 通读锚点章 → 按需查人物卡与写作技巧 → '
-        'create_side_story 建番外 → 逐章 create_chapter 生成全部正文，完成后简短总结。';
+        'create_side_story 建番外 → 逐章创作：在你的回复中直接写出该章完整正文，'
+        '随后立即调用 save_chapter 保存（一次只写一章、保存一章），完成后简短总结。';
 
     final userMsg = ChatMessage(role: 'user', content: userContent);
     _agentMessages.add(userMsg);

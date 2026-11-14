@@ -1,9 +1,14 @@
-/// 章节写入子执行器 — create_chapter / update_chapter_content /
+/// 章节写入子执行器 — save_chapter / update_chapter_content /
 /// rewrite_chapter / delete_chapter
 ///
+/// save_chapter 是「哑保存」工具：Agent 在回复中直接写出正文后调用本工具
+/// 落库，不再走内层 LLM 生成（2026-11-14 移除 create_chapter——其独立
+/// LLM 调用与会话上下文完全隔离，只靠 instruction 独木桥传上下文，是
+/// 「生成内容丢上下文、细节错乱」的根因）。
+///
 /// 唯一持有 LLM 调用链的子执行器（_callLlm + _loadWriterPrompt +
-/// _buildContextParts + _rewriteChapter + _generateChapter）。这些 helper
-/// 跟着「章节写入」走，不跨域，所以留在本文件内私有。
+/// _buildContextParts + _rewriteChapter，供 rewrite_chapter 使用）。
+/// 这些 helper 跟着「章节写入」走，不跨域，所以留在本文件内私有。
 library;
 
 import 'dart:convert';
@@ -38,23 +43,22 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
   @override
   final Ref ref;
 
-  Future<String> createChapter(
+  /// save_chapter：把 Agent 在回复中写好的正文落库为新章节（哑工具，不调 LLM）。
+  ///
+  /// 与旧 create_chapter（内层独立 LLM 生成）不同，正文由 Agent 基于其完整
+  /// 会话上下文（锚点章/需求/人物卡/大纲/已写章节）在回复中直接写出，本工具
+  /// 只做校验与落库——上下文不再经过 instruction 独木桥，细节一致性由
+  /// Agent 的会话记忆保证。
+  Future<String> saveChapter(
     Map<String, dynamic> args,
-    AgentScenarioContext? ctx, {
-    void Function(int generatedChars)? onProgress,
-  }) async {
+    AgentScenarioContext? ctx,
+  ) async {
     final parser = ToolArgParser(args);
     final (position, posErr) = parser.requireInt('position');
     if (posErr != null) return posErr;
-    final (instruction, instErr) = parser.requireString('instruction');
-    if (instErr != null) return instErr;
     final (title, _) = parser.optionalString('title');
-    final (characterNames, charNamesErr) = parser.optionalStringList('characterNames');
-    if (charNamesErr != null) return charNamesErr;
-    final (tagNames, tagNamesErr) = parser.optionalStringList('tagNames');
-    if (tagNamesErr != null) return tagNamesErr;
-    final charNames = characterNames ?? const <String>[];
-    final tags = tagNames ?? const <String>[];
+    final (rawContent, contentErr) = parser.requireString('content');
+    if (contentErr != null) return contentErr;
 
     final novelResolve = await resolveCurrentNovelUrl(ctx);
     if (novelResolve.errorJson != null) {
@@ -68,9 +72,9 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     final totalCount = chapters.length;
     if (position < 1 || position > totalCount + 1) {
       LoggerService.instance.w(
-        '工具引导错误: create_chapter_position_out_of_range position=$position total=$totalCount',
+        '工具引导错误: save_chapter_position_out_of_range position=$position total=$totalCount',
         category: LogCategory.ai,
-        tags: ['agent', 'tool', 'create_chapter', 'position_out_of_range'],
+        tags: ['agent', 'tool', 'save_chapter', 'position_out_of_range'],
       );
       return jsonEncode(guidanceError(
         'position_out_of_range',
@@ -88,31 +92,37 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
         ? title.trim()
         : '第 $position 章';
 
-    // 取前一章正文作为衔接上下文（position=1 无前一章；前一章未缓存则跳过）
-    String? previousChapterContext;
-    if (position >= 2) {
-      final prevChapter = chapters[position - 2]; // 前一章（列表 0-based）
-      final prevContent = await chapterRepo.getCachedChapter(prevChapter.url);
-      if (prevContent != null && prevContent.trim().isNotEmpty) {
-        previousChapterContext = '《${prevChapter.title}》\n\n$prevContent';
-      }
+    // 入参清洗：还原 LLM 透传的字面 JSON 转义序列（与 update_chapter_content
+    // 同一防御纵深——content 经 JSON 参数包装，\n 等序列可能未被还原就落库）
+    final content = unescapeJsonEscapeSequences(rawContent);
+    if (content != rawContent) {
+      LoggerService.instance.w(
+        '工具入参清洗: save_chapter content=${rawContent.length}→${content.length} '
+        'position=$position',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'save_chapter', 'escape_unwrapped'],
+      );
     }
 
-    // 调用 LLM 生成正文
-    final generateResult = await _generateChapter(
-      novelUrl: novelUrl,
-      chapterTitle: chapterTitle,
-      instruction: instruction,
-      characterNames: charNames,
-      tagNames: tags,
-      previousChapterContext: previousChapterContext,
-      scenarioId: ctx?.scenarioId ?? ScenarioIds.writing,
-      onProgress: onProgress,
-    );
-    if (generateResult.errorJson != null) {
-      return jsonEncode(generateResult.errorJson);
+    final newContent = ContentSanitizer.sanitize(content);
+
+    // 长度下限：过短 = 回复被截断 / Agent 偷懒没写完整正文。拒绝保存并引导
+    // 重写，防止残缺章节混进正文体系。
+    const minChars = 300;
+    if (newContent.length < minChars) {
+      LoggerService.instance.w(
+        '工具引导错误: save_chapter_content_too_short position=$position '
+        'chars=${newContent.length}',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'save_chapter', 'content_too_short'],
+      );
+      return jsonEncode({
+        'error': 'content_too_short',
+        'message': '正文仅 ${newContent.length} 字，低于 $minChars 字下限，'
+            '疑似回复被截断或正文未完整写出。请重新完整写出《$chapterTitle》的全部正文'
+            '（建议 1500~3000 字），然后再次调用本工具保存。',
+      });
     }
-    final newContent = ContentSanitizer.sanitize(generateResult.content!);
 
     // 插入章节：走 ChapterMutationNotifier 收口（单事务 shift+insert + bump signal
     // 触发章节列表软刷新）。insertIndex = position - 1（0-based）。
@@ -127,13 +137,13 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
             insertIndex: insertIndex,
           );
     } catch (e, stack) {
-      LoggerService.instance.e('创建章节入库失败: $e',
+      LoggerService.instance.e('章节保存入库失败: $e',
           stackTrace: stack.toString(),
           category: LogCategory.ai,
-          tags: ['agent', 'tool', 'create_chapter', 'db_error']);
+          tags: ['agent', 'tool', 'save_chapter', 'db_error']);
       return jsonEncode({
         'error': 'db_error',
-        'message': '章节内容已生成但入库失败：$e',
+        'message': '章节保存失败：$e。正文仍在你此前的回复中，请重试保存。',
       });
     }
 
@@ -145,11 +155,11 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     );
 
     LoggerService.instance.i(
-        'AI 创建章节: position=$position, title="$chapterTitle", ${newContent.length} chars',
-        category: LogCategory.ai, tags: ['agent', 'tool', 'create_chapter']);
+        'Agent 保存章节: position=$position, title="$chapterTitle", ${newContent.length} chars',
+        category: LogCategory.ai, tags: ['agent', 'tool', 'save_chapter']);
     return jsonEncode({
       'success': true,
-      'message': '章节「$chapterTitle」已创建（${newContent.length} 字）。',
+      'message': '章节「$chapterTitle」已保存（${newContent.length} 字）。',
       'chapterTitle': chapterTitle,
       'position': position,
       'novelUrl': novelUrl,
@@ -635,66 +645,6 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       systemPrompt: systemPrompt,
       userPrompt: prompt.toString(),
       failTag: 'update_chapter_content',
-      scenarioId: scenarioId,
-      onProgress: onProgress,
-    );
-  }
-
-  /// 调用 LLM 创作新章节
-  ///
-  /// 组合「前一章正文（可选）+ 创作要求 + 人物卡 + 技巧 prompt」为提示词（无原文），
-  /// 流式调用 LLM，返回新正文或错误。
-  Future<_RewriteResult> _generateChapter({
-    required String novelUrl,
-    required String chapterTitle,
-    required String instruction,
-    required List<String> characterNames,
-    required List<String> tagNames,
-    String? previousChapterContext,
-    String scenarioId = ScenarioIds.writing,
-    void Function(int generatedChars)? onProgress,
-  }) async {
-    final writerPrompt = await _loadWriterPrompt();
-    final contextParts =
-        await _buildContextParts(novelUrl, characterNames, tagNames);
-
-    final prompt = StringBuffer()
-      ..writeln('请根据以下信息创作新的章节正文。')
-      ..writeln()
-      ..writeln('## 章节标题')
-      ..writeln(chapterTitle)
-      ..writeln();
-    // 前一章正文：用成对硬边界符号包裹，明确为只读参考，避免与创作要求/产出混淆
-    if (previousChapterContext != null && previousChapterContext.isNotEmpty) {
-      prompt
-        ..writeln('## 前一章内容（仅供衔接参考：保持人物、情节、场景连贯，'
-            '勿与上文矛盾，不要重复上文情节，不要直接续写接龙）')
-        ..writeln()
-        ..writeln('━━━━━━━━━ 上一章正文开始 ━━━━━━━━━')
-        ..writeln(previousChapterContext)
-        ..writeln('━━━━━━━━━ 上一章正文结束 ━━━━━━━━━')
-        ..writeln();
-    }
-    prompt
-      ..writeln('## 创作要求')
-      ..writeln(instruction)
-      ..writeln();
-    if (contextParts.isNotEmpty) {
-      prompt.writeln(contextParts.join('\n'));
-      prompt.writeln();
-    }
-    prompt
-      ..writeln('## 输出要求')
-      ..writeln('请直接输出完整的章节正文，不要输出任何说明、标题或解释性文字。');
-
-    final systemPrompt = writerPrompt.isNotEmpty
-        ? '$writerPrompt\n\n你是专业的小说写作助手，只输出小说正文。'
-        : '你是专业的小说写作助手，只输出小说正文。';
-
-    return _callLlm(
-      systemPrompt: systemPrompt,
-      userPrompt: prompt.toString(),
-      failTag: 'create_chapter',
       scenarioId: scenarioId,
       onProgress: onProgress,
     );

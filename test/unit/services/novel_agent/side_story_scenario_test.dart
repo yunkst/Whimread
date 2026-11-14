@@ -80,13 +80,15 @@ void main() {
         'list_chapters',
         'list_characters',
         'create_side_story',
-        'create_chapter',
+        'save_chapter',
         'list_prompt_tags',
         'get_prompt_tag',
       });
       expect(names.contains('update_chapter_content'), isFalse,
           reason: '番外场景不能改宿主章节');
       expect(names.contains('delete_chapter'), isFalse);
+      expect(names.contains('create_chapter'), isFalse,
+          reason: 'create_chapter 已移除：正文由 Agent 在回复中直接写出');
     });
 
     test('executeTool 未知名返回 unknown_tool', () async {
@@ -96,13 +98,15 @@ void main() {
       expect(json['error'], 'unknown_tool');
     });
 
-    test('executeTool create_chapter 在未建番外时返回 no_side_story 引导', () async {
+    test('executeTool save_chapter 在未建番外时返回 no_side_story 引导', () async {
       final scenario = buildScenario();
-      final result = await scenario
-          .executeTool('create_chapter', {'position': 1, 'instruction': 'x'});
+      final result = await scenario.executeTool('save_chapter', {
+        'position': 1,
+        'content': '正文' * 200,
+      });
       final json = jsonDecode(result) as Map<String, dynamic>;
       expect(json['error'], 'no_side_story');
-      expect(json['suggestedTool'], 'create_side_story');
+      expect(json['suggested_tool'], 'create_side_story');
     });
   });
 
@@ -188,6 +192,73 @@ void main() {
           reason: '相同锚点章+相同需求 → 复用已有番外，不重复创建');
       final rows = await db.query('bookshelf', where: 'isSideStory = 1');
       expect(rows, hasLength(1));
+    });
+  });
+
+  group('save_chapter 落库链路', () {
+    /// 建番外并返回场景（上下文已切到番外）
+    Future<AgentScenario> createThenBuild() async {
+      final scenario = buildScenario();
+      await scenario.executeTool('create_side_story', {'title': '闺蜜往事'});
+      return scenario;
+    }
+
+    test('正文达标 → 落库到番外（宿主章节不受影响）', () async {
+      final scenario = await createThenBuild();
+      final content = '第一章正文。\n\n${'林晚与苏晴的往事段落。' * 40}';
+      final result = await scenario.executeTool('save_chapter', {
+        'position': 1,
+        'title': '初遇',
+        'content': content,
+      });
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['success'], isTrue, reason: 'result=$result');
+      expect(json['chapterTitle'], '初遇');
+      expect(json['position'], 1);
+
+      // 章节落在番外 novelUrl 下，宿主小说无新增章节
+      final sideChapters = await db.query(
+        'novel_chapters',
+        where: 'chapterUrl = ?',
+        whereArgs: [json['chapterUrl']],
+      );
+      expect(sideChapters, hasLength(1));
+      expect(sideChapters.single['title'], '初遇');
+      expect(sideChapters.single['novelUrl'], startsWith('custom://sidestory/'));
+
+      final hostChapters = await db.query(
+        'novel_chapters',
+        where: 'novelUrl = ?',
+        whereArgs: [target.anchorNovelUrl],
+      );
+      expect(hostChapters, isEmpty,
+          reason: '宿主小说（测试夹具未种子章节）不应新增章节');
+    });
+
+    test('正文低于 300 字下限 → content_too_short，不落库', () async {
+      final scenario = await createThenBuild();
+      final result = await scenario.executeTool('save_chapter', {
+        'position': 1,
+        'title': '初遇',
+        'content': '太短的正文。',
+      });
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['error'], 'content_too_short');
+      expect(json['message'], contains('300'));
+
+      final chapters = await db.query('novel_chapters');
+      expect(chapters, isEmpty, reason: '残缺正文不得入库');
+    });
+
+    test('position 越界 → position_out_of_range 引导', () async {
+      final scenario = await createThenBuild();
+      final result = await scenario.executeTool('save_chapter', {
+        'position': 2, // 番外尚无章节，有效位置只有 1
+        'content': '第一章正文。\n\n${'段落。' * 60}',
+      });
+      final json = jsonDecode(result) as Map<String, dynamic>;
+      expect(json['error'], 'position_out_of_range');
+      expect(json['suggested_tool'], 'list_chapters');
     });
   });
 

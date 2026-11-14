@@ -99,9 +99,8 @@ class ToolExecutor with ToolExecutorHelpers {
         case 'search_in_chapters':
           return await _chapterRead.searchInChapters(args, scenarioContext);
         // ===== 章节写入 =====
-        case 'create_chapter':
-          return await _chapterWrite.createChapter(args, scenarioContext,
-              onProgress: onProgress);
+        case 'save_chapter':
+          return await _chapterWrite.saveChapter(args, scenarioContext);
         case 'update_chapter_content':
           return await _chapterWrite.updateChapterContent(args, scenarioContext,
               onProgress: onProgress);

@@ -8,16 +8,18 @@
 /// - 目标绑定：宿主小说/锚点章来自构造时注入的 [SideStoryTarget]
 ///   （经 AgentScenarioContext.sideStoryTarget 传递）。
 /// - 上下文切换：`create_side_story` 建番外（不入书架的 bookshelf 行）成功后，
-///   内部工作上下文切到番外 novel——后续 `create_chapter` 全部落进番外的
-///   章节（复用 ChapterWriteExecutor 的前章衔接/字数进度/落库收口），
-///   物理上无法写入宿主小说。
+///   内部工作上下文切到番外 novel——后续 `save_chapter` 全部落进番外的
+///   章节（复用 ChapterWriteExecutor 的校验/清洗/落库收口），物理上无法
+///   写入宿主小说。
+/// - 正文由 Agent 在回复中直接写出（完整会话上下文天然可见：锚点章/需求/
+///   人物卡/已写各章），`save_chapter` 只做校验与落库，不再有内层 LLM 生成。
 /// - 最小工具面：
 ///   - `read_chapter_content` —— 只读锚点章正文（宿主上下文的唯一正文入口）
 ///   - `list_chapters`        —— 宿主小说章节列表（了解主线脉络）
 ///   - `list_characters`      —— 宿主小说人物卡（恒指向宿主，不随上下文切换）
 ///   - `list_prompt_tags` / `get_prompt_tag` —— 写作技巧（只读）
 ///   - `create_side_story`    —— 建番外并切换工作上下文
-///   - `create_chapter`       —— 在番外内逐章生成正文
+///   - `save_chapter`         —— 保存 Agent 写好的番外章节
 library;
 
 import 'dart:convert';
@@ -51,7 +53,7 @@ class SideStoryScenario with AgentScenarioCleanupMixin implements AgentScenario 
         _kListChaptersTool,
         _kListCharactersTool,
         _kCreateSideStoryTool,
-        _kCreateChapterTool,
+        _kSaveChapterTool,
         _kListPromptTagsTool,
         _kGetPromptTagTool,
       ];
@@ -65,7 +67,7 @@ class SideStoryScenario with AgentScenarioCleanupMixin implements AgentScenario 
       );
 
   /// 工作上下文（可变）：create_side_story 成功后切到番外 novel，
-  /// create_chapter 据此落库进番外。
+  /// save_chapter 据此落库进番外。
   AgentScenarioContext? _writingContext;
 
   /// 宿主小说 id（创建时由 startSideStoryCreation 注入）
@@ -104,16 +106,16 @@ class SideStoryScenario with AgentScenarioCleanupMixin implements AgentScenario 
 1. 调用 `read_chapter_content` 通读锚点章正文，理解番外要挂接的剧情点。
 2. 需要了解主线脉络时调用 `list_chapters`；需要人物设定时调用 `list_characters`（人物卡恒指向宿主小说）。
 3. 调用 `list_prompt_tags` 查看用户的写作技巧库，与本次创作相关的技巧用 `get_prompt_tag` 读取完整提示词，落笔时遵循。
-4. 调用 `create_side_story(title)` 建立番外（标题要像作品名，能概括这条支线，4~10 字为佳）。创建后所有写操作自动作用于该番外。
-5. 逐章调用 `create_chapter(position, title, instruction)` 生成正文：
-   - position 从 1 开始连续递增，一气呵成生成全部章节，中途不要停下来询问用户。
-   - 第 1 章的 instruction 要包含番外的整体构思（起因/经过/结局的走向）；后续章节的 instruction 聚焦本章情节点。
-   - 每章 instruction 中请自然融入涉及人物的性格、关系与口吻要点（人物卡来自第 2 步，工具不会自动注入人物卡）。
-   - 每章正文 1500~3000 字，结尾留有推进感。
-6. 全部章节完成后，直接输出简短总结（番外名/章数/各章一句话简介），不要调用工具——看到你没有工具调用，流程即结束。
+4. 调用 `create_side_story(title)` 建立番外（标题要像作品名，能概括这条支线，4~10 字为佳）。创建后所有保存操作自动作用于该番外。
+5. 逐章创作（一章一轮，写完即存）：
+   - 在**你的回复中直接写出该章完整正文**（1500~3000 字），人物性格、关系与口吻要点自然融入行文——你已在第 2 步读到人物卡，写作时它们就在你的上下文里。
+   - 写完立即调用 `save_chapter(position, title, content)` 保存，content 必须与你刚写出的正文**逐字一致**（含段落换行）。
+   - position 从 1 开始连续递增；一轮回复只写一章、保存一章，不要把多章塞进同一个回复（会被截断）。
+   - 每章结尾留有推进感；相邻章节衔接连贯，人物细节前后一致。
+6. 全部章节保存完成后，直接输出简短总结（番外名/章数/各章一句话简介），不要调用工具——看到你没有工具调用，流程即结束。
 
 ## 硬性规则
-1. `create_chapter` 只能在番外上使用（自动生效，你无需关心目标）。
+1. `save_chapter` 只能保存到番外（自动生效，你无需关心目标）；只调工具不写正文、或只写正文不调工具，都会导致内容丢失。
 2. 不调用任何改写/删除宿主章节、改人物、改大纲的工具——工具面里也没有它们。
 3. 期望章节数：$countReq。
 4. 用户需求是最高优先级；需求与主线设定冲突时，以用户需求为准。
@@ -195,7 +197,7 @@ ${_target.requirement}''';
     if (createdSideStory != null) {
       return jsonEncode({
         'error': 'already_created',
-        'message': '番外《${createdSideStory!.title}》已创建，请继续用 create_chapter 写章节，不要重复创建。',
+        'message': '番外《${createdSideStory!.title}》已创建，请继续在回复中写正文并调用 save_chapter 保存，不要重复创建。',
       });
     }
     // 跨 run 幂等保护：场景实例每回合重建，同一次创作任务的后续回合
@@ -220,7 +222,7 @@ ${_target.requirement}''';
         'sideStoryId': novel.id,
         'sideStoryTitle': novel.title,
         'anchorChapter': _target.anchorChapterTitle,
-        'message': '本任务已创建过番外《${novel.title}》，已切换为当前工作目标，继续用 create_chapter 写章节。',
+        'message': '本任务已创建过番外《${novel.title}》，已切换为当前工作目标，继续在回复中写正文并调用 save_chapter 保存。',
       });
     }
     final title = args['title']?.toString().trim() ?? '';
@@ -270,20 +272,17 @@ ${_target.requirement}''';
     );
   }
 
-  /// create_chapter：在番外内生成章节（复用 ChapterWriteExecutor 全套能力）
-  Future<String> _createChapter(
-    Map<String, dynamic> args, {
-    void Function(int generatedChars)? onProgress,
-  }) async {
+  /// save_chapter：把 Agent 在回复中写好的正文保存进番外
+  /// （复用 ChapterWriteExecutor 的校验/清洗/落库收口）
+  Future<String> _saveChapter(Map<String, dynamic> args) async {
     if (createdSideStory == null) {
       return jsonEncode({
         'error': 'no_side_story',
         'message': '尚未创建番外。请先调用 create_side_story(title)。',
-        'suggestedTool': 'create_side_story',
+        'suggested_tool': 'create_side_story',
       });
     }
-    return ChapterWriteExecutor(_ref)
-        .createChapter(args, _writingContext, onProgress: onProgress);
+    return ChapterWriteExecutor(_ref).saveChapter(args, _writingContext);
   }
 
   // ============================== 工具调度 ==============================
@@ -305,8 +304,8 @@ ${_target.requirement}''';
         return CharacterExecutor(_ref).listCharacters(args, _anchorContext);
       case 'create_side_story':
         return _createSideStory(args);
-      case 'create_chapter':
-        return _createChapter(args, onProgress: onProgress);
+      case 'save_chapter':
+        return _saveChapter(args);
       case 'list_prompt_tags':
         return PromptTagExecutor(_ref).listPromptTags(args);
       case 'get_prompt_tag':
@@ -367,7 +366,7 @@ const Map<String, dynamic> _kCreateSideStoryTool = {
     'name': 'create_side_story',
     'description':
         '创建番外（一段挂载在锚点章下的独立支线，不进入主线章节列表）。'
-        '创建成功后，后续所有 create_chapter 自动写入该番外。整个任务只能创建一次。',
+        '创建成功后，后续所有 save_chapter 自动写入该番外。整个任务只能创建一次。',
     'parameters': {
       'type': 'object',
       'properties': {
@@ -381,13 +380,15 @@ const Map<String, dynamic> _kCreateSideStoryTool = {
   },
 };
 
-const Map<String, dynamic> _kCreateChapterTool = {
+const Map<String, dynamic> _kSaveChapterTool = {
   'type': 'function',
   'function': {
-    'name': 'create_chapter',
+    'name': 'save_chapter',
     'description':
-        '在番外内创建一章并生成正文（AI 全文生成，无需提供 content）。'
-        '必须先 create_side_story。章节自动衔接前一章结尾；instruction 中请融入人物性格与本章情节点。',
+        '保存一章番外。你必须在调用前的回复中已经完整写出该章全部正文'
+        '（1500~3000 字），然后把同一段正文逐字作为 content 传入。'
+        '本工具只负责校验与落库，不会生成任何内容；content 低于 300 字会被拒绝。'
+        '必须先 create_side_story。',
     'parameters': {
       'type': 'object',
       'properties': {
@@ -399,22 +400,14 @@ const Map<String, dynamic> _kCreateChapterTool = {
           'type': 'string',
           'description': '本章标题（如「初遇」）',
         },
-        'instruction': {
+        'content': {
           'type': 'string',
-          'description': '本章创作要求：情节要点、涉及人物与性格口吻、场景与氛围、期望字数等',
-        },
-        'characterNames': {
-          'type': 'array',
-          'items': {'type': 'string'},
-          'description': '本章出场人物名（供记录，人物设定需写入 instruction）',
-        },
-        'tagNames': {
-          'type': 'array',
-          'items': {'type': 'string'},
-          'description': '要应用的写作技巧名',
+          'description':
+              '本章正文全文，与你回复中已写出的正文逐字一致（含段落换行），'
+              '不要缩写或占位，不要混入标题或说明性文字',
         },
       },
-      'required': <String>['position', 'instruction'],
+      'required': <String>['position', 'content'],
     },
   },
 };

@@ -991,7 +991,7 @@ class AgentLoop {
         tags: ['agent', 'tool', call.name, _scenario.id]);
     emit(ToolCallStartEvent(call.name, call.arguments, call.id));
 
-    // 流式进度节流：仅 create_chapter / update_chapter_content 这类
+    // 流式进度节流：仅 rewrite_chapter / update_chapter_content 这类
     // 内部走 LLM 流式的工具会触发 onProgress 回调。
     // - 首个非空 chunk 必发，避免短章节全程无进度
     // - 之后每累计 100 字发一次（一章 ~3000 字约 30 次，UI 刷新可控）

@@ -206,7 +206,7 @@ abstract class AgentScenario {
 
   /// 执行工具调用
   ///
-  /// [onProgress] 可选进度回调，供内部走 LLM 流式的工具（如 create_chapter /
+  /// [onProgress] 可选进度回调，供内部走 LLM 流式的工具（如 rewrite_chapter /
   /// update_chapter_content）上报已生成字符数。不传或工具无流式生成时忽略。
   ///
   /// [toolCallId] LLM tool_calls[i].id（任务 7 引入），用于：
@@ -552,8 +552,8 @@ abstract final class ScenarioIds {
   static const annotationRewrite = 'annotation_rewrite';
 
   /// 番外创作 — 从创建番外弹层发起：AI 通读锚点章正文/人物卡/写作技巧，
-  /// 先 create_side_story 建番外（不入书架的 bookshelf 行），再逐章
-  /// create_chapter 生成正文。工具面锁定宿主上下文，不在通用聊天场景
+  /// 先 create_side_story 建番外（不入书架的 bookshelf 行），再逐章在回复中
+  /// 写出正文并 save_chapter 落库。工具面锁定宿主上下文，不在通用聊天场景
   /// 菜单出现（showInChatMenu=false）。
   static const sideStory = 'side_story';
 

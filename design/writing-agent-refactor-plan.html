@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>写作 Agent 重构计划 v2 — 在「已经写成的小说」上做衍生创作</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ================= 主题变量（晨读书馆 / 暗夜书馆） ================= */
+:root, [data-theme="light"] {
+  --page-bg: #F4EFE3;
+  --bg: #FFFDF8;
+  --paper: #F7F1E3;
+  --ink: #2B2620;
+  --ink-soft: #6B6358;
+  --accent: #8C5A1F;
+  --accent-2: #B8843A;
+  --chip-bg: rgba(184, 132, 58, .14);
+  --divider: #E5DDCC;
+  --card-shadow: 0 1px 3px rgba(43,38,32,.08), 0 8px 28px rgba(43,38,32,.10);
+  --ok: #5E7A3C; --ok-bg: #E0E8CF;
+  --err: #B23A2E; --err-bg: #F3DAD5;
+  --info: #4A4034; --info-bg: #E8E0D0;
+}
+[data-theme="dark"] {
+  --page-bg: #17130D;
+  --bg: #1C1812;
+  --paper: #241F16;
+  --ink: #E8DCC4;
+  --ink-soft: #B5A482;
+  --accent: #B8843A;
+  --accent-2: #D9A05B;
+  --chip-bg: rgba(217, 160, 91, .18);
+  --divider: #3A3128;
+  --card-shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.5);
+  --ok: #7A9A55; --ok-bg: #2A3A14;
+  --err: #D9685A; --err-bg: #4A1A14;
+  --info: #B0A282; --info-bg: #342D22;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--page-bg); color: var(--ink);
+  line-height: 1.75; transition: background .35s, color .35s;
+}
+.serif { font-family: "Noto Serif SC", Georgia, "STSong", serif; }
+
+/* ================= 顶栏 ================= */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--divider);
+  padding: 13px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.topbar h1 { font-size: 18px; font-weight: 700; }
+.topbar h1 small { font-weight: 400; color: var(--ink-soft); font-size: 12.5px; margin-left: 10px; }
+.topbar .spacer { flex: 1; }
+.nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.nav button {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink-soft);
+  padding: 4px 12px; border-radius: 999px; font-size: 12.5px; cursor: pointer; transition: all .15s;
+}
+.nav button:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ================= 布局 ================= */
+.wrap { max-width: 1060px; margin: 0 auto; padding: 36px 28px 90px; }
+.section { margin-bottom: 76px; scroll-margin-top: 90px; }
+.section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.section-head .no {
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  border: 1.5px solid var(--accent); border-radius: 8px; padding: 1px 9px;
+  letter-spacing: 1px; flex-shrink: 0;
+}
+.section-head h2 { font-size: 23px; font-weight: 700; }
+.section-sub { color: var(--ink-soft); font-size: 14.5px; margin-bottom: 24px; max-width: 820px; }
+.card {
+  background: var(--bg); border: 1px solid var(--divider);
+  border-radius: 18px; box-shadow: var(--card-shadow); padding: 28px;
+  margin-bottom: 20px; transition: box-shadow .3s;
+}
+.card.flash { animation: flash 1.4s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent-2), var(--card-shadow); } }
+
+h3.block-title {
+  font-size: 16px; color: var(--accent); margin: 0 0 14px; letter-spacing: .5px;
+  display: flex; align-items: center; gap: 8px;
+}
+p + p { margin-top: 10px; }
+b { color: var(--accent); }
+.lead { font-size: 15.5px; }
+.small { font-size: 13px; color: var(--ink-soft); }
+ul.list { padding-left: 20px; font-size: 14px; }
+ul.list li { margin-bottom: 8px; }
+ul.list li b { color: var(--ink); font-weight: 700; }
+
+/* ================= 徽标 chip ================= */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--chip-bg); color: var(--accent);
+  font-size: 12px; font-weight: 600; border-radius: 999px;
+  padding: 2px 11px; border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  white-space: nowrap;
+}
+.chip.p0 { background: var(--err-bg); color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+.chip.p1 { background: var(--chip-bg); color: var(--accent); }
+.chip.p2 { background: var(--info-bg); color: var(--info); border-color: var(--divider); }
+.chip.done { background: var(--ok-bg); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+
+/* ================= 工具全景网格 ================= */
+.tool-domains { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.domain {
+  background: var(--paper); border: 1px solid var(--divider); border-radius: 14px; padding: 16px 18px;
+}
+.domain h4 { font-size: 14px; color: var(--ink); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.domain h4 .cnt {
+  font-size: 11px; color: var(--accent); background: var(--chip-bg);
+  border-radius: 999px; padding: 0 8px; font-weight: 700;
+}
+.domain .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.tchip {
+  font-size: 12px; font-family: Consolas, monospace; color: var(--ink-soft);
+  border: 1px dashed var(--divider); border-radius: 7px; padding: 2px 8px;
+}
+.tchip.w { color: var(--accent); border-style: solid; border-color: color-mix(in srgb, var(--accent-2) 40%, transparent); }
+.tchip.new { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); font-weight: 700; }
+.tchip.gone { text-decoration: line-through; opacity: .55; }
+
+/* ================= 架构分层图 ================= */
+.layers { display: flex; flex-direction: column; gap: 10px; }
+.layer {
+  display: flex; align-items: center; gap: 14px;
+  border: 1.5px solid var(--divider); border-radius: 12px; padding: 12px 18px;
+  background: var(--paper);
+}
+.layer .lname { width: 130px; flex-shrink: 0; font-weight: 700; font-size: 14.5px; }
+.layer .ldesc { flex: 1; font-size: 13px; color: var(--ink-soft); }
+.layer.miss { border-style: dashed; opacity: .62; background: transparent; }
+.layer.miss .lname { color: var(--err); }
+.layer.miss .ldesc::before { content: "缺失 — "; color: var(--err); font-weight: 700; }
+.layer.have { border-left: 4px solid var(--ok); }
+.layer.planned { border-left: 4px solid var(--accent-2); }
+.layer .tag { margin-left: auto; }
+.arrow-row { text-align: center; color: var(--ink-soft); font-size: 15px; opacity: .7; }
+
+/* ================= Agent 对话模拟 ================= */
+.sim { background: var(--paper); border-radius: 14px; padding: 20px 22px; border: 1px solid var(--divider); }
+.sim-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.sim-head .who { font-weight: 700; font-size: 14.5px; }
+.sim-head .ctx {
+  font-size: 11.5px; color: var(--ink-soft); background: var(--bg);
+  border: 1px solid var(--divider); border-radius: 999px; padding: 2px 10px;
+}
+.msg { font-size: 13.5px; border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; max-width: 92%; }
+.msg.agent { background: var(--bg); border: 1px solid var(--divider); }
+.msg.tool { font-family: Consolas, monospace; font-size: 12.5px; color: var(--ink-soft); padding-left: 26px; position: relative; }
+.msg.tool::before { content: "⚙"; position: absolute; left: 8px; opacity: .7; }
+.msg.err { background: var(--err-bg); border-left: 3px solid var(--err); color: var(--err); }
+.msg.good { background: var(--ok-bg); border-left: 3px solid var(--ok); }
+.msg .lost { color: var(--err); font-weight: 700; }
+.msg .gain { color: var(--ok); font-weight: 700; }
+.vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .vs-grid { grid-template-columns: 1fr; } }
+.vs-label {
+  text-align: center; font-weight: 700; font-size: 13.5px; margin-bottom: 10px;
+  padding: 6px; border-radius: 9px;
+}
+.vs-label.bad { background: var(--err-bg); color: var(--err); }
+.vs-label.good { background: var(--ok-bg); color: var(--ok); }
+
+/* ================= 计划卡片 ================= */
+.plan-card { border-left: 4px solid var(--accent-2); }
+.plan-card.p0 { border-left-color: var(--err); }
+.plan-card.p2 { border-left-color: var(--info); }
+.plan-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.plan-head h3 { font-size: 17px; }
+.plan-head .ref { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+.mech {
+  background: var(--chip-bg); border-radius: 10px; padding: 12px 16px;
+  font-size: 13.5px; margin-top: 14px;
+}
+.mech b { color: var(--accent); }
+.mech .chain { font-family: inherit; }
+.mech .chain span { white-space: nowrap; }
+.mech .chain .arr { color: var(--accent-2); font-weight: 700; margin: 0 4px; }
+.kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; font-size: 13.5px; margin-top: 10px; }
+.kv .k { color: var(--ink-soft); font-weight: 600; }
+code.inline {
+  font-family: Consolas, monospace; font-size: 12.5px; background: var(--paper);
+  border: 1px solid var(--divider); border-radius: 6px; padding: 1px 7px; color: var(--accent);
+}
+
+/* ================= 案例表 ================= */
+table.cases { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.cases th, table.cases td {
+  border-bottom: 1px solid var(--divider); padding: 11px 12px; text-align: left; vertical-align: top;
+}
+table.cases th { color: var(--accent); font-size: 12.5px; letter-spacing: 1px; }
+table.cases td a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-2); }
+table.cases td a:hover { border-bottom-style: solid; }
+table.cases td .g { color: var(--ok); font-weight: 700; font-size: 12px; }
+table.cases td .x { color: var(--err); font-weight: 700; font-size: 12px; }
+
+/* ================= 路线图 ================= */
+.roadmap { display: flex; flex-direction: column; gap: 0; }
+.rm-item { display: flex; gap: 18px; }
+.rm-rail { display: flex; flex-direction: column; align-items: center; width: 30px; flex-shrink: 0; }
+.rm-dot {
+  width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--accent-2);
+  background: var(--bg); z-index: 1; margin-top: 4px;
+}
+.rm-dot.done { background: var(--ok); border-color: var(--ok); }
+.rm-line { width: 2px; flex: 1; background: var(--divider); min-height: 26px; }
+.rm-body { padding-bottom: 22px; flex: 1; }
+.rm-body h4 { font-size: 15px; margin-bottom: 4px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rm-body .d { font-size: 13.5px; color: var(--ink-soft); }
+.rm-body .accept { font-size: 12.5px; color: var(--ok); margin-top: 5px; }
+.rm-body .accept::before { content: "验收 — "; font-weight: 700; }
+
+/* ================= FAQ / 提醒 ================= */
+.note {
+  border-left: 4px solid var(--accent-2); background: var(--chip-bg);
+  border-radius: 0 12px 12px 0; padding: 14px 18px; font-size: 13.5px; margin-top: 16px;
+}
+.note b { color: var(--accent); }
+</style>
+</head>
+<body data-theme="light">
+
+<div class="topbar">
+  <h1>写作 Agent 重构计划 v2<small>场景修正版：主场景不是从零写小说，是在「已经写成的小说」上做衍生创作（番外）</small></h1>
+  <div class="spacer"></div>
+  <div class="nav">
+    <button data-goto="s1">现状</button>
+    <button data-goto="s2">诊断</button>
+    <button data-goto="s3">目标架构</button>
+    <button data-goto="s4">计划详解</button>
+    <button data-goto="s5">前后对比</button>
+    <button data-goto="s6">案例参照</button>
+    <button data-goto="s7">路线图</button>
+  </div>
+  <button class="theme-toggle" id="themeBtn">🌙 暗夜书馆</button>
+</div>
+
+<div class="wrap">
+
+  <!-- ================= S0 摘要 ================= -->
+  <div class="section" id="s0">
+    <div class="card">
+      <h3 class="block-title serif">一句话版本</h3>
+      <p class="lead">我们的主场景：一本<b>已经成型的小说</b>（多为导入的网文，章节已缓存本地），读者在某一章触发番外创作。此时<b>大纲已存在</b>（章节列表就是大纲）、<b>事实已存在</b>（正文就是设定源）、<b>结构不需要创造</b>。所以 v1 照搬 Dramatron / NovelCrafter 这些「从零写作」框架的结论——让 Agent 边写边攒大纲、beats、人物进展——方向错了，那是在给「从零写」补结构。番外场景缺的是<b>理解力</b>：低成本读懂既有正文，再忠实延续。v2 把「累积式记忆」翻转成「<b>提取式理解</b>」：摘要与人物状态不是 Agent 写出来的，是系统从既有正文里<b>提取</b>出来的。</p>
+
+      <div class="note" style="margin-top:18px">
+        <b>v1 → v2 修订说明（场景纠偏）</b>：v1 误把「原创长篇连载」当主场景。实际受影响项——
+        <b>P0-1 摘要</b>（Agent 随写随攒 → 管线从既有正文提取）、
+        <b>P1 人物进展</b>（记录变化 → 提取现状）、
+        <b>结构化 beats（v1-P1-2）→ 删除</b>（番外结构已存在，归入「原创模式」独立 track）、
+        <b>审校环 P2 → 升 P1</b>（与主线不打架就是番外的第一质量指标）。
+        不受影响项：注入层、save_chapter 阶段 0 成果、工具瘦身。
+      </div>
+
+      <div class="note">
+        <b>阶段 0 已完成</b>：save_chapter 重构已落地——正文由 Agent 在会话内直接写出、哑工具落库，消灭了旧 <code class="inline">create_chapter</code>「内层独立 LLM 调用只靠一句 instruction 传上下文」的失忆根源。本计划构建在它之上。
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S1 现状 ================= -->
+  <div class="section card" id="s1">
+    <div class="section-head"><span class="no">01</span><h2>现状：工具面不缺广度，番外缺的是「看见主线的通道」</h2></div>
+    <p class="section-sub">全局工具按域拆成 8 组、共 31 个。番外场景锁定了其中 7 个。问题不在工具数量，而在<b>番外 Agent 能看到的主线信息量</b>。</p>
+
+    <div class="tool-domains">
+      <div class="domain">
+        <h4>📖 小说导航 <span class="cnt">4</span></h4>
+        <div class="tools">
+          <span class="tchip">list_novels</span><span class="tchip">select_novel</span>
+          <span class="tchip">create_novel</span><span class="tchip">set_novel_cover</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>🔍 章节读取 <span class="cnt">3</span></h4>
+        <div class="tools">
+          <span class="tchip">list_chapters</span><span class="tchip">read_chapter_content</span>
+          <span class="tchip">search_in_chapters</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>✍️ 章节写入 <span class="cnt">4</span></h4>
+        <div class="tools">
+          <span class="tchip new">save_chapter ★新</span><span class="tchip gone">create_chapter</span>
+          <span class="tchip w">update_chapter_content</span><span class="tchip w">rewrite_chapter</span>
+          <span class="tchip w">delete_chapter</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>👤 角色 <span class="cnt">4</span></h4>
+        <div class="tools">
+          <span class="tchip">list_characters</span><span class="tchip w">create_character</span>
+          <span class="tchip w">update_character</span><span class="tchip w">delete_character</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>🗺 设定 / 大纲 <span class="cnt">5</span></h4>
+        <div class="tools">
+          <span class="tchip">get_background_setting</span><span class="tchip w">update_background_setting</span>
+          <span class="tchip">get_outline</span><span class="tchip w">write_outline</span>
+          <span class="tchip w">update_outline</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>🎨 写作技巧 <span class="cnt">4</span></h4>
+        <div class="tools">
+          <span class="tchip">list_prompt_tags</span><span class="tchip">get_prompt_tag</span>
+          <span class="tchip w">save_prompt_tag</span><span class="tchip w">delete_prompt_tag</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>🖼 媒体 / 游戏 <span class="cnt">5</span></h4>
+        <div class="tools">
+          <span class="tchip">list_text2img_models</span><span class="tchip w">create_images</span>
+          <span class="tchip">create_text_game</span><span class="tchip">list_text_games</span>
+          <span class="tchip w">update_text_game</span>
+        </div>
+      </div>
+      <div class="domain">
+        <h4>🎛 编排 <span class="cnt">2</span></h4>
+        <div class="tools">
+          <span class="tchip">dispatch_subagent</span><span class="tchip">ask_user</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>番外场景的真实视野</b>：当前流程是 <code class="inline">read_chapter_content（锁死锚点章，无参数）→ list_chapters（只有标题）→ list_characters（导入网文常为空）→ create_side_story → 写 + save_chapter × N</code>。
+      也就是说，面对一本 300 章的小说，Agent 的<b>全部视野 = 1 章全文 + 300 个标题</b>。
+      更关键的是：<code class="inline">search_in_chapters</code> <b>不在番外的 7 工具白名单里</b>——它连「查一下这个配角在哪章和女主决裂」都做不到。
+    </div>
+  </div>
+
+  <!-- ================= S2 诊断 ================= -->
+  <div class="section card" id="s2">
+    <div class="section-head"><span class="no">02</span><h2>诊断：细节错乱的根源是「既有内容不可理解」</h2></div>
+    <p class="section-sub">v1 的诊断是「系统把记住一切的责任压在工作记忆上」——这对原创续写成立，但番外场景要改写成：<b>系统没有把「既有小说」变成 Agent 可理解、可查证的数据。</b>工作记忆有限是常态，前提是得给它一条接触既有事实的路。</p>
+
+    <div class="sim">
+      <div class="sim-head">
+        <span class="who serif">👉 一个真实的失败瞬间</span>
+        <span class="ctx">用户在第 200 章创建番外：「女主与闺蜜的十年前」</span>
+      </div>
+      <div class="msg tool">Agent 调 read_chapter_content ✓（只有第 200 章，锁死）</div>
+      <div class="msg tool">Agent 调 list_chapters ✓（300 个标题，无内容）</div>
+      <div class="msg tool">Agent 调 list_characters ✓（导入的网文：人物卡为空）</div>
+      <div class="msg err">闺蜜在第 3 章登场、第 45 章与女主决裂出国、口癖是「啧」、左腕有旧伤——<span class="lost">全在 Agent 看不见的章节里</span></div>
+      <div class="msg err">写出的番外：闺蜜「温婉可人、与女主从未红过脸、十指完好」——<span class="lost">与主线第 45、102 章直接矛盾</span></div>
+      <div class="msg tool">长回合中，压缩器把仅有的锚点章正文也压成一行（只保护最近 6 条工具结果）</div>
+    </div>
+
+    <table class="cases" style="margin-top:18px">
+      <tr><th>#</th><th>缺陷</th><th>对番外质量的直接伤害</th></tr>
+      <tr><td>1</td><td><b>既有正文不可及</b>——read_chapter_content 锁死锚点章，全书其余章节没有任何读取通道</td><td>番外与现实脱节，只能围绕锚点章「编」</td></tr>
+      <tr><td>2</td><td><b>无摘要理解层</b>——300 章的事实只以「标题列表」形态存在</td><td>无法低成本通晓前情，长程设定全部丢失</td></tr>
+      <tr><td>3</td><td><b>人物事实无人提取</b>——人物卡是静态档案且对导入小说常为空；口癖/旧伤/关系变化没有提取管线</td><td>OOC、人物状态与主线脱节</td></tr>
+      <tr><td>4</td><td><b>system prompt 零自动注入</b>——连锚点章都要靠流程约定让 Agent 自己调工具去读</td><td>忘查一次、或结果被压缩，就凭空编一次</td></tr>
+      <tr><td>5</td><td><b>search_in_chapters 不在番外工具面</b>——精确查证既有事实的最后一条通道被关掉</td><td>长尾疑问（某配角、某物件）无路可查</td></tr>
+      <tr><td>6</td><td><b>无一致性校验</b>——写完即完成</td><td>与主线的矛盾只有读者能发现</td></tr>
+      <tr><td>7</td><td><b>压缩器只护最近 6 条工具结果</b></td><td>长回合中锚点章正文同样被压掉</td></tr>
+    </table>
+  </div>
+
+  <!-- ================= S3 目标架构 ================= -->
+  <div class="section card" id="s3">
+    <div class="section-head"><span class="no">03</span><h2>目标架构：围绕「衍生创作」重组五层</h2></div>
+    <p class="section-sub">v1 的五层是「从零写作」的五层（含结构层）。番外场景的结构<b>已经存在</b>——主线的章节序列就是结构。所以 v2 把「结构层」从架构里<b>有意去掉</b>，换成「理解层」：系统预先从既有正文提取可检索的事实，注入层负责送进上下文，检索层兜住长尾疑问，校验层保证不打架。</p>
+
+    <div class="layers">
+      <div class="layer planned">
+        <span class="lname">🧠 理解层 ← P0-1</span>
+        <span class="ldesc">从既有正文**提取**章节摘要 / 关键事实 / 全书梗概 —— 管线批量生成、缓存 DB、不占 Agent 工具面</span>
+        <span class="tag chip p0">P0 新建</span>
+      </div>
+      <div class="layer planned">
+        <span class="lname">💉 注入层 ← P0-2</span>
+        <span class="ldesc">system prompt 确定性装配：锚点章全文 + 邻章摘要 + 人物 digest + 全书梗概</span>
+        <span class="tag chip p0">P0 新建</span>
+      </div>
+      <div class="layer planned">
+        <span class="lname">🔎 检索层 ← P0-3</span>
+        <span class="ldesc">search_in_chapters 加入番外白名单 + 新增 get_chapter_summary + read 解锁全书缓存章</span>
+        <span class="tag chip p0">P0 补齐</span>
+      </div>
+      <div class="layer have">
+        <span class="lname">✍️ 写入层 ✓ 已有</span>
+        <span class="ldesc">save_chapter（阶段 0 重构完成：会话内写作、哑工具落库）</span>
+        <span class="tag chip done">已具备</span>
+      </div>
+      <div class="layer planned">
+        <span class="lname">🛡 校验层 ← P1-2</span>
+        <span class="ldesc">reviewer 对照提取事实清单审校番外正文 —— 矛盾在入库前被拦，而非被读者发现</span>
+        <span class="tag chip p1">P1 新建（v1 排 P2，场景纠偏后升级）</span>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:14px">
+      <b>为什么没有「结构层」</b>：beats / 大纲规划只对「从零写」有意义——番外的每一章该挂在那条支线上、起承转合如何，是由 Agent 根据需求与锚点现场决定的，不需要预设的任务卡。原创长篇连载如需 beats / 累积式记忆，归入「原创模式」独立 track（见 P2-2），不混入番外的精简工具面。
+    </div>
+  </div>
+
+  <!-- ================= S4 计划详解 ================= -->
+  <div class="section" id="s4">
+    <div class="section-head"><span class="no">04</span><h2>计划详解：五项改动与各自的「提效机制」</h2></div>
+    <p class="section-sub">每一项都回答三个问题：<b>做什么、为什么能提升创作效果（机制链）、参照了谁</b>。改动集中在 services/novel_agent/ 与一张新表，不动 UI。</p>
+
+    <!-- P0-1 -->
+    <div class="card plan-card p0">
+      <div class="plan-head">
+        <span class="chip p0">P0-1</span>
+        <h3 class="serif">章节理解层 —— 从既有正文提取，不是随写随攒</h3>
+        <span class="ref">参照：RAG 检索增强 / RecurrentGPT 长期记忆（方向反转：提取「别人写完的」）</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：新表 <code class="inline">chapter_summaries</code>（novelUrl / chapterUrl / position / summary / keyFacts / characters / updatedAt）。由<b>确定性管线</b>（代码发起的小型 LLM 调用）生成，不进 Agent 工具面：番外场景启动时懒生成锚点章 ±N 窗口，随后后台逐章补全；章节被改写时失效重提。</li>
+        <li><b>keyFacts 即一致性锚点</b>：人物状态（受伤 / 获得物 / 死亡）、关系变化、时间点、伏笔承诺——正是细节错乱的四大来源。</li>
+        <li><b>边界</b>：只覆盖已缓存章节；未缓存章在索引中标注「未缓存」，Agent 可提示用户先加载。成本集中一次性，之后永久缓存复用。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          300 章不可读<span class="arr">→</span>300 条可检索的结构化事实<span class="arr">→</span>「闺蜜哪章决裂」一次查询就有出处<span class="arr">→</span>事实有出处，编造无处遁形<span class="arr">→</span>番外与主线的兼容性从「碰运气」变成「有下限」</span>
+      </div>
+    </div>
+
+    <!-- P0-2 -->
+    <div class="card plan-card p0">
+      <div class="plan-head">
+        <span class="chip p0">P0-2</span>
+        <h3 class="serif">确定性上下文注入 —— 番外的 system prompt 自带前情</h3>
+        <span class="ref">参照：NovelCrafter Codex 自动注入（差异：Codex 靠作者手填卡，我们全自动提取）</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：side_story 场景 <code class="inline">buildSystemPrompt</code> 直接装配四样：<b>锚点章全文</b>（Agent 不必再调 read）、<b>锚点前后各 1~2 章摘要</b>、<b>主要人物 digest</b>（P1-1 后接入，先接人物卡）、<b>全书一句话梗概</b>（由摘要分层聚合：分卷摘要 → 全书梗概）。</li>
+        <li><b>长度预算</b>：锚点章全文封顶（如 6000 字）、邻章摘要各 200 字、人物 digest 按与需求的相关度挑选——宁可精，不可爆。</li>
+        <li><b>原创写作场景同样适用</b>：注入其大纲 / 人物卡 / 前一章结尾，机制相同、数据源不同。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          上下文从「流程约定 + Agent 自觉」<span class="arr">→</span>「system prompt 必然存在的固定区」<span class="arr">→</span>零遗漏、不会被压缩器吃掉<span class="arr">→</span>锚点衔接与人物口吻从第一段就锁定<span class="arr">→</span>「忘查就瞎编」整类错误消失</span>
+      </div>
+    </div>
+
+    <!-- P0-3 -->
+    <div class="card plan-card p0">
+      <div class="plan-head">
+        <span class="chip p0">P0-3</span>
+        <h3 class="serif">番外工具面补齐 —— 把查证通道还给 Agent</h3>
+        <span class="ref">内部补齐（现有 executor 直接复用）</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：① <code class="inline">search_in_chapters</code> 加入番外 7 工具白名单（全文精确查证，executor 现成）；② 新增 <code class="inline">get_chapter_summary(chapterUrl | position)</code>——读摘要级前情，比全文便宜两个数量级；③ <code class="inline">read_chapter_content</code> 解锁为「宿主任意已缓存章」（锚点章保持默认），不再锁死单章。</li>
+        <li><b>原则</b>：注入层覆盖「大概率需要的前情」，检索层兜住「长尾疑问」——两层互补，长尾不再靠编。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          注入管「常考题」<span class="arr">→</span>检索管「偏题」<span class="arr">→</span>任何一处既有事实都「查得到、读得起」<span class="arr">→</span>Agent 敢写不熟悉的配角与远期设定<span class="arr">→</span>番外题材范围从「锚点章周边」扩展到「全书任一支线」</span>
+      </div>
+    </div>
+
+    <!-- P1-1 -->
+    <div class="card plan-card">
+      <div class="plan-head">
+        <span class="chip p1">P1-1</span>
+        <h3 class="serif">人物状态提取 —— 提取「她现在什么样」，不是记录「她变了什么」</h3>
+        <span class="ref">参照：NovelCrafter progressions（场景反转：对既有小说是提取，不是记录）</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：从 chapter_summaries 聚合 per-character 状态卡：现状 / 关系网 / 所在位置 / 口癖 / 旧伤，每条标注<b>出处章号</b>；接入 P0-2 的人物 digest 注入；<code class="inline">list_characters</code> 返回时附提取状态（无卡时明确说明，而非静默空列表）。</li>
+        <li><b>与 v1 的区别</b>：v1 是「Agent 写完一章登记一条 progression」——只对原创模式成立；导入的网文几百章没人登记过，必须反向提取。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          人物 digest 带着「第 45 章已决裂、左腕旧伤未愈」<span class="arr">→</span>生成前矛盾就被拦住<span class="arr">→</span>而非写完后被读者发现<span class="arr">→</span>OOC 类差评整类下降</span>
+      </div>
+    </div>
+
+    <!-- P1-2 -->
+    <div class="card plan-card">
+      <div class="plan-head">
+        <span class="chip p1">P1-2</span>
+        <h3 class="serif">一致性审校环 —— 番外的第一质量指标是「与主线不打架」</h3>
+        <span class="ref">参照：CreAgentive writer–reviewer 反馈环 / Re3 修订环</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：<code class="inline">dispatch_subagent</code> 配 reviewer 只读白名单（摘要 / 检索 / 锚点正文）+ 一致性 checklist（人物状态 / 时间线 / 称谓地名 / 已死角色）；每本番外保存完跑一次，发现问题回注主 Agent 修订（rewrite 通道现成）。</li>
+        <li><b>为何从 v1 的 P2 升到 P1</b>：原创连载的核心诉求是「越写越不漂」，审校是锦上添花；番外的核心诉求就是<b>与既有事实一致</b>——审校在这里是刚需，不该排队。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          错误的发现者从「读者评论区」<span class="arr">→</span>「发布前的 reviewer」<span class="arr">→</span>矛盾在入库前被拦<span class="arr">→</span>修订成本从「删番外重来」降到「改一段」<span class="arr">→</span>番外可信度 = 用户敢持续用这个功能</span>
+      </div>
+    </div>
+
+    <!-- P2 -->
+    <div class="card plan-card p2">
+      <div class="plan-head">
+        <span class="chip p2">P2</span>
+        <h3 class="serif">工具瘦身 + 「原创模式」独立 track —— 两类场景分道扬镳</h3>
+        <span class="ref">内部优化</span>
+      </div>
+      <ul class="list">
+        <li><b>做什么</b>：① 创作回合（writing / side_story）工具面收窄到 ~15 个创作相关工具，生图与文字游戏系移出；② <b>从零原创长篇</b>作为独立 track 后续增强：累积式摘要（save_chapter_summary）、人物进展记录、结构化 beats——这些只对「边写边攒设定」的场景有意义。</li>
+        <li><b>收益</b>：番外的精简工具面不被原创功能污染；原创场景的规划能力不受番外约束。</li>
+      </ul>
+      <div class="mech">
+        <b>为什么能提升创作效果</b>　<span class="chain">
+          schema 从 31 份 → 15 份<span class="arr">→</span>工具选择错误率下降、每轮省数千 token<span class="arr">→</span>同样的上下文窗口装下更多正文与前情<span class="arr">→</span>两个场景各自演化、互不拖累</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S5 前后对比 ================= -->
+  <div class="section card" id="s5">
+    <div class="section-head"><span class="no">05</span><h2>同一个任务的前后对比：「在第 200 章创建番外·女主与闺蜜的十年前」</h2></div>
+    <div class="vs-grid">
+      <div>
+        <div class="vs-label bad">✗ 现在：视野 = 1 章 + 300 个标题</div>
+        <div class="sim">
+          <div class="msg tool">read_chapter_content ✓（只有第 200 章）</div>
+          <div class="msg tool">list_chapters ✓（标题列表）· list_characters ✓（空）</div>
+          <div class="msg agent">开始写「十年前」……闺蜜的性格、口癖、旧伤全靠脑补</div>
+          <div class="msg err">「从未红过脸」「十指完好」——与第 45 章决裂、第 102 章旧伤<span class="lost">直接矛盾</span></div>
+          <div class="msg err">读者：这番外写的不是同一本书吧？</div>
+        </div>
+      </div>
+      <div>
+        <div class="vs-label good">✓ 重构后：前情档案自动随行 + 长尾可查证</div>
+        <div class="msg good" style="font-size:12.5px; margin-bottom:12px">system prompt 自动携带：第 200 章全文 + 198/199 章摘要 + 全书梗概 + 闺蜜人物卡（提取自第 3/45/102 章：口癖「啧」、第 45 章决裂出国、左腕旧伤未愈）</div>
+        <div class="sim">
+          <div class="msg tool">（自动注入，零工具调用）核心前情已在眼前</div>
+          <div class="msg tool">（可选）get_chapter_summary(102) / search_in_chapters("决裂") 查证细节</div>
+          <div class="msg agent">「她啧了一声，无意识地转着左腕的护腕——十年前不欢而散那次之后，她就没摘下来过……」</div>
+          <div class="msg good">save_chapter ✓ → reviewer 对照 keyFacts 巡检 ✓ 无矛盾</div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>注意一个反直觉的点</b>：重构后工具调用量反而<b>下降</b>——注入层替代了凑上下文的调用，番外场景连锚点章的读取都省了；而写出的内容第一次「有出处可查」。质量与成本同向改善。
+    </div>
+  </div>
+
+  <!-- ================= S6 案例参照 ================= -->
+  <div class="section card" id="s6">
+    <div class="section-head"><span class="no">06</span><h2>外部案例：同一批框架，换一个场景读法</h2></div>
+    <p class="section-sub">v1 曾把这些框架当作「直接抄作业」的模板——它们确实优秀，但都是<b>从零写作</b>的范式。放在「既有小说 + 衍生创作」场景下，有的机制要<b>反转方向</b>用，有的要<b>降级移走</b>。逐个过一遍。</p>
+    <table class="cases">
+      <tr><th>体系</th><th>核心机制</th><th>对我们场景的启示</th></tr>
+      <tr>
+        <td><a href="https://github.com/aiwaves-cn/RecurrentGPT" target="_blank">RecurrentGPT</a></td>
+        <td>语言版 LSTM：短期记忆（近期上下文）+ 长期记忆（可检索摘要库）同步更新</td>
+        <td><span class="g">P0-1 理解层</span> —— 但方向反转：它攒「自己写的」，我们<b>提取「别人写完的」</b>；导入的网文没人替它攒，只能自动提取</td>
+      </tr>
+      <tr>
+        <td><a href="https://www.novelcrafter.com/features/codex" target="_blank">NovelCrafter Codex</a></td>
+        <td>故事圣经：实体卡自动注入 + 进展记录（progressions）</td>
+        <td><span class="g">P0-2 注入 + P1-1 状态提取</span> —— Codex 的卡靠作者手填；我们的用户是读者不是作者，<b>必须全自动提取</b></td>
+      </tr>
+      <tr>
+        <td><a href="https://arxiv.org/html/2509.26461v1" target="_blank">CreAgentive</a>（2025）</td>
+        <td>writer–reviewer 多 agent 反馈环，百万字级长文生成</td>
+        <td><span class="g">P1-2 审校环</span> —— 在衍生创作中一致性权重最高，所以从 P2 升 P1</td>
+      </tr>
+      <tr>
+        <td><a href="https://medium.com/@anote-ai/recursive-re-prompting-and-revision-enhancing-long-range-coherence-in-story-generation-eea047c0386e" target="_blank">Re3</a></td>
+        <td>递归重提示 + 修订：草稿 → 重写 → 编辑循环</td>
+        <td><span class="g">P1-2</span> 的另一种形态；rewrite_chapter 已是现成的修订通道</td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/google-deepmind/dramatron" target="_blank">Dramatron</a>（DeepMind）</td>
+        <td>层级提示链：logline → 人物 → plot beats → 场景</td>
+        <td><span class="x">降级移走</span> —— beats 是「从零规划」的产物；番外的结构（主线章节序列）已存在。归入「原创模式」独立 track</td>
+      </tr>
+      <tr>
+        <td><a href="https://writeabookai.com/blog/sudowrite-vs-novelcrafter-ai-novel-writing-2026" target="_blank">Sudowrite Story Bible</a></td>
+        <td>braindump 引导式构建故事圣经</td>
+        <td><span class="x">同上</span> —— 引导用户「建设定」只适合原创场景，远期参考</td>
+      </tr>
+      <tr>
+        <td><a href="https://en.wikipedia.org/wiki/Retrieval-augmented_generation" target="_blank">RAG（检索增强生成）</a></td>
+        <td>先检索相关语料再生成，事实有出处</td>
+        <td><span class="g">P0-3 检索层</span> —— 番外本质是对既有语料的<b>受控衍生</b>，检索兜住注入层覆盖不到的长尾</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ================= S7 路线图 ================= -->
+  <div class="section card" id="s7">
+    <div class="section-head"><span class="no">07</span><h2>路线图与验收标准</h2></div>
+    <p class="section-sub">P0 三项是「给番外装眼睛」（先能看见主线），P1 两项是「保证不打架」（状态提取 + 审校），P2 是「分道扬镳」（瘦身 + 原创模式独立 track）。每项带可验证的验收标准。</p>
+
+    <div class="roadmap">
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot done"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>阶段 0 <span class="chip done">已完成</span> save_chapter 重构</h4>
+          <div class="d">正文生成收进 Agent 会话，哑工具落库；消灭 instruction 独木桥与番外人物卡恒空问题。</div>
+          <div class="accept">目标测试 673 全过、analyze 零问题（全量回归补跑中）</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>P0-1 章节理解层 <span class="chip p0">装眼睛</span></h4>
+          <div class="d">chapter_summaries 表 + 确定性提取管线（懒生成锚点窗口 → 后台补全）+ keyFacts 字段。</div>
+          <div class="accept">同一本 300 章测试书：Agent 能准确说出某配角在指定章节的状态（get_chapter_summary / 日志验证）</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>P0-2 确定性上下文注入 <span class="chip p0">装眼睛</span></h4>
+          <div class="d">buildSystemPrompt 装配锚点章全文 + 邻章摘要 + 人物卡 digest + 全书梗概，带长度预算。</div>
+          <div class="accept">番外首章日志确认注入内容存在；Agent 不调 read 工具也能正确衔接锚点</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>P0-3 番外工具面补齐 <span class="chip p0">装眼睛</span></h4>
+          <div class="d">search_in_chapters 入白名单 + 新增 get_chapter_summary + read_chapter_content 解锁全书缓存章。</div>
+          <div class="accept">番外会话中三个工具可用且作用于宿主小说（scenario 测试断言）</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>P1-1 人物状态提取 <span class="chip p1">不打架</span></h4>
+          <div class="d">从摘要聚合 per-character 状态卡（现状/关系/位置/口癖/旧伤，带出处章号）→ 接入注入层。</div>
+          <div class="accept">人为埋点：番外正文不再出现与提取状态矛盾的人物细节（抽查）</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div><div class="rm-line"></div></div>
+        <div class="rm-body">
+          <h4>P1-2 一致性审校环 <span class="chip p1">不打架</span></h4>
+          <div class="d">dispatch_subagent reviewer 只读白名单 + checklist；每本番外保存完跑一次，问题回注修订。</div>
+          <div class="accept">人为埋 3 处与主线矛盾，reviewer 全部命中并回注修订</div>
+        </div>
+      </div>
+      <div class="rm-item">
+        <div class="rm-rail"><div class="rm-dot"></div></div>
+        <div class="rm-body">
+          <h4>P2 工具瘦身 + 原创模式独立 track <span class="chip p2">分道扬镳</span></h4>
+          <div class="d">创作回合工具面收窄到 ~15 个；从零原创的累积式记忆 / beats / 进展记录单独立项。</div>
+          <div class="accept">创作回合工具面 ≤ 15；原创模式 track 有独立方案文档</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>一个诚实的预期管理</b>：P0-1 的提取成本与书的已缓存章节数成正比（300 章 ≈ 300 次小型摘要调用），好在是一次性成本、缓存永久复用，且番外场景只懒生成锚点窗口即可先跑起来。这套重构提升的是「与主线一致性」的<b>下限</b>；单章文笔的上限仍取决于模型与作家人设 prompt。
+    </div>
+  </div>
+
+  <p class="small" style="text-align:center; margin-top:-30px">
+    设计依据：内部梳理（本仓 agent_tools 体系 + save_chapter 重构 + 番外场景实测）× 外部案例
+    （<a href="https://github.com/aiwaves-cn/RecurrentGPT" style="color:var(--accent)">RecurrentGPT</a> ·
+    <a href="https://www.novelcrafter.com/features/codex" style="color:var(--accent)">NovelCrafter</a> ·
+    <a href="https://arxiv.org/html/2509.26461v1" style="color:var(--accent)">CreAgentive</a> ·
+    <a href="https://en.wikipedia.org/wiki/Retrieval-augmented_generation" style="color:var(--accent)">RAG</a>）
+    　·　v2 场景纠偏版 · 生成于 2026-11-14
+  </p>
+</div>
+
+<script>
+// 主题切换
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => {
+  const body = document.body;
+  const dark = body.getAttribute('data-theme') === 'dark';
+  body.setAttribute('data-theme', dark ? 'light' : 'dark');
+  themeBtn.textContent = dark ? '🌙 暗夜书馆' : '☀️ 晨读书馆';
+});
+// 锚点跳转 + 高亮
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-goto]');
+  if (!el) return;
+  const target = document.getElementById(el.getAttribute('data-goto'));
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.classList.remove('flash'); void target.offsetWidth;
+  target.classList.add('flash');
+});
+</script>
+</body>
+</html>
