@@ -40,9 +40,6 @@ class _RecordingWriter implements IChapterWriter {
   Future<void> cacheNovelChapters(
       String novelUrl, List<Chapter> chapters) async {}
 
-  @override
-  Future<void> updateCustomChapter(
-      String chapterUrl, String title, String content) async {}
 
   @override
   Future<void> updateChaptersOrder(
@@ -82,7 +79,9 @@ class _RecordingVersionRepo implements IChapterVersionRepository {
   }
 
   @override
-  Future<int> deleteVersionsByNovel(String novelUrl) async => 1;
+  Future<int> deleteVersionsByNovel(String novelUrl,
+        {sqflite.DatabaseExecutor? executor}) async =>
+      1;
 
   @override
   Future<int> evictOldestVersions(String chapterUrl,

@@ -56,28 +56,6 @@ class ChatSession {
     );
   }
 
-  ChatSession copyWith({
-    int? id,
-    String? scenarioId,
-    String? title,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-    int? currentNovelId,
-    String? currentNovelTitle,
-    bool clearCurrentNovel = false,
-  }) {
-    return ChatSession(
-      id: id ?? this.id,
-      scenarioId: scenarioId ?? this.scenarioId,
-      title: title ?? this.title,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-      currentNovelId: clearCurrentNovel ? null : (currentNovelId ?? this.currentNovelId),
-      currentNovelTitle:
-          clearCurrentNovel ? null : (currentNovelTitle ?? this.currentNovelTitle),
-    );
-  }
-
   /// 列表展示用标题，空标题回退到「新对话 YYYY/MM/DD HH:mm」
   String get displayTitle {
     if (title.trim().isNotEmpty) return title.trim();

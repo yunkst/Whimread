@@ -159,15 +159,26 @@ mixin ToolExecutorHelpers {
   /// resolveCurrentNovelUrl 重复查 DB，也消除 `url!` 链式强解包。
   /// position 是 1-based 的顺序号，依赖 list_chapters 返回的顺序
   /// （按 chapterIndex ASC 排序）。
+  ///
+  /// [novelUrlOverride] 非空时直接在该命名空间解析（sideStoryId 可选参数
+  /// 越界寻址用，跳过 currentNovel 解析）；省略时按 ctx.currentNovelId
+  /// 解析宿主。position 范围错误信息对两种命名空间通用（list_chapters
+  /// 带 sideStoryId 同样能列番外目录）。
   Future<ChapterResolveResult> resolveChapterUrlByPosition(
     AgentScenarioContext? ctx,
-    int position,
-  ) async {
-    final novelResolve = await resolveCurrentNovelUrl(ctx);
-    if (novelResolve.errorJson != null) {
-      return ChapterResolveResult.failure(novelResolve.errorJson);
+    int position, {
+    String? novelUrlOverride,
+  }) async {
+    final String novelUrl;
+    if (novelUrlOverride != null) {
+      novelUrl = novelUrlOverride;
+    } else {
+      final novelResolve = await resolveCurrentNovelUrl(ctx);
+      if (novelResolve.errorJson != null) {
+        return ChapterResolveResult.failure(novelResolve.errorJson);
+      }
+      novelUrl = novelResolve.url!;
     }
-    final novelUrl = novelResolve.url!;
 
     final repo = ref.read(chapterRepositoryProvider);
     final chapters = await repo.getCachedNovelChapters(novelUrl);
@@ -180,8 +191,8 @@ mixin ToolExecutorHelpers {
       return ChapterResolveResult.failure(guidanceError(
         'chapter_position_out_of_range',
         chapters.isEmpty
-            ? '当前小说没有任何章节。请先调用 list_chapters 确认。'
-            : '章节位置 $position 超出范围（当前小说共 ${chapters.length} 章）。'
+            ? '目标没有任何章节。请先调用 list_chapters 确认。'
+            : '章节位置 $position 超出范围（共 ${chapters.length} 章）。'
                 '请先调用 list_chapters 查看有效位置。',
         suggestedTool: 'list_chapters',
         suggestedArgs: const <String, dynamic>{},
@@ -191,5 +202,47 @@ mixin ToolExecutorHelpers {
       novelUrl: novelUrl,
       chapterUrl: chapters[position - 1].url,
     );
+  }
+
+  /// sideStoryId 可选参数 → 番外命名空间寻址（窄越界）。
+  ///
+  /// 三道校验：小说存在、是番外行（isSideStory）、锚点归属当前小说
+  /// （anchorNovelUrl == currentNovel.url）。任一不满足返回
+  /// side_story_not_found 引导错误。由此保证不变量：**可选参数只能越界到
+  /// 当前小说的番外**——其他书的番外 id、宿主正篇 id、编造 id 一律打不进去，
+  /// select_novel 的作用域纪律不被参数绕过。
+  ///
+  /// 成功返回番外 novelUrl（后续 position 解析以它为命名空间，
+  /// 经 resolveChapterUrlByPosition 的 novelUrlOverride）。
+  /// [toolName] 仅用于日志 tag 定位调用方。
+  Future<IdResolveResult> resolveSideStoryTarget(
+    int sideStoryId,
+    AgentScenarioContext? ctx, {
+    String toolName = 'side_story_param',
+  }) async {
+    final novelResolve = await resolveCurrentNovelUrl(ctx);
+    if (novelResolve.errorJson != null) return novelResolve;
+    final hostUrl = novelResolve.url!;
+
+    final novel =
+        await ref.read(novelRepositoryProvider).getNovelById(sideStoryId);
+    if (novel == null ||
+        !novel.isSideStory ||
+        novel.anchorNovelUrl != hostUrl) {
+      LoggerService.instance.w(
+        '工具引导错误: side_story_not_found sideStoryId=$sideStoryId tool=$toolName',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', toolName, 'side_story_not_found'],
+      );
+      return IdResolveResult.failure(guidanceError(
+        'side_story_not_found',
+        '番外 ID $sideStoryId 不存在，或不属于当前小说。'
+            '先用 list_side_stories 查看当前小说的全部番外，'
+            '再用返回结果里的 sideStoryId 重试。',
+        suggestedTool: 'list_side_stories',
+        suggestedArgs: const <String, dynamic>{},
+      ));
+    }
+    return IdResolveResult.success(novel.url);
   }
 }

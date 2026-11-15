@@ -90,7 +90,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen> {
       ),
       body: asyncList.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => _buildErrorView(e, st),
+        error: (e, st) => _buildErrorView(),
         data: (characters) {
           if (characters.isEmpty) {
             return EmptyCharactersView(onCreateCharacter: _onCreate);
@@ -186,7 +186,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen> {
 
   // ─── 错误态 ─────────────────────────────────────────────────
 
-  Widget _buildErrorView(Object e, StackTrace st) {
+  Widget _buildErrorView() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

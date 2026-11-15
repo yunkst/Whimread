@@ -22,8 +22,6 @@ void main() {
     Novel? novel,
     int afterIndex = 0,
     List<Chapter>? chapters,
-    String? prefillTitle,
-    String? prefillContent,
   }) {
     return ProviderScope(
       child: MaterialApp(
@@ -31,8 +29,6 @@ void main() {
           novel: novel ?? createTestNovel(),
           afterIndex: afterIndex,
           chapters: chapters ?? const [],
-          prefillTitle: prefillTitle,
-          prefillContent: prefillContent,
         ),
       ),
     );
@@ -121,18 +117,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('取消'), findsNothing);
-    });
-
-    testWidgets('prefillTitle 和 prefillContent 应被预填到输入框',
-        (WidgetTester tester) async {
-      await tester.pumpWidget(createTestWidget(
-        prefillTitle: '预填标题',
-        prefillContent: '预填内容',
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('预填标题'), findsOneWidget);
-      expect(find.text('预填内容'), findsOneWidget);
     });
   });
 }

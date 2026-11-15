@@ -65,8 +65,9 @@ class ChapterVersionRepository extends BaseRepository
   }
 
   @override
-  Future<int> deleteVersionsByNovel(String novelUrl) async {
-    final db = await database;
+  Future<int> deleteVersionsByNovel(String novelUrl,
+      {DatabaseExecutor? executor}) async {
+    final db = executor ?? await database;
     // 通过 chapter_cache JOIN 获取该小说所有章节 URL，然后删除对应版本
     final affected = await db.rawDelete('''
       DELETE FROM $_table

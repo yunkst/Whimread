@@ -160,7 +160,7 @@ class OcrPredictor {
     // 诊断日志：确认崩溃发生在哪个阶段
     final t0 = DateTime.now();
     final pngLen = base64Png.length;
-    LoggerService.instance.i(
+    LoggerService.instance.d(
       'OCR recognizeImage 开始 pngLen=$pngLen',
       category: LogCategory.ai,
       tags: ['ocr', 'onnx', 'recognize-begin'],
@@ -169,7 +169,7 @@ class OcrPredictor {
     Uint8List bytes;
     try {
       bytes = base64Decode(base64Png);
-      LoggerService.instance.i(
+      LoggerService.instance.d(
         'OCR base64Decode 完成 byteLen=${bytes.length} 耗时=${DateTime.now().difference(t0).inMilliseconds}ms',
         category: LogCategory.ai,
         tags: ['ocr', 'onnx', 'base64-ok'],
@@ -187,7 +187,7 @@ class OcrPredictor {
     ui.Codec codec;
     try {
       codec = await ui.instantiateImageCodec(bytes);
-      LoggerService.instance.i(
+      LoggerService.instance.d(
         'OCR instantiateImageCodec 完成 耗时=${DateTime.now().difference(t0).inMilliseconds}ms',
         category: LogCategory.ai,
         tags: ['ocr', 'onnx', 'codec-ok'],
@@ -214,13 +214,13 @@ class OcrPredictor {
         // 兜底初始化为空：run() 抛异常时 finally 只需释放 input。
         Map<String, OrtValue> outputs = const {};
         try {
-          LoggerService.instance.i(
+          LoggerService.instance.d(
             'OCR ONNX 推理开始 耗时=${DateTime.now().difference(t0).inMilliseconds}ms',
             category: LogCategory.ai,
             tags: ['ocr', 'onnx', 'session-run-begin'],
           );
           outputs = await _session!.run({'x': inputValue});
-          LoggerService.instance.i(
+          LoggerService.instance.d(
             'OCR ONNX 推理完成 耗时=${DateTime.now().difference(t0).inMilliseconds}ms',
             category: LogCategory.ai,
             tags: ['ocr', 'onnx', 'session-run-ok'],
@@ -231,7 +231,7 @@ class OcrPredictor {
               .map((e) => (e as List).map((x) => (x as num).toDouble()).toList())
               .toList();
           final (text, _) = _ctcDecode(logits);
-          LoggerService.instance.i(
+          LoggerService.instance.d(
             'OCR CTC 解码完成 result="$text" 总耗时=${DateTime.now().difference(t0).inMilliseconds}ms',
             category: LogCategory.ai,
             tags: ['ocr', 'onnx', 'recognize-done'],

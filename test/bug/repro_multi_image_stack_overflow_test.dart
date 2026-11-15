@@ -29,7 +29,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_app/core/database/database_connection.dart';
 import 'package:novel_app/core/theme/app_colors.dart';
 import 'package:novel_app/services/media/media_proxy.dart';
-import 'package:novel_app/services/media/media_types.dart';
 import 'package:novel_app/widgets/agent_chat/media_gallery_card.dart';
 import 'package:novel_app/widgets/media/media_view.dart';
 
@@ -205,7 +204,7 @@ void main() {
     final proxy = _MissMediaProxy();
     final card = MediaGalleryCard(
       data: MediaGalleryData(items: [
-        MediaGalleryItem(mediaId: 'm0', kind: MediaKind.image, prompt: 'p0'),
+        MediaGalleryItem(mediaId: 'm0', prompt: 'p0'),
       ]),
     );
 

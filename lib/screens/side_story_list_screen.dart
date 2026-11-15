@@ -80,10 +80,7 @@ class SideStoryListScreen extends ConsumerWidget {
     List<SideStorySummary> summaries,
     bool isChapterLevel,
   ) {
-    if (summaries.isEmpty && isChapterLevel) {
-      return _buildEmpty(context, isChapterLevel);
-    }
-    if (summaries.isEmpty && !isChapterLevel) {
+    if (summaries.isEmpty) {
       return _buildEmpty(context, isChapterLevel);
     }
 

@@ -66,16 +66,6 @@ class RunEntry {
     this.domain,
     this.dbId,
   });
-
-  Map<String, dynamic> toJson() => {
-        'run_id': runId,
-        'success': success,
-        'source': source.name,
-        if (testUrl != null) 'test_url': testUrl,
-        if (resultSummary != null) 'result_summary': resultSummary,
-        if (domain != null) 'domain': domain,
-        'script_length': script.length,
-      };
 }
 
 /// 脚本执行记录的内存存储（LRU）

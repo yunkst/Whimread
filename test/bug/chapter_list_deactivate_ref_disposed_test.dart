@@ -40,7 +40,6 @@ class _FakeChapterList extends ChapterList {
     return const ChapterListState(
       isLoading: false,
       chapters: [],
-      isInBookshelf: false,
     );
   }
 }

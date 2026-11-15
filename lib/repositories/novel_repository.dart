@@ -192,7 +192,6 @@ class NovelRepository extends BaseRepository
         coverMediaId: maps[i]['coverMediaId'],
         description: maps[i]['description'],
         backgroundSetting: maps[i]['backgroundSetting'],
-        isInBookshelf: true,
         lastReadChapterIndex: maps[i]['lastReadChapter'] as int?,
       );
     });
@@ -431,7 +430,6 @@ class NovelRepository extends BaseRepository
       title: maps[0]['title'],
       author: maps[0]['author'],
       url: maps[0]['url'],
-      isInBookshelf: true,
       coverUrl: maps[0]['coverUrl'] as String?,
       coverMediaId: maps[0]['coverMediaId'] as String?,
       description: maps[0]['description'] as String?,
@@ -464,6 +462,10 @@ class NovelRepository extends BaseRepository
   // ========== ID-based 查询方法（Agent 工具用） ==========
 
   /// 根据 ID 查询小说
+  ///
+  /// 走 [Novel.fromMap] 单一映射源（含 v58 番外三列 isSideStory /
+  /// anchorNovelUrl / anchorChapterUrl）——此前手工映射漏掉番外列，
+  /// 番外行经本方法读出 isSideStory 恒 false，sideStoryId 寻址校验会误拒。
   @override
   Future<Novel?> getNovelById(int id) async {
     if (isWebPlatform) return null;
@@ -475,18 +477,7 @@ class NovelRepository extends BaseRepository
       limit: 1,
     );
     if (maps.isEmpty) return null;
-    return Novel(
-      id: maps.first['id'] as int?,
-      title: maps.first['title'] as String,
-      author: maps.first['author'] as String,
-      url: maps.first['url'] as String,
-      isInBookshelf: true,
-      coverUrl: maps.first['coverUrl'] as String?,
-      description: maps.first['description'] as String?,
-      backgroundSetting: maps.first['backgroundSetting'] as String?,
-      coverMediaId: maps.first['coverMediaId'] as String?,
-      lastReadChapterIndex: maps.first['lastReadChapter'] as int?,
-    );
+    return Novel.fromMap(maps.first);
   }
 
   /// 根据 ID 获取小说 URL（内部 ID→URL 解析用）

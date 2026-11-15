@@ -178,29 +178,4 @@ void main() {
       expect(newId, 'exec_1');
     });
   });
-
-  group('RunEntry - toJson', () {
-    test('toJson 包含关键字段但不含完整脚本', () {
-      final store = RunStore();
-      final id = store.put(
-        script: 'const P="{{URL}}"; long script content here',
-        success: true,
-        source: RunEntrySource.execution,
-        testUrl: 'https://t.com',
-        resultSummary: '{"ok":true}',
-      );
-
-      final entry = store.get(id)!;
-      final json = entry.toJson();
-
-      expect(json['run_id'], 'exec_1');
-      expect(json['success'], isTrue);
-      expect(json['source'], 'execution');
-      expect(json['test_url'], 'https://t.com');
-      expect(json['result_summary'], '{"ok":true}');
-      expect(json['script_length'], greaterThan(0));
-      // toJson 不应包含完整脚本内容（避免占上下文）
-      expect(json.containsKey('script'), isFalse);
-    });
-  });
 }

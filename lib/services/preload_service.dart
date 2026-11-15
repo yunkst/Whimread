@@ -549,9 +549,6 @@ class PreloadService {
   /// 是否已暂停
   bool get isPaused => _isPaused;
 
-  /// 获取队列长度
-  int get queueLength => _queue.length;
-
   /// 当前队列中的章节 URL 顺序（队头在前，仅供测试断言与诊断使用）
   List<String> get queuedChapterUrls =>
       _queue.map((t) => t.chapterUrl).toList();

@@ -1,7 +1,7 @@
 /// LLM Provider — SSE 解析器
 ///
 /// 从原 `llm_provider.dart` 上帝文件拆分。本文件承载 SSE 流式协议解析：
-/// [SseParseResult]/[StreamingResult] 结果模型、[SseParser] 解析骨架、
+/// [StreamingResult] 结果模型、[SseParser] 解析骨架、
 /// 以及流式 tool_call delta 聚合辅助 [_ToolCallDelta]。
 library;
 
@@ -11,13 +11,6 @@ import 'package:novel_app/services/logger_service.dart';
 import 'package:novel_app/services/dsl_engine/llm_provider_config.dart';
 
 // -- SSE 解析器 --
-
-class SseParseResult {
-  final List<String> content;
-  final List<String> reasoning;
-
-  const SseParseResult({required this.content, required this.reasoning});
-}
 
 /// 流式响应累积结果（Phase 1: 支持 tool_calls 收集）
 ///
@@ -169,12 +162,6 @@ class SseParser {
     }
 
     return (content, reasoning);
-  }
-
-  /// 解析带 reasoning_content 的 SSE 流（DeepSeek thinking 格式）
-  static SseParseResult parseSseStreamWithReasoning(String raw) {
-    final (content, reasoning) = _parseDataPayload(raw);
-    return SseParseResult(content: content, reasoning: reasoning);
   }
 
   /// 解析流式响应为 StreamingResult（Phase 1: 支持 tool_calls）

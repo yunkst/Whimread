@@ -428,7 +428,7 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          _runningLabel(call),
+                          call.name,
                           style: theme.textTheme.bodySmall?.copyWith(
                             fontFamily: 'monospace',
                             color: statusColor,
@@ -470,8 +470,11 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
           ),
           // 展开内容
           if (_expanded) _buildExpandedBody(context, call),
-          // update_chapter_content / save_chapter 成功时，渲染跳转阅读器入口
-          if ((call.name == 'update_chapter_content' || call.name == 'save_chapter') &&
+          // update_chapter_content / save_chapter / save_side_story_chapter
+          // 成功时，渲染跳转阅读器入口
+          if ((call.name == 'update_chapter_content' ||
+                  call.name == 'save_chapter' ||
+                  call.name == 'save_side_story_chapter') &&
               call.status == AgentToolStatus.completed &&
               _rewriteEntry != null)
             Padding(
@@ -480,7 +483,9 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
                 data: _rewriteEntry!,
                 titleText: call.name == 'save_chapter'
                     ? '查看新保存的章节'
-                    : '查看重写后的章节',
+                    : call.name == 'save_side_story_chapter'
+                        ? '查看新保存的番外章节'
+                        : '查看重写后的章节',
               ),
             ),
           // create_images 成功时，渲染媒体画廊
@@ -527,12 +532,6 @@ class _AgentToolCallCardState extends State<AgentToolCallCard> {
   /// 解析工具结果中的游戏入口数据（create_text_game 成功时非空）
   TextGameEntryData? get _textGameEntry =>
       parseTextGameEntry(widget.call.result);
-
-  /// 标题栏第一行文案：始终返回工具名（保持单行简洁，进度单独占第二行）。
-  String _runningLabel(AgentToolCall call) {
-    if (call.status != AgentToolStatus.running) return call.name;
-    return call.name;
-  }
 
   /// 标题栏第二行：仅内部走 LLM 流式 + running 阶段展示，避免横向被进度挤掉。
   /// 返回 null 时不渲染第二行，保持非流式工具的原视觉。

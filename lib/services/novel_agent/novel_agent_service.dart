@@ -323,10 +323,9 @@ class NovelAgentService {
   }) async {
     // A 方案：与 sendMessage 对称。retryLastRound 调本方法前应已确保
     // _isRunning=false（失败轮 finalize 后 _isRunning 被设回 false），
-    // 正常不会撞；万一上层 race 兜底走 inject 路径（传空串 = noop，
-    // _enqueueInjection 会 trim 过滤），不抛错不丢。
+    // 正常不会撞；万一上层 race 撞上运行中的同场景 run，直接忽略本次
+    // resume（此前此处曾传空串调 _enqueueInjection，实为 noop 装饰）。
     if (_runningByScenario[scenarioId] == true) {
-      _enqueueInjection(scenarioId, '');
       return;
     }
 
@@ -440,7 +439,7 @@ class NovelAgentService {
     return (llm: llm, scenario: scenario);
   }
 
-  /// 取消当前运行（仅关闭流，不中断底层 HTTP）
+  /// 关闭事件流（不中断底层 HTTP 运行）
   void dispose() {
     _controller.close();
   }

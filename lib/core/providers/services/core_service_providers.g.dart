@@ -52,35 +52,6 @@ final loggerServiceProvider = AutoDisposeProvider<LoggerService>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef LoggerServiceRef = AutoDisposeProviderRef<LoggerService>;
-String _$llmLoggerHash() => r'7db4b6f0e55537fdbe94f184f9f89070e090bae0';
-
-/// LlmLogger Provider
-///
-/// 提供全局 LLM 调用日志服务实例，记录前端所有 LLM 请求/响应。
-///
-/// **功能**:
-/// - JSONL 文件落盘（按天分文件，7 天自动清理）
-/// - 内存缓存最近 200 条记录
-/// - 查询接口：getRecent / getById / clear
-/// - 通过 [LlmLogger.changeNotifier] 推送变化通知
-///
-/// **依赖**:
-/// - 需在 `main.dart` 启动时调用 `LlmLogger.instance.initialize()`
-///
-/// Copied from [llmLogger].
-@ProviderFor(llmLogger)
-final llmLoggerProvider = AutoDisposeProvider<LlmLogger>.internal(
-  llmLogger,
-  name: r'llmLoggerProvider',
-  debugGetCreateSourceHash:
-      const bool.fromEnvironment('dart.vm.product') ? null : _$llmLoggerHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef LlmLoggerRef = AutoDisposeProviderRef<LlmLogger>;
 String _$preferencesServiceHash() =>
     r'082811fb7cecf997dd4fe3f88aa802ee93900402';
 

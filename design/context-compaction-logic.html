@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上下文压缩逻辑全景 — Whimread「随心阅读」</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ================= 主题变量（晨读书馆 / 暗夜书馆） ================= */
+:root, [data-theme="light"] {
+  --page-bg: #F4EFE3;
+  --bg: #FFFDF8;
+  --paper: #F7F1E3;
+  --ink: #2B2620;
+  --ink-soft: #6B6358;
+  --accent: #8C5A1F;
+  --accent-2: #B8843A;
+  --chip-bg: rgba(184, 132, 58, .14);
+  --divider: #E5DDCC;
+  --card-shadow: 0 1px 3px rgba(43,38,32,.08), 0 8px 28px rgba(43,38,32,.10);
+  --ok: #5E7A3C; --ok-bg: #E0E8CF;
+  --err: #B23A2E; --err-bg: #F3DAD5;
+  --info: #4A4034; --info-bg: #E8E0D0;
+  --side: #7A5230; --side-bg: #EFE3D0;
+  --code-bg: #2B2620; --code-ink: #E8DCC4;
+  --drop-bg: rgba(178,58,46,.10); --drop-bd: rgba(178,58,46,.45);
+  --keep-bg: rgba(94,122,60,.12); --keep-bd: rgba(94,122,60,.45);
+  --rw-bg: rgba(184,132,58,.14); --rw-bd: rgba(184,132,58,.55);
+  --mk-bg: rgba(74,64,52,.10); --mk-bd: rgba(74,64,52,.4);
+}
+[data-theme="dark"] {
+  --page-bg: #17130D;
+  --bg: #1C1812;
+  --paper: #241F16;
+  --ink: #E8DCC4;
+  --ink-soft: #B5A482;
+  --accent: #B8843A;
+  --accent-2: #D9A05B;
+  --chip-bg: rgba(217, 160, 91, .18);
+  --divider: #3A3128;
+  --card-shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.5);
+  --ok: #7A9A55; --ok-bg: #2A3A14;
+  --err: #D9685A; --err-bg: #4A1A14;
+  --info: #B0A282; --info-bg: #342D22;
+  --side: #D9A05B; --side-bg: #3A2E1C;
+  --code-bg: #131009; --code-ink: #D8CBAE;
+  --drop-bg: rgba(217,104,90,.14); --drop-bd: rgba(217,104,90,.5);
+  --keep-bg: rgba(122,154,85,.16); --keep-bd: rgba(122,154,85,.5);
+  --rw-bg: rgba(217,160,91,.16); --rw-bd: rgba(217,160,91,.55);
+  --mk-bg: rgba(176,162,130,.12); --mk-bd: rgba(176,162,130,.4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--page-bg); color: var(--ink);
+  line-height: 1.75; transition: background .35s, color .35s;
+}
+.serif { font-family: "Noto Serif SC", Georgia, "STSong", serif; }
+.mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; }
+
+/* ================= 顶栏 ================= */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--divider);
+  padding: 13px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.topbar h1 { font-size: 18px; font-weight: 700; }
+.topbar .brand { font-size: 12px; color: var(--ink-soft); }
+.topbar nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+.topbar nav a {
+  font-size: 13px; color: var(--ink-soft); text-decoration: none;
+  padding: 5px 12px; border-radius: 999px;
+}
+.topbar nav a:hover { background: var(--chip-bg); color: var(--accent); }
+.theme-btn {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink);
+  border-radius: 999px; padding: 5px 14px; font-size: 13px; cursor: pointer;
+}
+.theme-btn:hover { border-color: var(--accent-2); color: var(--accent); }
+
+/* ================= 布局 ================= */
+.wrap { max-width: 1080px; margin: 0 auto; padding: 40px 28px 90px; }
+section { margin-bottom: 64px; scroll-margin-top: 90px; }
+h2 {
+  font-size: 26px; font-weight: 900; margin-bottom: 6px;
+  display: flex; align-items: baseline; gap: 12px;
+}
+h2 .no {
+  font-family: "JetBrains Mono", monospace; font-size: 14px; color: var(--accent-2);
+  border: 1px solid var(--accent-2); border-radius: 8px; padding: 1px 9px; transform: translateY(-3px);
+}
+.lead { color: var(--ink-soft); font-size: 15px; margin-bottom: 22px; max-width: 860px; }
+h3 { font-size: 17px; font-weight: 700; margin: 28px 0 12px; }
+p { margin-bottom: 12px; font-size: 14.5px; }
+.card {
+  background: var(--bg); border: 1px solid var(--divider); border-radius: 14px;
+  padding: 22px 24px; box-shadow: var(--card-shadow); margin-bottom: 18px;
+}
+.chip {
+  display: inline-block; background: var(--chip-bg); color: var(--accent);
+  border-radius: 999px; padding: 2px 12px; font-size: 12.5px; font-weight: 600; margin: 0 4px 6px 0;
+}
+code.inline {
+  font-family: "JetBrains Mono", monospace; font-size: .86em;
+  background: var(--chip-bg); color: var(--accent); border-radius: 5px; padding: 1px 6px;
+}
+pre.code {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  background: var(--code-bg); color: var(--code-ink);
+  border-radius: 10px; padding: 16px 18px; font-size: 12.8px; line-height: 1.7;
+  overflow-x: auto; margin: 12px 0; white-space: pre;
+}
+pre.code .c { color: #8a7d63; }
+pre.code .k { color: #d9a05b; }
+pre.code .s { color: #9fbe6a; }
+.file-ref { font-size: 12px; color: var(--ink-soft); font-family: "JetBrains Mono", monospace; }
+
+/* ================= Hero ================= */
+.hero {
+  background: var(--bg); border: 1px solid var(--divider); border-radius: 18px;
+  box-shadow: var(--card-shadow); padding: 38px 36px; margin-bottom: 56px;
+  position: relative; overflow: hidden;
+}
+.hero::after {
+  content: "🗂"; position: absolute; right: -10px; bottom: -34px;
+  font-size: 170px; opacity: .06; transform: rotate(-12deg);
+}
+.hero .kicker { color: var(--accent-2); font-weight: 700; font-size: 13px; letter-spacing: .2em; }
+.hero h2 { font-size: 34px; margin: 10px 0 14px; }
+.hero p.sub { font-size: 15.5px; color: var(--ink-soft); max-width: 780px; }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 26px; }
+.stat {
+  background: var(--paper); border: 1px solid var(--divider); border-radius: 12px;
+  padding: 14px 16px;
+}
+.stat .v { font-family: "JetBrains Mono", monospace; font-size: 22px; font-weight: 600; color: var(--accent); }
+.stat .k { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; }
+
+/* ================= 数据流图 ================= */
+.flow { display: flex; flex-direction: column; gap: 0; }
+.flow-row { display: flex; align-items: stretch; gap: 14px; }
+.flow-node {
+  flex: 1; border: 1.5px solid var(--accent-2); background: var(--paper);
+  border-radius: 12px; padding: 14px 16px; position: relative;
+}
+.flow-node .t { font-weight: 700; font-size: 14.5px; }
+.flow-node .d { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+.flow-node .f { font-size: 11px; color: var(--accent-2); font-family: "JetBrains Mono", monospace; margin-top: 7px; word-break: break-all; }
+.flow-arrow { text-align: center; color: var(--accent-2); font-size: 20px; line-height: 1.2; padding: 4px 0; }
+.flow-arrow .lbl { font-size: 12px; color: var(--ink-soft); font-family: "JetBrains Mono", monospace; }
+
+/* ================= 触发判定 ================= */
+.trigger-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.trig {
+  border: 1px solid var(--divider); border-left: 4px solid var(--accent-2);
+  background: var(--paper); border-radius: 10px; padding: 16px 18px;
+}
+.trig .p { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--accent-2); }
+.trig .t { font-weight: 700; font-size: 14.5px; margin: 4px 0 6px; }
+.trig .d { font-size: 12.8px; color: var(--ink-soft); }
+.trig .cond { margin-top: 10px; font-size: 12.5px; font-family: "JetBrains Mono", monospace; color: var(--accent); }
+
+/* ================= 消息序列演示 ================= */
+.demo-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.btn {
+  border: 1.5px solid var(--accent-2); background: var(--accent-2); color: var(--bg);
+  font-weight: 700; font-size: 14px; border-radius: 999px; padding: 8px 22px; cursor: pointer;
+}
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+.phase-hint {
+  flex: 1; min-width: 260px; font-size: 13.5px; color: var(--ink-soft);
+  background: var(--paper); border: 1px dashed var(--accent-2); border-radius: 10px; padding: 9px 14px;
+}
+.phase-hint b { color: var(--accent); }
+.msglist { display: flex; flex-direction: column; gap: 7px; }
+.msg {
+  display: flex; gap: 12px; align-items: stretch;
+  border: 1px solid var(--divider); border-radius: 10px; background: var(--paper);
+  padding: 9px 14px; font-size: 13px; transition: all .45s ease; position: relative;
+}
+.msg .idx { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-soft); min-width: 30px; padding-top: 2px; }
+.msg .role {
+  min-width: 74px; text-align: center; align-self: flex-start; margin-top: 1px;
+  font-size: 11px; font-weight: 700; border-radius: 6px; padding: 2px 0;
+  font-family: "JetBrains Mono", monospace;
+}
+.role-system  { background: var(--mk-bg);  color: var(--ink-soft); border: 1px solid var(--mk-bd); }
+.role-user    { background: var(--keep-bg); color: var(--ok);      border: 1px solid var(--keep-bd); }
+.role-assistant { background: var(--chip-bg); color: var(--accent); border: 1px solid var(--accent-2); }
+.role-tool    { background: var(--rw-bg);  color: var(--side);     border: 1px solid var(--rw-bd); }
+.msg .body { flex: 1; min-width: 0; }
+.msg .desc { color: var(--ink); }
+.msg .meta { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.msg .rw-note {
+  display: none; margin-top: 6px; font-family: "JetBrains Mono", monospace; font-size: 11.8px;
+  background: var(--code-bg); color: var(--code-ink); border-radius: 7px; padding: 6px 10px;
+}
+.msg.st-dropped { opacity: .32; filter: grayscale(.7); text-decoration: line-through; }
+.msg.st-kept    { border-color: var(--keep-bd); background: var(--keep-bg); }
+.msg.st-rewritten { border-color: var(--rw-bd); }
+.msg.st-dup     { border-color: var(--rw-bd); }
+.msg.st-marker  { border-color: var(--accent-2); background: var(--chip-bg); }
+.msg.st-new { animation: pop .5s ease; }
+@keyframes pop { 0% { transform: scale(.97); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.cutline {
+  display: none; align-items: center; gap: 10px; margin: 2px 0;
+  color: var(--err); font-size: 12px; font-family: "JetBrains Mono", monospace;
+}
+.cutline::before, .cutline::after { content: ""; flex: 1; border-top: 2px dashed var(--err); }
+.demo-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.demo-stats .st {
+  background: var(--paper); border: 1px solid var(--divider); border-radius: 9px;
+  padding: 8px 14px; font-size: 12.5px;
+}
+.demo-stats .st b { font-family: "JetBrains Mono", monospace; color: var(--accent); font-size: 14px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--ink-soft); }
+.legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 5px; vertical-align: -1px; }
+
+/* ================= 表格 ================= */
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+table.tbl th, table.tbl td { border: 1px solid var(--divider); padding: 9px 12px; text-align: left; vertical-align: top; }
+table.tbl th { background: var(--paper); font-weight: 700; font-size: 12.5px; }
+table.tbl td.mono { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--accent); white-space: nowrap; }
+table.tbl td .sm { color: var(--ink-soft); font-size: 12px; }
+
+/* ================= 1-liner 示例 ================= */
+.io-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.io {
+  display: grid; grid-template-columns: minmax(150px, 220px) 40px 1fr; gap: 10px; align-items: stretch;
+  border: 1px solid var(--divider); border-radius: 10px; overflow: hidden;
+}
+.io .in, .io .out { padding: 10px 14px; font-size: 12.3px; }
+.io .in { background: var(--paper); }
+.io .out { background: var(--chip-bg); font-family: "JetBrains Mono", monospace; font-size: 12px; display: flex; align-items: center; }
+.io .tool-tag { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--accent-2); display: block; margin-bottom: 3px; }
+.io-arrow { display: flex; align-items: center; padding: 0 4px; color: var(--accent-2); }
+
+/* ================= 双列 ================= */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } .io { grid-template-columns: 1fr; } .io-arrow { display: none; } }
+
+/* ================= UI 呈现 mock ================= */
+.mock-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 760px) { .mock-wrap { grid-template-columns: 1fr; } }
+.mock {
+  border: 1px solid var(--divider); border-radius: 14px; overflow: hidden; background: var(--paper);
+}
+.mock .cap { font-size: 12px; color: var(--ink-soft); padding: 8px 14px; border-bottom: 1px solid var(--divider); background: var(--bg); }
+.mock .inner { padding: 16px; font-size: 13px; }
+.mock-snack {
+  background: #3A332B; color: #EFE6D2; border-radius: 8px; padding: 11px 16px;
+  font-size: 12.8px; box-shadow: 0 4px 14px rgba(0,0,0,.25); margin: 0 auto; max-width: 340px;
+}
+.mock-card {
+  border: 1px solid var(--divider); border-radius: 8px; margin: 0 auto; max-width: 380px; background: var(--bg);
+}
+.mock-card .row {
+  text-align: center; padding: 7px 12px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer;
+}
+.mock-card .grid4 { display: none; grid-template-columns: repeat(4,1fr); gap: 6px; padding: 10px 12px 6px; border-top: 1px dashed var(--divider); }
+.mock-card .grid4 .g { text-align: center; }
+.mock-card .grid4 .g .v { font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 14px; color: var(--accent); }
+.mock-card .grid4 .g .k { font-size: 10.5px; color: var(--ink-soft); }
+.mock-card .bar { height: 5px; border-radius: 4px; background: var(--divider); margin: 6px 12px 10px; overflow: hidden; display: none; }
+.mock-card .bar i { display: block; height: 100%; width: 78%; background: var(--accent-2); }
+.mock-card.open .grid4, .mock-card.open .bar { display: grid; }
+.mock-card.open .bar { display: block; }
+.mock-card .nocb { display: none; text-align: center; font-size: 11px; color: var(--ink-soft); padding: 0 12px 9px; border-top: 1px dashed var(--divider); padding-top: 7px; }
+.mock-card.open .nocb { display: block; }
+
+/* ================= 页脚 ================= */
+footer { border-top: 1px solid var(--divider); padding: 26px 28px 40px; color: var(--ink-soft); font-size: 12.5px; text-align: center; }
+.footer-files { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: center; margin-top: 10px; }
+.footer-files span { font-family: "JetBrains Mono", monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1 class="serif">上下文压缩逻辑全景</h1>
+    <span class="brand">Whimread「随心阅读」 · Novel Agent · v32 统一历史模型</span>
+  </div>
+  <nav>
+    <a href="#overview">总览</a>
+    <a href="#flow">组件地图</a>
+    <a href="#trigger">触发判定</a>
+    <a href="#demo">压缩演示</a>
+    <a href="#preprune">预剪枝</a>
+    <a href="#sync">一致性同步</a>
+    <a href="#ui">UI 呈现</a>
+    <a href="#params">参数速查</a>
+    <a href="#future">边界与演进</a>
+  </nav>
+  <button class="theme-btn" onclick="toggleTheme()">🌓 昼夜切换</button>
+</div>
+
+<div class="wrap">
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="kicker">CONTEXT COMPACTION</div>
+  <h2 class="serif">Agent 聊天的「上下文回收站」</h2>
+  <p class="sub">
+    Agent 多轮 ReAct 循环中消息会无限增长，撞上 LLM 128K 上下文窗口就 400。
+    本项目用一套<strong>纯规则（零 LLM 参与）</strong>的压缩体系：预剪枝改写老工具结果 →
+    按尾部预算丢弃早期消息 → 注入压缩提示，同时保证 <strong>tool_calls/tool 配对合法</strong>、
+    <strong>内存 / DB / LLM 视图三者一致</strong>、<strong>UI 可感知可还原</strong>。
+  </p>
+  <div class="stat-row">
+    <div class="stat"><div class="v">500K</div><div class="k">字符阈值（≈125K tokens）</div></div>
+    <div class="stat"><div class="v">100K</div><div class="k">token 阈值（真实 usage 优先）</div></div>
+    <div class="stat"><div class="v">100K</div><div class="k">尾部保留字符（≈25K tokens）</div></div>
+    <div class="stat"><div class="v">6 条</div><div class="k">近期 tool result 免改写</div></div>
+    <div class="stat"><div class="v">50K</div><div class="k">实时工具结果截断（上游防线）</div></div>
+  </div>
+</div>
+
+<!-- ================= 1 总览 ================= -->
+<section id="overview">
+  <h2><span class="no">01</span>这套体系解决什么问题</h2>
+  <p class="lead">四条硬约束，决定了它不是简单地把数组截断。</p>
+  <div class="card">
+    <span class="chip">① 不能撞窗口</span><span class="chip">② 不能切断工具配对</span><span class="chip">③ 内存 = DB = LLM 视图</span><span class="chip">④ 压缩本身不调 LLM</span>
+    <p style="margin-top:14px">
+      AgentLoop 每轮调用 LLM 前检查消息总量，超阈值就执行压缩。压缩器 <code class="inline">ContextCompactor</code>
+      是纯函数：输入消息列表，输出压缩后的消息列表 + 元数据，自己<strong>不发任何 LLM 请求</strong>（P2 规划中的 LLM 摘要除外）。
+      之所以要配对保护：OpenAI 兼容网关要求每条 <code class="inline">role:"tool"</code> 消息前面必须有声明对应
+      <code class="inline">tool_calls</code> 的 assistant 消息，切断了直接 400。
+    </p>
+    <p>
+      压缩的落库遵循 v32 统一历史模型：DB 的 <code class="inline">chat_messages</code> 表 1:1 存 agent 消息，
+      压缩后以内存为基准用 <code class="inline">replaceMessages</code> 单事务原子重写 DB，跨会话永不「复活」已压缩内容。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 2 组件地图 ================= -->
+<section id="flow">
+  <h2><span class="no">02</span>组件地图与数据流</h2>
+  <p class="lead">五个组件各管一段，事件穿针引线。</p>
+  <div class="card">
+    <div class="flow">
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="t">🛡 ToolResultFormatter <span class="chip" style="font-size:10.5px">上游防线</span></div>
+          <div class="d">工具结果实时回传时截断到 50K 字符（约 12.5K tokens），压缩阶段不再二次截断</div>
+          <div class="f">lib/services/novel_agent/tool_result_formatter.dart</div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓<span class="lbl"> tool result 已有界</span></div>
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="t">🔍 AgentLoop（每轮 LLM 调用前）</div>
+          <div class="d">检查点 0b：四条触发路（见 §03）→ 调 compact → emit CompactionEvent</div>
+          <div class="f">lib/services/novel_agent/agent_loop.dart</div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓<span class="lbl"> CompactionEvent（统计 + 压缩提示 + 改写记录）</span></div>
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="t">⚙️ ContextCompactor（纯函数压缩器）</div>
+          <div class="d">P1 预剪枝 → 边界选择（配对保护）→ 重组 + 注入压缩提示；不调 LLM、无副作用</div>
+          <div class="f">lib/services/novel_agent/context_compactor.dart</div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓<span class="lbl"> 事件消费</span></div>
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="t">💾 ScenarioSessionChain._handleCompaction</div>
+          <div class="d">内存 removeRange + 头部插 marker + 应用改写 → replaceMessages 单事务原子重写 DB</div>
+          <div class="f">lib/core/providers/scenario_session_chain.dart</div>
+        </div>
+      </div>
+      <div class="flow-arrow">↓<span class="lbl"> hydrate / 展示</span></div>
+      <div class="flow-row">
+        <div class="flow-node">
+          <div class="t">🗂 CompactionNoteParser → CompactionMarkerCard</div>
+          <div class="d">重启/切会话时解析 DB 中 KV 标记还原成可展开卡片；运行时另弹 SnackBar</div>
+          <div class="f">compaction_note_parser.dart · compaction_marker_card.dart · agent_chat_dialog.dart</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:16px; font-size:12.8px; color:var(--ink-soft)">
+      注：子 Agent 的 <code class="inline">SubagentStateProjector</code> 对 CompactionEvent 是 no-op——压缩只发生在主 session，
+      由 ScenarioSession 统一处理（spec §8.2）。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 3 触发判定 ================= -->
+<section id="trigger">
+  <h2><span class="no">03</span>何时压缩：四条触发路</h2>
+  <p class="lead">AgentLoop 每轮 LLM 调用前检查一次。有真实 usage 时直接对照 token 阈值；没有时双轨启发式兜底。</p>
+  <div class="trigger-grid">
+    <div class="trig">
+      <div class="p">PATH 1 · 最准</div>
+      <div class="t">真实 promptTokens</div>
+      <div class="d">上一轮 LLM 末帧 usage 回报的 prompt_tokens 被动记录，下一轮直接对照 token 阈值，绕过一切估算。</div>
+      <div class="cond">usage.promptTokens ≥ 100K → 压缩</div>
+    </div>
+    <div class="trig">
+      <div class="p">PATH 2 · 字符启发式</div>
+      <div class="t">字符总量阈值</div>
+      <div class="d">消息总字符（content + toolCalls 参数 + toolCallId）≥ 500K 字符，约等于 125K tokens。</div>
+      <div class="cond">totalChars ≥ 500,000 → 压缩</div>
+    </div>
+    <div class="trig">
+      <div class="p">PATH 3 · token 启发式</div>
+      <div class="t">CJK 加权估算</div>
+      <div class="d">无 usage 时按 CJK 字符 ×2、其他 ×0.25 估算 token（准确度约 80%，比纯字符准）。与 PATH 2 任一超限即触发。</div>
+      <div class="cond">estimatedTokens ≥ 100K → 压缩</div>
+    </div>
+    <div class="trig">
+      <div class="p">PATH 4 · 强制</div>
+      <div class="t">finish_reason = length</div>
+      <div class="d">输出被截断往往意味着上下文压力，置 _forceCompaction 标记，下一轮无条件先压缩（content_filter 不触发）。</div>
+      <div class="cond">finishReason == 'length' → 下轮强制</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3 style="margin-top:0">两个防呆细节</h3>
+    <p>
+      <b>空压缩跳过</b>：如果压缩结果「丢弃 0 条且无改写」（比如首轮就撞 length），不 apply、不 emit 事件，
+      避免往上下文和 DB 里插一条「丢弃 0 条」的无意义压缩提示。<br>
+      <b>思维链不入账</b>：reasoning 增量只 emit 给 UI 展示，从不写进消息历史，自然也不参与压缩。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 4 交互演示 ================= -->
+<section id="demo">
+  <h2><span class="no">04</span>压缩怎么执行：三步流程演示</h2>
+  <p class="lead">下面用一份按比例缩小的模拟消息列表，走一遍 compact() 的完整流程。点「下一步」逐步观察。</p>
+
+  <div class="card">
+    <div class="demo-toolbar">
+      <button class="btn" id="btnNext" onclick="demoNext()">下一步 ▸</button>
+      <button class="btn ghost" onclick="demoReset()">↺ 重置</button>
+      <div class="phase-hint" id="phaseHint">点击「下一步」开始。当前为压缩前的原始消息列表（11 条，模拟数据）。</div>
+    </div>
+
+    <div class="msglist" id="msglist"></div>
+
+    <div class="cutline" id="cutline">✂ 候选切点：保留 [10..) —— 首条是 tool 结果，配对保护回退 → 保留 [9..)</div>
+
+    <div class="demo-stats" id="demoStats" style="display:none">
+      <div class="st">丢弃 <b>8</b> 条（#1–#8）</div>
+      <div class="st">保留 <b>2</b> 条 + system + marker</div>
+      <div class="st">预剪枝改写 <b>3</b> 条（1 去重 + 2 摘要）</div>
+      <div class="st">字符 <b>22.8K → 8.3K</b>（压缩率 ≈ 64%）</div>
+    </div>
+
+    <div class="legend">
+      <span><span class="sw" style="background:var(--drop-bg);border:1px solid var(--drop-bd)"></span>丢弃区（早期消息）</span>
+      <span><span class="sw" style="background:var(--rw-bg);border:1px solid var(--rw-bd)"></span>预剪枝改写（content 被替换）</span>
+      <span><span class="sw" style="background:var(--keep-bg);border:1px solid var(--keep-bd)"></span>尾部保留区</span>
+      <span><span class="sw" style="background:var(--chip-bg);border:1px solid var(--accent-2)"></span>压缩提示 marker（新插入）</span>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="card">
+      <h3 style="margin-top:0">Step 1 · P1 预剪枝</h3>
+      <p>对「可改写区间」（去掉最近 6 条 tool result 后的历史区）的老 tool result 改写 content：
+      Pass 1 MD5 去重 + Pass 2 按工具类型 1-liner 摘要。只改 content，不动 toolCallId / 顺序 / 配对。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Step 2 · 边界选择</h3>
+      <p>从最后一条向前累加字符，超过 <code class="inline">preserveTailChars</code>（100K）处为候选切点；
+      若保留段首条是 tool 消息，逐条向前回退到其归属 assistant——多保留一条是安全方向，留下孤儿才会 400。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Step 3 · 重组</h3>
+      <p>最终消息列表 = <code class="inline">[system prompt] + [压缩提示] + [保留尾部]</code>。
+      压缩提示是带 KV 前缀的 system 消息：KV 给解析器还原 UI marker，自然语言给 LLM 看。</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">压缩提示长这样</h3>
+<pre class="code" style="margin:4px 0 0"><span class="s">[上下文压缩|droppedCount=8|keptCount=2|removedChars=14500|originalChars=22800|compactedChars=8300|rewrittenCount=3|timestamp=1763160000000]</span>
+早期 8 条消息已被压缩移除。请基于保留的最近 2 条消息继续对话。如果缺少关键信息，请使用工具重新查询。</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 5 预剪枝细节 ================= -->
+<section id="preprune">
+  <h2><span class="no">05</span>预剪枝细节：去重与 1-liner</h2>
+  <p class="lead">小说场景里工具结果最占空间（整章正文几千字），而 LLM 对「很久之前读过什么」只需要一行记忆。</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">Pass 1 · MD5 去重</h3>
+    <p>
+      区间内 content &gt; 200 字符的 tool result 两遍扫描：第一遍记录每个 MD5 的<strong>最后出现索引</strong>，
+      第二遍把非最后出现的重复替换为指向标记——保留最新原文，旧的变成「这里有过一份相同结果」的指针。
+      200 字符以下的短结果不参与（两条 "OK" 碰巧相同不该被去重）。
+    </p>
+    <div class="io-grid">
+      <div class="io">
+        <div class="in"><span class="tool-tag">#7 · read_chapter_content（6500 字，与 #5 内容相同）</span>第三章全文……</div>
+        <div class="io-arrow">→</div>
+        <div class="out">"[read_chapter_content dup of 5#a3f9c1]"</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Pass 2 · 按工具类型 1-liner</h3>
+    <p>未被去重的、content &gt; 500 字符的结果改写成一行结构化摘要。短结果不动（改写收益低、信息损失大）。</p>
+    <div class="io-grid">
+      <div class="io">
+        <div class="in"><span class="tool-tag">read_chapter_content · 纯文本</span>第三章 夜渡 ……（6500 字正文）</div>
+        <div class="io-arrow">→</div>
+        <div class="out">[read_chapter] 6500 字</div>
+      </div>
+      <div class="io">
+        <div class="in"><span class="tool-tag">list_chapters · JSON</span>{"count": 42, "chapters": [……]}</div>
+        <div class="io-arrow">→</div>
+        <div class="out">"[list_chapters] 42 章"</div>
+      </div>
+      <div class="io">
+        <div class="in"><span class="tool-tag">search_in_chapters · JSON</span>{"keyword":"主角","totalChaptersHit":12,"totalMatches":37, ……}</div>
+        <div class="io-arrow">→</div>
+        <div class="out">"[search] 搜\"主角\" 命中 12 章/37 处"</div>
+      </div>
+      <div class="io">
+        <div class="in"><span class="tool-tag">execute_js · JSON</span>{"__meta":{"run_id":"…","mode":"extract"}, ……}</div>
+        <div class="io-arrow">→</div>
+        <div class="out">"[execute_js] extract r-a1b2c3d4"</div>
+      </div>
+      <div class="io">
+        <div class="in"><span class="tool-tag">未知工具 · fallback</span>（任意长内容）</div>
+        <div class="io-arrow">→</div>
+        <div class="out">"[toolName] (N 字符)"</div>
+      </div>
+    </div>
+    <p style="margin-top:12px; font-size:12.8px; color:var(--ink-soft)">
+      红线：改写只作用于 tool result 的 content。assistant 的 toolCalls（含 arguments，LLM 决策上下文）、
+      user / system 消息、toolCallId、消息顺序与配对关系一律不动。错误分支（含 error 字段）保留 error / message 原文。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 6 一致性同步 ================= -->
+<section id="sync">
+  <h2><span class="no">06</span>一致性同步：内存 / DB / LLM 视图</h2>
+  <p class="lead">v32 起 DB 直接 1:1 存 agent 消息，压缩后的回写以内存为基准原子重写，三个视图永不分叉。</p>
+  <div class="card">
+    <p>CompactionEvent 到达后，<code class="inline">ScenarioSessionChain._handleCompaction</code> 依次执行：</p>
+<pre class="code"><span class="c">// 1) 内存裁剪：丢掉前缀 [0, cut)</span>
+_agentMessages.removeRange(0, removed);
+
+<span class="c">// 2) 头部插入压缩提示（独占 index 0，落库即 agentMsgIndex=0）</span>
+_agentMessages.insert(0, ChatMessage(role: 'system', content: e.compactionNote));
+
+<span class="c">// 3) 应用预剪枝改写：压缩前 index → 落点 = index - cut + 1（+1 为头部 marker 占位）</span>
+<span class="c">//    落在丢弃段（index < cut）的 entry 已随 removeRange 消失，无须处理</span>
+<span class="c">//    （历史 bug 备注：曾误用 `- cut`，改写落到前一条消息上——已修复 +1）</span>
+
+<span class="c">// 4) DB 原子重写：以当前内存为基准，replaceMessages 单事务整段重写</span>
+unawaited(_persistence.rewriteAgentMessagesInDb(cut, logTag: 'compaction_db'));</pre>
+    <p>
+      重启或切会话时 hydrate 从 DB 读回消息：压缩提示 system 消息保留在 agent 消息序列里（LLM 下一轮仍能看到），
+      UI 投影层则用 <code class="inline">CompactionNoteParser</code> 识别 KV 前缀，把它渲染成 marker 卡片而不是一条灰 system 文本。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 7 UI 呈现 ================= -->
+<section id="ui">
+  <h2><span class="no">07</span>用户看到什么</h2>
+  <p class="lead">压缩对用户是「可感知、不可回溯」的：一条提示 + 一张可展开的统计卡片。</p>
+  <div class="mock-wrap">
+    <div class="mock">
+      <div class="cap">运行时 · CompactionEvent → 一次性 SnackBar（agent_chat_dialog）</div>
+      <div class="inner">
+        <div class="mock-snack">🗂 上下文已压缩：420K → 96K 字，保留 15 条 / 丢弃 23 条</div>
+        <p style="margin-top:14px; font-size:12.3px; color:var(--ink-soft)">Floating 样式，展示 3 秒自动消失，不打断对话流。</p>
+      </div>
+    </div>
+    <div class="mock">
+      <div class="cap">聊天流 · CompactionMarkerCard（可展开分隔条）</div>
+      <div class="inner">
+        <div class="mock-card" id="mockCard" onclick="document.getElementById('mockCard').classList.toggle('open')">
+          <div class="row">🗂 上下文已压缩 · 丢弃 23 条 ▾（点击展开）</div>
+          <div class="grid4">
+            <div class="g"><div class="v">420K</div><div class="k">压缩前</div></div>
+            <div class="g"><div class="v">96K</div><div class="k">压缩后</div></div>
+            <div class="g"><div class="v">23</div><div class="k">丢弃</div></div>
+            <div class="g"><div class="v">15</div><div class="k">保留</div></div>
+          </div>
+          <div class="bar"><i></i></div>
+          <div class="nocb">压缩内容不可回溯 · 如需信息请让 Agent 重新查询</div>
+        </div>
+        <p style="margin-top:14px; font-size:12.3px; color:var(--ink-soft)">折叠态只有一行提示；展开态为 4 格统计 + 压缩率进度条。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 8 参数速查 ================= -->
+<section id="params">
+  <h2><span class="no">08</span>参数速查表</h2>
+  <p class="lead">全部集中在 <code class="inline">CompactorConfig</code>，可整体关闭（enabled: false）。</p>
+  <div class="card">
+    <table class="tbl">
+      <tr><th>参数</th><th>默认值</th><th>作用</th></tr>
+      <tr><td class="mono">maxContextChars</td><td class="mono">500,000</td><td>字符阈值（≈125K tokens），适配 GPT-4o / DeepSeek / Qwen 的 128K 窗口<span class="sm">，留 28K 给输出 + 新消息</span></td></tr>
+      <tr><td class="mono">maxContextTokens</td><td class="mono">100,000</td><td>token 阈值；有真实 usage 时优先对照它</td></tr>
+      <tr><td class="mono">preserveTailChars</td><td class="mono">100,000</td><td>尾部保留预算（≈25K tokens，占总阈值 20%），保证近期对话 + 工具结果不丢</td></tr>
+      <tr><td class="mono">protectRecentToolResults</td><td class="mono">6</td><td>最近 6 条 tool result 免改写（≈3 轮调用），LLM 下轮可能还追问</td></tr>
+      <tr><td class="mono">dedupThresholdChars</td><td class="mono">200</td><td>content 超过此值才参与 MD5 去重（防误判短结果）</td></tr>
+      <tr><td class="mono">longFieldChars</td><td class="mono">500</td><td>content 超过此值才被 1-liner 改写</td></tr>
+      <tr><td class="mono">prePruneEnabled</td><td class="mono">true</td><td>关闭则退化为 v32 的「按切点丢弃式」压缩</td></tr>
+      <tr><td class="mono">ToolResultFormatter.maxChars</td><td class="mono">50,000</td><td>上游防线：实时工具结果回传时截断，加 "... [truncated]" 后缀</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 9 边界与演进 ================= -->
+<section id="future">
+  <h2><span class="no">09</span>设计边界与演进方向</h2>
+  <div class="card">
+    <h3 style="margin-top:0">当前边界</h3>
+    <p>
+      · 1-liner 是<strong>规则式摘要</strong>（数 count / 拼关键字），不是语义摘要——LLM 只知道「读过 6500 字」，不知道读了什么。<br>
+      · 丢弃式压缩不生成「前情提要」，早期对话细节丢失后只能靠工具重查（压缩提示里正是这么引导 LLM 的）。<br>
+      · 压缩只在主 Agent 的 session 链上发生，子 Agent 的 CompactionEvent 是 no-op。
+    </p>
+    <h3>P2 规划（代码内注释已标注）</h3>
+    <p>
+      用 LLM 生成<strong>结构化摘要</strong>替代规则式 1-liner。预剪枝层是它的前置：先把总字符数降下来，
+      减少需要送去做 LLM 摘要的内容量。届时压缩将分两级：廉价规则剪枝（每次都跑）+ 昂贵 LLM 摘要（必要才跑）。
+    </p>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Whimread「随心阅读」 · 上下文压缩逻辑说明 · 生成于 2026-11-15，基于 v3.2.1 代码
+  <div class="footer-files">
+    <span>context_compactor.dart</span><span>agent_loop.dart</span><span>agent_event.dart</span>
+    <span>compaction_note_parser.dart</span><span>scenario_session_chain.dart</span><span>scenario_session.dart</span>
+    <span>agent_session_persistence.dart</span><span>tool_result_formatter.dart</span>
+    <span>compaction_marker_card.dart</span><span>agent_chat_dialog.dart</span><span>agent_chat_message.dart</span>
+  </div>
+</footer>
+
+<script>
+/* ================= 主题 ================= */
+function toggleTheme() {
+  const el = document.documentElement;
+  const cur = el.getAttribute('data-theme');
+  el.setAttribute('data-theme', (!cur || cur === 'light') ? 'dark' : 'light');
+}
+
+/* ================= 压缩演示 =================
+   模拟数据：按比例缩小。状态机 phase 0→4。
+   phase 1 = 预剪枝；phase 2 = 边界选择（切点 + 配对回退）；
+   phase 3 = 重组（marker 插入 + 丢弃态显现）；phase 4 = 完成（统计显现）。 */
+const MESSAGES = [
+  { idx: 0,  role: 'system',    title: 'sys_prompt',                  desc: '系统提示词（场景设定 + 工具说明）', meta: '~2.1K 字符', alwaysKeep: true },
+  { idx: 1,  role: 'user',      title: '用户',                        desc: '「通读第 3 章并整理伏笔」', meta: '12 字符' },
+  { idx: 2,  role: 'assistant', title: 'assistant',                   desc: 'toolCalls: [search_in_chapters]', meta: '180 字符' },
+  { idx: 3,  role: 'tool',      title: 'search_in_chapters',          desc: '搜索结果 JSON（章节列表 + 命中位置）', meta: '3,200 字符 · >500 → 1-liner', rewrite: '[search] 搜"伏笔" 命中 6 章/14 处' },
+  { idx: 4,  role: 'assistant', title: 'assistant',                   desc: 'toolCalls: [read_chapter_content]', meta: '160 字符' },
+  { idx: 5,  role: 'tool',      title: 'read_chapter_content',        desc: '第三章全文', meta: '6,500 字符 · >500 → 1-liner', rewrite: '[read_chapter] 6500 字' },
+  { idx: 6,  role: 'assistant', title: 'assistant',                   desc: 'toolCalls: [read_chapter_content]（又读了一次第三章）', meta: '155 字符' },
+  { idx: 7,  role: 'tool',      title: 'read_chapter_content',        desc: '第三章全文（与 #5 完全相同）', meta: '6,500 字符 · MD5 命中 → dup 标记', rewrite: '"[read_chapter_content dup of 5#a3f9c1]"', dup: true },
+  { idx: 8,  role: 'user',      title: '用户',                        desc: '「继续读第 4 章」', meta: '10 字符' },
+  { idx: 9,  role: 'assistant', title: 'assistant',                   desc: 'toolCalls: [read_chapter_content]', meta: '150 字符', keptFrom: true },
+  { idx: 10, role: 'tool',      title: 'read_chapter_content',        desc: '第四章全文（最近一次工具结果）', meta: '5,800 字符 · 受保护（最近 6 条内）', keptFrom: true },
+];
+const PHASES = [
+  '点击「下一步」开始。当前为压缩前的原始消息列表（11 条，模拟数据，总 ~22.8K 字符）。',
+  '<b>Step 1 · P1 预剪枝</b>：#3、#5 超 500 字符 → 按工具类型改写为 1-liner；#7 与 #5 MD5 相同 → 替换为 dup 指针。最近 6 条 tool result 中的 #10 受保护不动。注意：只改 content，role / toolCallId / 顺序全不变。',
+  '<b>Step 2 · 边界选择</b>：从尾部向前累加字符，超出尾部预算（演示中缩放为 ~8.5K）处为候选切点 → 保留 [10..)。但 #10 是 tool 消息，保留它必须带上归属 assistant——<b>配对保护回退</b>到 #9，最终保留 [9..)。',
+  '<b>Step 3 · 重组</b>：丢弃 #1–#8 共 8 条（sys_prompt 由 systemPrompt 参数重新挂载），重组为 [system prompt] + [压缩提示 marker] + [#9, #10]。KV 前缀留给 hydrate 解析，自然语言给 LLM 看。',
+  '压缩完成。内存同步裁剪 + 头部插 marker + 应用改写，然后 replaceMessages 单事务原子重写 DB —— 三个视图一致，跨会话不复活。',
+];
+let phase = 0;
+
+function roleClass(r) { return 'role-' + r; }
+
+function render() {
+  const list = document.getElementById('msglist');
+  list.innerHTML = '';
+  const showCut = phase >= 2;
+  const showMarker = phase >= 3;
+  const showStats = phase >= 4;
+
+  MESSAGES.forEach(m => {
+    const div = document.createElement('div');
+    let cls = 'msg';
+    let bodyExtra = '';
+    let desc = m.desc;
+    let meta = m.meta;
+
+    const dropped = phase >= 3 && !m.alwaysKeep && !m.keptFrom;
+    const rewritten = phase >= 1 && m.rewrite;
+    const kept = phase >= 2 && m.keptFrom;
+
+    if (rewritten) {
+      cls += ' st-rewritten';
+      bodyExtra = `<div class="rw-note">→ 改写为：${escapeHtml(m.rewrite)}</div>`;
+      meta = m.meta.replace(/ · .*/, '') + ' · 已改写';
+    }
+    if (m.dup && phase >= 1) cls += ' st-dup';
+    if (dropped) cls += ' st-dropped';
+    if (kept) cls += ' st-kept';
+
+    div.className = cls;
+    div.innerHTML = `
+      <div class="idx">#${m.idx}</div>
+      <div class="role ${roleClass(m.role)}">${m.role}</div>
+      <div class="body">
+        <div class="desc"><b>${m.title}</b> — ${desc}</div>
+        <div class="meta">${meta}</div>
+        ${bodyExtra}
+      </div>`;
+    list.appendChild(div);
+
+    if (m.idx === 9 && showCut) {
+      const cl = document.getElementById('cutline');
+      cl.style.display = 'flex';
+    }
+  });
+
+  if (showMarker) {
+    const div = document.createElement('div');
+    div.className = 'msg st-marker st-new';
+    div.innerHTML = `
+      <div class="idx">＋</div>
+      <div class="role role-system">system</div>
+      <div class="body">
+        <div class="desc"><b>压缩提示 marker（新插入，index 0）</b></div>
+        <div class="meta">[上下文压缩|droppedCount=8|keptCount=2|removedChars=14500|originalChars=22800|compactedChars=8300|rewrittenCount=3|timestamp=…]</div>
+        <div class="rw-note">早期 8 条消息已被压缩移除。请基于保留的最近 2 条消息继续对话。如果缺少关键信息，请使用工具重新查询。</div>
+      </div>`;
+    list.insertBefore(div, list.children[1] || null);
+  }
+
+  document.getElementById('phaseHint').innerHTML = PHASES[Math.min(phase, PHASES.length - 1)];
+  document.getElementById('demoStats').style.display = showStats ? 'flex' : 'none';
+  document.getElementById('cutline').style.display = showCut ? 'flex' : 'none';
+  document.getElementById('btnNext').disabled = phase >= 4;
+  document.getElementById('btnNext').textContent = phase >= 4 ? '✓ 演示完成' : '下一步 ▸';
+}
+
+function demoNext() { if (phase < 4) { phase++; render(); } }
+function demoReset() { phase = 0; render(); }
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+render();
+</script>
+</body>
+</html>

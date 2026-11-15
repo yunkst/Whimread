@@ -7,7 +7,7 @@ part of 'reader_state_providers.dart';
 // **************************************************************************
 
 String _$chapterContentStateNotifierHash() =>
-    r'97978b1fb04a815fe1d31f3260f548db845a1b58';
+    r'a4cf69659df2f0b0f63aa8569d393be81edfc9cd';
 
 /// ChapterContentStateNotifier
 ///

@@ -15,7 +15,6 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:riverpod/riverpod.dart' show Ref;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,8 +39,6 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
     ResourceIds.ocrModel,
     ResourceIds.localDreamQnn,
   ];
-
-  Dio? _downloadDio;
 
   /// build 期同步捕获的依赖：skip() 后引导页 unmount → autoDispose
   /// Notifier dispose → 此后再 ref.read 会抛 StateError。后台静默
@@ -242,13 +239,11 @@ class ResourceBootstrapNotifier extends _$ResourceBootstrapNotifier {
   }
 
   /// 不改 UI 状态，静默把缺失资源补齐（跳过后调用）。
-  /// 独立 Dio，避免占用引导页下载通道。
   void _continueInBackground() {
     // ref.read 只在存活期同步执行；此后 Notifier 随引导页 unmount 被
     // dispose，后台闭包只操作捕获的依赖 + no-op 化的 _update
     final manager = _manager;
     if (manager == null) return;
-    _downloadDio ??= Dio();
     unawaited(() async {
       try {
         final manifest = await manager.fetchManifest();

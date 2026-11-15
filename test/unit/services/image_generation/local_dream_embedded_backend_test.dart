@@ -47,16 +47,10 @@ class _FakeEngineManager implements LocalDreamEngineManager {
   Future<void> stop() async {}
 
   @override
-  LocalDreamEngineStatus get status => const LocalDreamEngineStatus.stopped();
-
-  @override
   Future<bool> isQnnRuntimeReady() async => true;
 
   @override
   Future<String?> nativeLibDir() async => '/unused';
-
-  @override
-  void dispose() {}
 }
 
 void main() {
@@ -165,33 +159,6 @@ void main() {
     expect(b.supports(ImageModelBackendType.localDreamEmbedded), isTrue);
   });
 
-  test('validate：引擎未打包 → 放置引导文案', () async {
-    final manager = _FakeEngineManager()..binaryAvailable = false;
-    final result = await backend(manager: manager).validate(model(createPack()));
-    expect(result, contains('引擎未打包'));
-  });
-
-  test('validate：未配置包类型 → 提示编辑', () async {
-    final pack = createPack();
-    final result = await backend()
-        .validate(model(pack).copyWith(remoteModelId: ''));
-    expect(result, contains('未配置模型包类型'));
-  });
-
-  test('validate：包文件缺失 → 列出缺失文件', () async {
-    final pack = createPack();
-    File(p.join(pack.path, 'unet.bin')).deleteSync();
-    final result = await backend().validate(model(pack));
-    expect(result, contains('unet.bin'));
-  });
-
-  test('validate：目录不存在 → 提示重新导入', () async {
-    final pack = createPack();
-    pack.deleteSync(recursive: true);
-    final result = await backend().validate(model(pack));
-    expect(result, contains('模型包目录不存在'));
-  });
-
   test('submit：ensureStarted + SSE 出图落库为 mediaId', () async {
     final pack = createPack();
     final manager = _FakeEngineManager();
@@ -202,9 +169,7 @@ void main() {
         negativePrompt: 'lowres',
         count: 1,
         seed: 11,
-        // 模型条目的 8×8 像素应被忽略：SDXL 恒用 1024 原生画布
-        width: 8,
-        height: 8,
+        // 画布恒用包类型原生尺寸（SDXL=1024），模型条目像素不透传
         aspectRatio: '16:9',
       ),
       onProgress: (step, total) {},

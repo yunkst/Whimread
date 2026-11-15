@@ -312,6 +312,16 @@ class MockScenarioSession extends _i1.Mock implements _i2.ScenarioSession {
       ) as _i2.SessionLifecycle);
 
   @override
+  void applySideStoryTarget(_i9.ActiveSideStoryWritingTarget? target) =>
+      super.noSuchMethod(
+        Invocation.method(
+          #applySideStoryTarget,
+          [target],
+        ),
+        returnValueForMissingStub: null,
+      );
+
+  @override
   _i5.Future<void> adoptSession(int? newSessionId) => (super.noSuchMethod(
         Invocation.method(
           #adoptSession,
@@ -494,32 +504,6 @@ class MockScenarioSession extends _i1.Mock implements _i2.ScenarioSession {
           ),
         )),
       ) as _i5.Future<_i2.AnnotationRewriteOutcome>);
-
-  @override
-  _i5.Future<void> startSideStoryCreation({
-    required String? anchorNovelUrl,
-    required String? anchorNovelTitle,
-    required String? anchorChapterUrl,
-    required String? anchorChapterTitle,
-    required String? requirement,
-    int? desiredChapterCount,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #startSideStoryCreation,
-          [],
-          {
-            #anchorNovelUrl: anchorNovelUrl,
-            #anchorNovelTitle: anchorNovelTitle,
-            #anchorChapterUrl: anchorChapterUrl,
-            #anchorChapterTitle: anchorChapterTitle,
-            #requirement: requirement,
-            #desiredChapterCount: desiredChapterCount,
-          },
-        ),
-        returnValue: _i5.Future<void>.value(),
-        returnValueForMissingStub: _i5.Future<void>.value(),
-      ) as _i5.Future<void>);
 
   @override
   _i5.Future<bool> rollbackToMessage(

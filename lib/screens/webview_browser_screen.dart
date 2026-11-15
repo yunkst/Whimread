@@ -9,7 +9,6 @@ import '../services/crawler/site_key.dart';
 import '../core/providers/webview_add_novel_providers.dart';
 import '../core/providers/webview_providers.dart';
 import '../core/theme/app_colors.dart';
-import '../services/logger_service.dart';
 import '../widgets/webview_address_bar.dart';
 import '../widgets/bookmark_panel.dart';
 import '../widgets/site_script_panel.dart';
@@ -69,25 +68,6 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
 
   document.addEventListener('touchstart', notifyWebViewTapped, { passive: true });
   document.addEventListener('mousedown', notifyWebViewTapped, { passive: true });
-})();
-''';
-
-  /// 单拍诊断 JS：输出当前 innerWidth / innerHeight / viewport / UA
-  static const String _diagnosticJs = r'''
-(function(){
-  var m = document.querySelector('meta[name="viewport"]');
-  window.__desktopDiag = JSON.stringify({
-    ua: navigator.userAgent,
-    platform: navigator.platform,
-    maxTouch: navigator.maxTouchPoints,
-    viewport: m ? m.content : '(none)',
-    width: window.innerWidth,
-    height: window.innerHeight,
-    screenW: screen.width,
-    screenH: screen.height,
-    url: location.href
-  });
-  return window.__desktopDiag;
 })();
 ''';
 
@@ -336,15 +316,6 @@ class _WebViewBrowserScreenState extends ConsumerState<WebViewBrowserScreen> {
       },
       onLoadStop: (controller, url) {
         notifier.handleLoadStop(url);
-        if (desktopMode) {
-          controller.evaluateJavascript(source: _diagnosticJs).then((value) {
-            LoggerService.instance.d(
-              'WebView 桌面化诊断: $value',
-              category: LogCategory.network,
-              tags: ['webview', 'desktop-mode', 'diag'],
-            );
-          });
-        }
       },
       onProgressChanged: (controller, progress) {
         notifier.handleProgress(progress);

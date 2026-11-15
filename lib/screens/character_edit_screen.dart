@@ -49,8 +49,6 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
   String? _gender;
   List<String> _aliases = const [];
   bool _isSaving = false;
-  bool _aiPromptsExpanded = false;
-
   bool get _isEditing => widget.existing != null;
 
   @override
@@ -305,8 +303,6 @@ class _CharacterEditScreenState extends ConsumerState<CharacterEditScreen> {
 
   Widget _buildAiPromptsSection() {
     return ExpansionTile(
-      initiallyExpanded: _aiPromptsExpanded,
-      onExpansionChanged: (v) => _aiPromptsExpanded = v,
       tilePadding: EdgeInsets.zero,
       title: Row(
         children: [

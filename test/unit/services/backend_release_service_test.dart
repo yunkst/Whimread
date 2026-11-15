@@ -112,7 +112,6 @@ void main() {
 
     expect(stub.capturedChannels, ['preview']);
     expect(release!.version, '2.0.0-preview.1');
-    expect(release.channel, 'preview');
   });
 
   test('404（通道无 release）返回 null 而不抛异常', () async {

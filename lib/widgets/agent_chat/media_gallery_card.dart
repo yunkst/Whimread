@@ -14,17 +14,14 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../screens/media_preview_screen.dart';
-import '../../services/media/media_types.dart';
 import '../media/media_view.dart';
 
 class MediaGalleryItem {
   final String mediaId;
-  final MediaKind kind;
   final String prompt;
 
   const MediaGalleryItem({
     required this.mediaId,
-    required this.kind,
     required this.prompt,
   });
 }
@@ -51,7 +48,6 @@ MediaGalleryData? parseMediaGallery(String? toolResultJson) {
         if (mediaId == null) continue;
         items.add(MediaGalleryItem(
           mediaId: mediaId,
-          kind: MediaKind.image,
           prompt: (m['prompt'] as String?) ?? '',
         ));
       }

@@ -24,10 +24,9 @@ final localDreamEmbeddedEngineManagerProvider =
     Provider<LocalDreamEngineManager>((ref) {
   final manager = LocalDreamEngineManager();
   ref.onDispose(() {
-    // 容器销毁时停掉引擎子进程并关闭状态流
+    // 容器销毁时停掉引擎子进程
     //（防热重载/测试容器重建后留下孤儿进程）
     unawaited(manager.stop());
-    manager.dispose();
   });
   return manager;
 });

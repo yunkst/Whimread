@@ -27,7 +27,6 @@ library;
 export 'services/core_service_providers.dart'
     show
         loggerServiceProvider,
-        llmLoggerProvider,
         logReporterServiceProvider,
         preferencesServiceProvider;
 
@@ -46,7 +45,6 @@ export 'services/network_service_providers.dart'
 export 'services/database_service_providers.dart'
     show
         chapterLoaderProvider,
-        chapterActionHandlerProvider,
         chapterReorderControllerProvider,
         chapterSearchServiceProvider;
 

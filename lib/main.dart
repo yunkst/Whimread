@@ -310,10 +310,6 @@ class NovelReaderApp extends ConsumerWidget {
           themeMode: themeState.flutterThemeMode,
           home: const _AppRoot(),
           debugShowCheckedModeBanner: true,
-          builder: (context, child) {
-            // 注：ErrorWidget.builder 已在 main() 顶层一次性注册，此处仅返回子组件。
-            return child!;
-          },
         );
       },
       loading: () {

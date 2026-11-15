@@ -4,7 +4,8 @@
 /// 错误响应包含 suggested_tool，引导 AI 自助修复。
 ///
 /// ★ 本类是 facade：负责 execute 入口（短路 / switch 分发 / try-catch），
-/// 把 21 个工具按业务域拆给 7 个子执行器。共享 helper 抽到
+/// 把 32 个工具按业务域拆给各子执行器（ask_user / dispatch_subagent
+/// 由场景拦截，不经本 facade）。共享 helper 抽到
 /// [ToolExecutorHelpers] mixin。所有子执行器懒创建（late final），
 /// 避免构造时 ref.read 触发副作用。
 library;
@@ -24,6 +25,7 @@ import 'tool_executor/media_executor.dart';
 import 'tool_executor/novel_navigation_executor.dart';
 import 'tool_executor/outline_executor.dart';
 import 'tool_executor/prompt_tag_executor.dart';
+import 'tool_executor/side_story_executor.dart';
 import 'tool_executor/text_game_executor.dart';
 import 'tool_executor_helpers.dart';
 
@@ -37,6 +39,7 @@ class ToolExecutor with ToolExecutorHelpers {
   late final _novelNav = NovelNavigationExecutor(ref);
   late final _chapterRead = ChapterReadExecutor(ref);
   late final _chapterWrite = ChapterWriteExecutor(ref);
+  late final _sideStory = SideStoryExecutor(ref);
   late final _character = CharacterExecutor(ref);
   late final _outline = OutlineExecutor(ref);
   late final _promptTag = PromptTagExecutor(ref);
@@ -153,6 +156,13 @@ class ToolExecutor with ToolExecutorHelpers {
           return await _textGame.listTextGames();
         case 'update_text_game':
           return await _textGame.updateTextGame(args);
+        // ===== 番外创作（主聊直接创作）=====
+        case 'create_side_story':
+          return await _sideStory.createSideStory(args, scenarioContext);
+        case 'save_side_story_chapter':
+          return await _sideStory.saveSideStoryChapter(args, scenarioContext);
+        case 'list_side_stories':
+          return await _sideStory.listSideStories(args, scenarioContext);
         default:
           LoggerService.instance.w('未知工具: $toolName',
               category: LogCategory.ai, tags: ['agent', 'tool', toolName, 'unknown']);

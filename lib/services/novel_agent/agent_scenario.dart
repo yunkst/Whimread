@@ -68,12 +68,12 @@ class AgentScenarioContext {
   /// 非 annotation_rewrite 场景忽略此字段（保持 null）。
   final AnnotationRewriteTarget? rewriteTarget;
 
-  /// 番外创作的目标绑定（仅 side_story 场景使用）
+  /// 番外创作写入目标（主聊 create_side_story 成功后由会话状态注入）
   ///
-  /// 携带宿主小说/锚点章 url、标题与用户需求。ScenarioSession 在启动番外
-  /// 创作前将其塞入 context，factory 据此构造 `SideStoryScenario`。
-  /// 非 side_story 场景忽略此字段（保持 null）。
-  final SideStoryTarget? sideStoryTarget;
+  /// 携带番外小说 id/url/标题与锚点章标题。save_side_story_chapter 据此把
+  /// 正文写进番外命名空间（currentNovel 保持宿主不变）。null = 本会话尚未
+  /// 创建（或未找回）番外写入目标。
+  final ActiveSideStoryWritingTarget? sideStoryWritingTarget;
 
   const AgentScenarioContext({
     this.scenarioId,
@@ -84,42 +84,36 @@ class AgentScenarioContext {
     this.currentNovelId,
     this.currentNovelTitle,
     this.rewriteTarget,
-    this.sideStoryTarget,
+    this.sideStoryWritingTarget,
     this.textGameId,
     this.chatSessionId,
   });
 }
 
-/// 番外创作场景的目标绑定
+/// 番外创作的写入目标
 ///
-/// 由创建番外弹层在启动创作时构造，注入 [AgentScenarioContext.sideStoryTarget]。
-/// SideStoryScenario 用它构造 system prompt + 锁定工具的宿主上下文。
-class SideStoryTarget {
-  /// 宿主小说 URL（主线或父番外——父番外即「番外套番外」）
-  final String anchorNovelUrl;
+/// 主聊 `create_side_story` 工具成功后由 ScenarioSession 记录（仿
+/// select_novel 的 ToolCallEndEvent 状态接线），随后每次
+/// `_buildScenarioContext` 注入 [AgentScenarioContext.sideStoryWritingTarget]，
+/// save_side_story_chapter 据此落库进番外命名空间。
+class ActiveSideStoryWritingTarget {
+  /// 番外小说 id（save_side_story_chapter 落库定位）
+  final int novelId;
 
-  /// 宿主小说标题（system prompt 中展示给 LLM）
-  final String anchorNovelTitle;
+  /// 番外小说 URL（`custom://sidestory/...`）
+  final String novelUrl;
 
-  /// 锚点章节 URL（番外挂载点；read_chapter_content 只读这一章）
-  final String anchorChapterUrl;
+  /// 番外标题
+  final String title;
 
-  /// 锚点章节标题（system prompt 中展示）
-  final String anchorChapterTitle;
+  /// 锚点章标题（提示词中展示）
+  final String? anchorChapterTitle;
 
-  /// 用户对番外的需求描述（来自创建弹层，唯一必填输入）
-  final String requirement;
-
-  /// 期望章节数（null = 由 AI 决定）
-  final int? desiredChapterCount;
-
-  const SideStoryTarget({
-    required this.anchorNovelUrl,
-    required this.anchorNovelTitle,
-    required this.anchorChapterUrl,
-    required this.anchorChapterTitle,
-    required this.requirement,
-    this.desiredChapterCount,
+  const ActiveSideStoryWritingTarget({
+    required this.novelId,
+    required this.novelUrl,
+    required this.title,
+    this.anchorChapterTitle,
   });
 }
 
@@ -551,10 +545,10 @@ abstract final class ScenarioIds {
   /// update_chapter_content 物理上只能改当前章节），改写过程进入对话窗口。
   static const annotationRewrite = 'annotation_rewrite';
 
-  /// 番外创作 — 从创建番外弹层发起：AI 通读锚点章正文/人物卡/写作技巧，
-  /// 先 create_side_story 建番外（不入书架的 bookshelf 行），再逐章在回复中
-  /// 写出正文并 save_chapter 落库。工具面锁定宿主上下文，不在通用聊天场景
-  /// 菜单出现（showInChatMenu=false）。
+  /// [v2 已废弃] 番外创作已并入主聊 writing 场景（create_side_story /
+  /// save_side_story_chapter 三工具）。本常量仅为 DB chat_sessions.scenarioId
+  /// 存量行保留：工厂把旧 side_story 会话兼容映射到 WritingScenario，
+  /// 不再有新会话以本 id 创建。
   static const sideStory = 'side_story';
 
   /// 文字游戏 — 一个游戏对应本场景下的一个 chat_session（text_games 行关联）。

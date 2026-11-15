@@ -19,27 +19,20 @@
 ///
 /// // 查询最近调用
 /// final recent = await LlmLogger.instance.getRecent(limit: 50);
-///
-/// // 查询单条详情
-/// final detail = await LlmLogger.instance.getById(recordId);
-///
-/// // 清空所有日志
-/// await LlmLogger.instance.clear();
 /// ```
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart'
-    show ChangeNotifier, ValueNotifier, debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../logger_service.dart';
 import 'llm_call_record.dart';
 
-class LlmLogger extends ChangeNotifier {
+class LlmLogger {
   static LlmLogger? _instance;
   static LlmLogger get instance {
     _instance ??= LlmLogger._internal();
@@ -51,13 +44,7 @@ class LlmLogger extends ChangeNotifier {
   /// 重置单例（仅测试用）
   static void resetForTesting() {
     _instance = null;
-    changeNotifier.value = 0;
   }
-
-  /// 静态 ValueNotifier：UI 可用 `LlmLogger.changeNotifier.addListener(...)`
-  /// 监听日志变化，`.value` 为变化计数（每次 log/clear 递增）。
-  /// 与 [instance]（也是 ChangeNotifier）并行通知，互不影响。
-  static final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
 
   // ==================== 常量 ====================
 
@@ -95,12 +82,6 @@ class LlmLogger extends ChangeNotifier {
 
   /// 内存缓存（最近的记录，用于列表页快速访问）
   final List<LlmCallRecord> _recentCache = [];
-
-  /// 变化通知计数器
-  int _changeCount = 0;
-
-  /// 获取变化计数器（UI 可用 ValueNotifier 监听）
-  int get changeCount => _changeCount;
 
   // ==================== 初始化 ====================
 
@@ -252,10 +233,6 @@ class LlmLogger extends ChangeNotifier {
       _updateCache(record);
       _enqueueWrite(record);
     }
-
-    _changeCount++;
-    changeNotifier.value = _changeCount;
-    notifyListeners();
   }
 
   /// 记录请求失败
@@ -274,10 +251,6 @@ class LlmLogger extends ChangeNotifier {
       _recentCache[cachedIndex] = updated;
       _enqueueWrite(updated);
     }
-
-    _changeCount++;
-    changeNotifier.value = _changeCount;
-    notifyListeners();
   }
 
   // ==================== 查询接口 ====================
@@ -293,38 +266,6 @@ class LlmLogger extends ChangeNotifier {
     // 缓存不足，从文件读取补充
     final fromFile = await _readRecentFromFile(limit - _recentCache.length);
     return [..._recentCache, ...fromFile];
-  }
-
-  /// 根据 ID 查询单条记录
-  ///
-  /// 先查缓存，再查文件。
-  Future<LlmCallRecord?> getById(String id) async {
-    // 先查缓存
-    final cached = _recentCache.where((r) => r.id == id).firstOrNull;
-    if (cached != null) return cached;
-
-    // 缓存未命中，从文件查找
-    return _findByIdInFiles(id);
-  }
-
-  /// 清空所有日志
-  Future<void> clear() async {
-    _recentCache.clear();
-    _writeQueue.clear();
-    _changeCount++;
-    changeNotifier.value = _changeCount;
-    notifyListeners();
-
-    if (_logDir == null) return;
-    try {
-      final dir = Directory(_logDir!);
-      if (await dir.exists()) {
-        await dir.delete(recursive: true);
-        await dir.create(recursive: true);
-      }
-    } catch (e) {
-      debugPrint('LlmLogger: 清空日志失败: $e');
-    }
   }
 
   // ==================== 内部实现 ====================
@@ -507,56 +448,6 @@ class LlmLogger extends ChangeNotifier {
     }
 
     return records;
-  }
-
-  /// 在文件中按 ID 查找记录
-  Future<LlmCallRecord?> _findByIdInFiles(String id) async {
-    if (_logDir == null) return null;
-
-    try {
-      final dir = Directory(_logDir!);
-      if (!await dir.exists()) return null;
-
-      await for (final entity in dir.list()) {
-        if (entity is! File || !entity.path.endsWith('.jsonl')) continue;
-        try {
-          final content = await entity.readAsString();
-          final lines = content.split('\n');
-          for (final line in lines.reversed) {
-            if (line.trim().isEmpty) continue;
-            try {
-              final json = jsonDecode(line) as Map<String, dynamic>;
-              if (json['id'] == id) {
-                return LlmCallRecord.fromJson(json);
-              }
-            } catch (e, st) {
-              LoggerService.instance.w(
-                'LLM日志: 按ID查找记录JSON解析失败: $e',
-                category: LogCategory.ai,
-                tags: ['llm-logger', 'parse-err'],
-                stackTrace: st.toString(),
-              );
-            }
-          }
-        } catch (e, st) {
-          LoggerService.instance.w(
-            'LLM日志: 按ID查找记录文件读取失败: $e',
-            category: LogCategory.ai,
-            tags: ['llm-logger', 'fs-err'],
-            stackTrace: st.toString(),
-          );
-        }
-      }
-    } catch (e, st) {
-      LoggerService.instance.w(
-        'LLM日志: 按ID查找记录目录扫描失败: $e',
-        category: LogCategory.ai,
-        tags: ['llm-logger', 'fs-err'],
-        stackTrace: st.toString(),
-      );
-    }
-
-    return null;
   }
 
   // ==================== 工具方法 ====================

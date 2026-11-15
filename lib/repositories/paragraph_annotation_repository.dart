@@ -91,9 +91,9 @@ class ParagraphAnnotationRepository extends BaseRepository
   }
 
   @override
-  Future<int> deleteByNovel(String novelUrl) {
+  Future<int> deleteByNovel(String novelUrl, {DatabaseExecutor? executor}) {
     return guard('paragraph_annotation.deleteByNovel', () async {
-      final db = await database;
+      final db = executor ?? await database;
       final affected = await db.delete(
         _table,
         where: 'novelUrl = ?',

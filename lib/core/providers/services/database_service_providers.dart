@@ -4,7 +4,6 @@
 ///
 /// **功能**:
 /// - 章节加载器
-/// - 章节操作处理器
 /// - 章节重排控制器
 /// - 章节搜索服务
 /// - 缓存搜索服务
@@ -22,7 +21,6 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:riverpod/riverpod.dart';
 import '../../../services/chapter_search_service.dart';
 import '../../../controllers/chapter_list/chapter_loader.dart';
-import '../../../controllers/chapter_list/chapter_action_handler.dart';
 import '../../../controllers/chapter_list/chapter_reorder_controller.dart';
 import '../database_providers.dart';
 import 'network_service_providers.dart';
@@ -66,37 +64,6 @@ ChapterLoader chapterLoader(Ref ref) {
     chapterRepository: chapterRepository,
     novelRepository: novelRepository,
     chapterListHeadlessService: chapterListHeadlessService,
-  );
-}
-
-/// ChapterActionHandler Provider
-///
-/// 提供章节操作处理器实例，处理章节的增删改查操作。
-///
-/// **功能**:
-/// - 章节缓存状态查询
-/// - 章节删除
-/// - 章节重排
-/// - 批量操作
-///
-/// **依赖**:
-/// - [databaseServiceProvider] - 数据库服务
-///
-/// **使用示例**:
-/// ```dart
-/// final handler = ref.watch(chapterActionHandlerProvider);
-/// final isCached = await handler.isChapterCached(chapterUrl);
-/// await handler.deleteChapter(chapterUrl);
-/// ```
-///
-/// **注意事项**:
-/// - 不使用 `keepAlive`，每次使用时创建新实例
-/// - 支持批量操作以提高性能
-@riverpod
-ChapterActionHandler chapterActionHandler(Ref ref) {
-  final chapterRepository = ref.watch(chapterRepositoryProvider);
-  return ChapterActionHandler(
-    chapterRepository: chapterRepository,
   );
 }
 

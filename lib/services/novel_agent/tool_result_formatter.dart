@@ -152,7 +152,7 @@ class ToolResultFormatter {
         escaped = false;
         continue;
       }
-      if (ch == r'\\') {
+      if (ch == '\\') {
         escaped = true;
         continue;
       }

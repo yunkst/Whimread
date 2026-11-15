@@ -164,12 +164,11 @@ class _MarkdownEditorScreenState extends ConsumerState<MarkdownEditorScreen> {
   // ─── 文本变化 & 自动保存 ────────────────────────────────────
 
   void _onTextChanged() {
-    final wasModified = _isModified;
     _isModified = _titleController.text != (_original.title ?? '') ||
         _contentController.text != _original.content;
-    if (wasModified != _isModified) {
-      setState(() {});
-    }
+    // 无条件重建：counterText 字数等 UI 依赖文本内容，只在 modified
+    // 翻转时 setState 会让字数在首字后停更（modified 恒 true 不再触发）。
+    setState(() {});
     _scheduleAutoSave();
   }
 

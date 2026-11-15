@@ -80,19 +80,19 @@ class OcrRestoreService {
     for (final cp in puaCodepoints) {
       loopIdx++;
       try {
-        LoggerService.instance.i(
+        LoggerService.instance.d(
           'OCR restorePua 循环 [$loopIdx/$totalPua] cp=0x${cp.toRadixString(16)} 渲染开始',
           category: LogCategory.ai,
           tags: ['ocr', 'restore-pua', 'loop-render-begin'],
         );
         final imageBase64 = await _renderPua(cp, fontFamily ?? '');
-        LoggerService.instance.i(
+        LoggerService.instance.d(
           'OCR restorePua 循环 [$loopIdx/$totalPua] cp=0x${cp.toRadixString(16)} 渲染完成 → 识别开始',
           category: LogCategory.ai,
           tags: ['ocr', 'restore-pua', 'loop-render-done'],
         );
         final decoded = await _recognizeImage(imageBase64);
-        LoggerService.instance.i(
+        LoggerService.instance.d(
           'OCR restorePua 循环 [$loopIdx/$totalPua] cp=0x${cp.toRadixString(16)} 识别完成 → "$decoded"',
           category: LogCategory.ai,
           tags: ['ocr', 'restore-pua', 'loop-recognize-done'],

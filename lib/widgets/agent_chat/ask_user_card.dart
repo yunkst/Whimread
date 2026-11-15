@@ -127,6 +127,14 @@ class _AskUserCardState extends State<AskUserCard> {
   bool _submitted = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 确认按钮的 enabled 依赖自由输入文本；无此监听时按钮停留在初始
+    // 禁用态（输入不触发重建），要点别处才刷新。
+    _freeTextController.addListener(() => setState(() {}));
+  }
+
+  @override
   void dispose() {
     _freeTextController.dispose();
     _freeTextFocus.dispose();

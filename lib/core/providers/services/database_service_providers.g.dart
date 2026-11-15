@@ -49,49 +49,6 @@ final chapterLoaderProvider = AutoDisposeProvider<ChapterLoader>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ChapterLoaderRef = AutoDisposeProviderRef<ChapterLoader>;
-String _$chapterActionHandlerHash() =>
-    r'98596d83a1f6d70366482892d0fe2f578f008f59';
-
-/// ChapterActionHandler Provider
-///
-/// 提供章节操作处理器实例，处理章节的增删改查操作。
-///
-/// **功能**:
-/// - 章节缓存状态查询
-/// - 章节删除
-/// - 章节重排
-/// - 批量操作
-///
-/// **依赖**:
-/// - [databaseServiceProvider] - 数据库服务
-///
-/// **使用示例**:
-/// ```dart
-/// final handler = ref.watch(chapterActionHandlerProvider);
-/// final isCached = await handler.isChapterCached(chapterUrl);
-/// await handler.deleteChapter(chapterUrl);
-/// ```
-///
-/// **注意事项**:
-/// - 不使用 `keepAlive`，每次使用时创建新实例
-/// - 支持批量操作以提高性能
-///
-/// Copied from [chapterActionHandler].
-@ProviderFor(chapterActionHandler)
-final chapterActionHandlerProvider =
-    AutoDisposeProvider<ChapterActionHandler>.internal(
-  chapterActionHandler,
-  name: r'chapterActionHandlerProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$chapterActionHandlerHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef ChapterActionHandlerRef = AutoDisposeProviderRef<ChapterActionHandler>;
 String _$chapterReorderControllerHash() =>
     r'249361b83c5d41d55c804b593d0a43ea02e14625';
 

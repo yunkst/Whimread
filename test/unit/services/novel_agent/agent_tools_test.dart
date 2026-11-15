@@ -16,13 +16,13 @@ import 'package:novel_app/services/novel_agent/agent_tools.dart';
 
 void main() {
   group('AgentTools.allTools — 基础验证', () {
-    test('应该有 31 个工具（2026-10 新增 ask_user）', () {
-      expect(AgentTools.allTools.length, 31, reason: '所有工具数应为 31（2026-09 移除 create_image_to_video 后，'
-          'list/select/create novel + read/list/search chapter + create/update/rewrite/delete chapter + '
+    test('应该有 34 个工具（2026-11 番外创作并入主聊：+3/-1）', () {
+      expect(AgentTools.allTools.length, 34, reason: '所有工具数应为 34（2026-09 移除 create_image_to_video 后，'
+          'list/select/create novel + read/list/search chapter + save/update/rewrite/delete chapter + '
           'list/update/create/delete character + get_background_setting/update_background_setting + '
           'update_outline/write_outline/get_outline + set_novel_cover + prompt tags + '
           'list_text2img_models + create_images + create_text_game/list_text_games/update_text_game + '
-          'dispatch_subagent + ask_user）');
+          'dispatch_subagent + ask_user + create_side_story/save_side_story_chapter/list_side_stories）');
     });
 
     test('每个工具都有 type=function', () {
@@ -356,6 +356,9 @@ void main() {
       'write_outline': (file: 'outline_executor.dart', method: 'writeOutline'),
       'get_outline': (file: 'outline_executor.dart', method: 'getOutline'),
       'list_prompt_tags': (file: 'prompt_tag_executor.dart', method: 'listPromptTags'),
+      'create_side_story': (file: 'side_story_executor.dart', method: 'createSideStory'),
+      'save_side_story_chapter': (file: 'side_story_executor.dart', method: 'saveSideStoryChapter'),
+      'list_side_stories': (file: 'side_story_executor.dart', method: 'listSideStories'),
       'get_prompt_tag': (file: 'prompt_tag_executor.dart', method: 'getPromptTag'),
       'save_prompt_tag': (file: 'prompt_tag_executor.dart', method: 'savePromptTag'),
       'delete_prompt_tag': (file: 'prompt_tag_executor.dart', method: 'deletePromptTag'),

@@ -15,9 +15,6 @@ import '../services/novel_agent/subagent_run.dart';
 /// （调 `run.token?.cancel(reason: '用户主动停止')`）。
 /// 任务 23：停止按钮点击后 await `run.done`，按钮置 loading 状态
 /// 防止用户在子 Agent 真正退出前重复点击或误以为无效。
-///
-/// 返回键仅 pop 页面，不取消子 Agent；取消需通过 AppBar 的停止按钮显式触发
-///（调 `run.token?.cancel(reason: '用户主动停止')`）。
 class SubagentDetailScreen extends ConsumerStatefulWidget {
   final String sessionId;
   final String toolCallId;

@@ -75,8 +75,9 @@ class ChatHistorySheet extends ConsumerWidget {
                         return ChatHistoryListItem(
                           session: s,
                           scenarioId: scenarioId,
-                          // 当前任一 session 运行中时，禁用其它项切换
-                          isRunning: running && s.id != currentSessionId,
+                          // 仅当前会话运行中时亮"进行中"徽章
+                          //（isRunning 现只用于徽章展示，不再禁用切换）
+                          isRunning: running && s.id == currentSessionId,
                           isCurrent: s.id == currentSessionId,
                         );
                       },

@@ -168,25 +168,6 @@ class SiteScriptRepository extends BaseRepository {
     );
   }
 
-  /// 按 domain 删除
-  Future<void> deleteByDomain(String domain) {
-    return guard(
-      'site_script.deleteByDomain',
-      () async {
-        final db = await database;
-        await db.delete('site_scripts', where: 'domain = ?', whereArgs: [domain]);
-        LoggerService.instance.i(
-          '删除域名所有脚本: domain=$domain',
-          category: LogCategory.database,
-          tags: ['site_script', 'delete_by_domain', 'success'],
-        );
-      },
-      message: (e) => '删除域名脚本失败: domain=$domain - $e',
-      category: LogCategory.database,
-      tags: ['site_script', 'delete_by_domain', 'failed'],
-    );
-  }
-
   /// 更新 verified 状态
   ///
   /// 重要事件：setVerified(false) 意味着脚本被自动禁用
@@ -292,109 +273,6 @@ class SiteScriptRepository extends BaseRepository {
   /// 按 domain 去重保存：已存在则 UPDATE，不存在则 INSERT
   ///
   /// UPDATE 时保留 id / created_at / use_count，重置 verified=0，
-  /// 更新脚本内容和 last_used_at。
-  /// 返回 (id, isInsert) —— isInsert=true 表示首次插入。
-  ///
-  /// v39 拆列后，[chapterListOcr] / [chapterContentOcr] 分别写到对应列，
-  /// 互不覆盖。
-  Future<({String id, bool isInsert})> upsertByDomain({
-    required String domain,
-    required String chapterListJs,
-    required String chapterContentJs,
-    String urlPattern = '',
-    String sampleUrl = '',
-    bool chapterListOcr = false, // v39 拆列后独立标记
-    bool chapterContentOcr = false,
-  }) {
-    return guard(
-      'site_script.upsertByDomain',
-      () async {
-        final db = await database;
-        final now = DateTime.now().millisecondsSinceEpoch;
-
-        // 查-改-写收敛到单事务：domain 列无 UNIQUE 约束，两次并发保存
-        // （WebView 提取与 agent save_script 同时落库）若无事务会双双查空、
-        // 各自 INSERT 产生重复行（下方 cleanup 即历史重复的补偿逻辑）
-        return db.transaction<({String id, bool isInsert})>((txn) async {
-          final existing = await txn.query(
-            'site_scripts',
-            where: 'domain = ?',
-            whereArgs: [domain],
-            orderBy: 'last_used_at DESC',
-          );
-
-          if (existing.isNotEmpty) {
-            // UPDATE：保留 id / created_at / use_count，重置 verified
-            final row = existing.first;
-            await txn.update(
-              'site_scripts',
-              {
-                'chapter_list_js': chapterListJs,
-                'chapter_content_js': chapterContentJs,
-                'url_pattern': urlPattern,
-                'sample_url': sampleUrl,
-                'last_used_at': now,
-                'verified': 0, // 脚本内容变了，需要重新验证
-                'chapter_list_ocr': chapterListOcr ? 1 : 0,
-                'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-              },
-              where: 'id = ?',
-              whereArgs: [row['id']],
-            );
-
-            // 清理同 domain 的历史重复记录（保留第一条，删除其余）
-            if (existing.length > 1) {
-              final keepId = row['id'] as String;
-              final deleted = await txn.delete(
-                'site_scripts',
-                where: 'domain = ? AND id != ?',
-                whereArgs: [domain, keepId],
-              );
-              LoggerService.instance.i(
-                '清理同域名重复脚本: domain=$domain, deleted=$deleted',
-                category: LogCategory.database,
-                tags: ['site_script', 'upsert', 'cleanup'],
-              );
-            }
-
-            LoggerService.instance.i(
-              '更新域名脚本 (upsert): domain=$domain id=${row['id']}',
-              category: LogCategory.database,
-              tags: ['site_script', 'upsert', 'update'],
-            );
-            return (id: row['id'] as String, isInsert: false);
-          }
-
-          // INSERT：首次保存
-          final id = _newScriptId();
-          await txn.insert('site_scripts', {
-            'id': id,
-            'domain': domain,
-            'url_pattern': urlPattern,
-            'chapter_list_js': chapterListJs,
-            'chapter_content_js': chapterContentJs,
-            'sample_url': sampleUrl,
-            'created_at': now,
-            'last_used_at': now,
-            'use_count': 0,
-            'verified': 0,
-            'chapter_list_ocr': chapterListOcr ? 1 : 0,
-            'chapter_content_ocr': chapterContentOcr ? 1 : 0,
-          });
-          LoggerService.instance.i(
-            '新增域名脚本 (upsert): domain=$domain id=$id',
-            category: LogCategory.database,
-            tags: ['site_script', 'upsert', 'insert'],
-          );
-          return (id: id, isInsert: true);
-        });
-      },
-      message: (e) => 'upsert 脚本失败: domain=$domain - $e',
-      category: LogCategory.database,
-      tags: ['site_script', 'upsert', 'failed'],
-    );
-  }
-
   /// 增量更新某域名某类型脚本（save_script 分次保存用）。
   ///
   /// - [scriptType] 为 `'chapter_list'` / `'chapter_content'` / `'bookshelf'`，
@@ -435,6 +313,12 @@ class SiteScriptRepository extends BaseRepository {
         final db = await database;
         final now = DateTime.now().millisecondsSinceEpoch;
 
+        // 查-改-写收敛到单事务：domain 列无 UNIQUE 约束，两次并发保存
+        //（WebView 提取与 agent save_script 同时落库）若无事务会双双查空、
+        // 各自 INSERT 产生重复行。闭包内 db 影子化为事务执行器。
+        return db.transaction<({bool success, String? id, String? reason})>(
+            (txn) async {
+        final db = txn;
         final existing = await db.query(
           'site_scripts',
           where: 'domain = ?',
@@ -513,6 +397,7 @@ class SiteScriptRepository extends BaseRepository {
           tags: ['site_script', 'update_part', 'update'],
         );
         return (success: true, id: id, reason: null);
+        });
       },
       message: (e) => 'updateScriptPart 失败: domain=$domain - $e',
       category: LogCategory.database,
@@ -538,6 +423,9 @@ class SiteScriptRepository extends BaseRepository {
         final db = await database;
         final now = DateTime.now().millisecondsSinceEpoch;
 
+        // 查-改-写（含重复副本清理）收敛到单事务，同 updateScriptPart
+        return db.transaction<({String id, bool isInsert})>((txn) async {
+        final db = txn;
         final existing = await db.query(
           'site_scripts',
           where: 'domain = ?',
@@ -613,6 +501,7 @@ class SiteScriptRepository extends BaseRepository {
           tags: ['site_script', 'remote_download', 'insert'],
         );
         return (id: id, isInsert: true);
+        });
       },
       message: (e) => 'insertRemoteDownload 失败: domain=${script.domain} - $e',
       category: LogCategory.database,

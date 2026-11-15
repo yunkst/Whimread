@@ -24,6 +24,24 @@ import '../novel_agent_service.dart';
 import '../tool_arg_parser.dart';
 import '../tool_executor.dart';
 
+/// 番外创作指引（追加在通用 system prompt 之后，仅 writing 场景）。
+///
+/// 番外的定义与既有约定一致：独立于主线的迷你小说（有自己的章节列表与
+/// 阅读体验，不入书架），挂载在锚点章下，可递归。创作直接在本对话内完成：
+/// create_side_story 定位写入目标，save_side_story_chapter 落库；
+/// currentNovel 全程保持宿主不变——读/搜/人物卡天然指宿主（查证通道），
+/// 写番外走显式工具（写通道），读写硬分离。
+const String _sideStoryGuide = '''
+## 番外创作（在本对话内直接完成）
+- 番外 = 独立于主线的支线故事：有自己的章节列表与完整阅读体验，不混入主线正文，也不出现在书架；挂载在某一章下，番外章节还能再挂番外。
+- 用户表达番外意图（如「给这章写个番外」「写个女主与闺蜜的过往支线」「某角色的后续故事」）时的流程：
+  1. **查证主线事实**（防写歪的关键步骤）：涉及人物在锚点章之外有戏份时，用 read_chapter_content / search_in_chapters 查证口癖、旧伤、关系变化、时间点；人物卡用 list_characters。凡引用主线既有事实，先查证再落笔。
+  2. 调用 `create_side_story(title, requirement)` 建立番外：锚点自动取用户当前正在阅读的章节；不在阅读态时请用户指定章节（你传 anchorChapterPosition）或引导其打开目标章节。requirement 忠实转述用户需求（用于幂等找回）。续写已有番外同样先调本工具定位（同锚点同需求幂等复用，不会重复建）。
+  3. 逐章创作（一章一轮，写完即存）：在**你的回复中直接写出该章完整正文**（1500~3000 字），然后调用 `save_side_story_chapter(position, title, content)`，content 与回复正文**逐字一致**。position 从 1 连续递增，用结果里的 sideStoryChapterCount 校准。章尾留推进感，人物细节前后一致。
+- **调整已有番外**（如「把番外第 2 章的师父名字改掉」「这段对话润色一下」）：不要凭记忆整章重写。先 `list_side_stories` 拿 sideStoryId → `list_chapters(sideStoryId)` 看章节清单 → `read_chapter_content(position, sideStoryId)` 核对原文 → `update_chapter_content(position, oldString, newString, sideStoryId)` 打段落级补丁；只改个别段落用这条路径，整章重写才用 `save_side_story_chapter` 覆盖。
+- **工具分工**：`save_chapter` 写正篇整章、`save_side_story_chapter` 写番外整章，二者不会混淆；read / list_chapters / update_chapter_content 默认作用于当前小说（宿主），传可选参数 `sideStoryId` 后定位到对应番外（只能越界到当前小说自己的番外，别的书打不进去）——创作与调整番外过程中随时可查证主线。
+- 用户需求与主线设定冲突时，以用户需求为准。''';
+
 class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
     implements AgentScenario {
   final Ref _ref;
@@ -56,9 +74,9 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
     _currentContext = context;
     // 用户阅读上下文、当前工作小说 改由 NovelAgentService 在 user message 头部注入，
     // 本方法只负责相对静态的"身份 + 工作原则 + 经验记忆"。
-    return AgentSystemPrompt.build(
+    return '${AgentSystemPrompt.build(
       memories: cachedMemories,
-    );
+    )}\n\n$_sideStoryGuide';
   }
 
   @override
@@ -122,6 +140,14 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
         });
       }
     }
+    // create_side_story：建番外后同步写入目标到 _currentContext，
+    // 确保同一 LLM 响应中后续的 save_side_story_chapter 能立刻定位番外
+    // （跨回合由 session 的 ToolCallEndEvent 接线注入，两处同步同 select_novel 模式）
+    if (name == 'create_side_story') {
+      final result = await _executor.execute(name, args, scenarioContext: _currentContext);
+      _syncSideStoryTarget(result);
+      return result;
+    }
     // select_novel / create_novel 需要同步更新 _currentContext，
     // 确保同一 LLM 响应中后续工具调用能作用于新小说
     if (name == 'select_novel' || name == 'create_novel') {
@@ -141,6 +167,59 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
   /// 写作场景无需"无 tool_call 注入"，直接结束
   @override
   Future<String?> onNoToolCalls(List<ChatMessage> messages) async => null;
+
+  /// create_side_story 成功后同步番外写入目标到 _currentContext。
+  ///
+  /// 解析工具结果 JSON 中的 sideStoryId/sideStoryUrl/sideStoryTitle，
+  /// 让同一 LLM 响应中后续的 save_side_story_chapter 立即可定位番外
+  /// （跨回合由 session 的 ToolCallEndEvent 接线注入，双保险同 select_novel）。
+  void _syncSideStoryTarget(String result) {
+    try {
+      final parsed = jsonDecode(result) as Map<String, dynamic>;
+      if (parsed['success'] != true) return;
+      final id = parsed['sideStoryId'];
+      final url = parsed['sideStoryUrl'] as String?;
+      final title = parsed['sideStoryTitle'] as String?;
+      if (id is! int || url == null || title == null) return;
+      _currentContext = _rebuildCurrentContext(
+        sideStory: ActiveSideStoryWritingTarget(
+          novelId: id,
+          novelUrl: url,
+          title: title,
+          anchorChapterTitle: parsed['anchorChapterTitle']?.toString(),
+        ),
+      );
+    } catch (_) {
+      // 非 JSON / 字段缺失 → 不同步（save 会走 no_side_story 引导兜底）
+    }
+  }
+
+  /// 单点重建 _currentContext：以当前上下文为底座，只覆写调用方指定的
+  /// 目标（工作小说 / 番外写入目标），其余跨工具携带字段一律回填。
+  ///
+  /// 背景：此前 select_novel 与 create_side_story 各自手写重建，字段保留
+  /// 范围已经漂移——select_novel 路径只回填 readingContext/currentUrl，
+  /// 丢掉 sideStoryWritingTarget/chatSessionId/rewriteTarget 等，换书后
+  /// 番外写入目标静默丢失。新增 AgentScenarioContext 携带字段时只改本处。
+  AgentScenarioContext _rebuildCurrentContext({
+    ({int id, String? title})? novel,
+    ActiveSideStoryWritingTarget? sideStory,
+  }) {
+    final base = _currentContext;
+    return AgentScenarioContext(
+      scenarioId: base?.scenarioId ?? ScenarioIds.writing,
+      readingContext: base?.readingContext,
+      webviewController: base?.webviewController,
+      currentUrl: base?.currentUrl,
+      useHeadlessWebView: base?.useHeadlessWebView ?? false,
+      currentNovelId: novel?.id ?? base?.currentNovelId,
+      currentNovelTitle: novel != null ? novel.title : base?.currentNovelTitle,
+      rewriteTarget: base?.rewriteTarget,
+      sideStoryWritingTarget: sideStory ?? base?.sideStoryWritingTarget,
+      textGameId: base?.textGameId,
+      chatSessionId: base?.chatSessionId,
+    );
+  }
 
   /// ask_user 工具执行：校验参数 → 注册挂起提问 → await 用户作答
   ///
@@ -275,17 +354,17 @@ class WritingScenario with AgentScenarioCleanupMixin, AgentMemoryPatchMixin
     });
   }
 
-  /// 从 select_novel 工具结果中提取小说信息并同步到 _currentContext
+  /// select_novel 工具结果同步：覆写工作小说（其余字段经
+  /// [_rebuildCurrentContext] 单点回填，番外写入目标等不丢）。
   void _syncCurrentContext(String result) {
     try {
       final parsed = jsonDecode(result) as Map<String, dynamic>;
       if (parsed['success'] == true && parsed['novelId'] != null) {
-        _currentContext = AgentScenarioContext(
-          scenarioId: ScenarioIds.writing,
-          readingContext: _currentContext?.readingContext,
-          currentUrl: _currentContext?.currentUrl,
-          currentNovelId: parsed['novelId'] as int,
-          currentNovelTitle: parsed['title'] as String?,
+        _currentContext = _rebuildCurrentContext(
+          novel: (
+            id: parsed['novelId'] as int,
+            title: parsed['title'] as String?,
+          ),
         );
       }
     } catch (e) {

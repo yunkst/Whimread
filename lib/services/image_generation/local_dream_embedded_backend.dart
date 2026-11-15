@@ -9,7 +9,6 @@
 /// - remoteModelId = 包类型 dbName（sd15cpu/sd15npu/sdxl）
 library;
 
-import 'dart:io' show Directory;
 
 import '../../models/image_model.dart';
 import '../logger_service.dart';
@@ -45,29 +44,6 @@ class LocalDreamEmbeddedBackend implements ImageGenerationBackend {
   /// 从模型条目解析包类型（remoteModelId 列存包类型 dbName）
   LocalDreamPackType? packTypeOf(ImageModel model) =>
       LocalDreamPackType.parse(model.remoteModelId);
-
-  @override
-  Future<String?> validate(ImageModel model) async {
-    final typeError = _resolvePack(model);
-    if (typeError != null) return typeError;
-
-    if (!await _engineManager.isBinaryAvailable()) {
-      return '引擎未打包：缺少 libstable_diffusion_core.so，'
-          '请按 docs/local_dream_engine.md 放置 Local Dream 引擎产物后重新安装';
-    }
-
-    final packDir = model.filePath;
-    if (packDir.isEmpty || !Directory(packDir).existsSync()) {
-      return '模型包目录不存在：$packDir，请重新导入或下载';
-    }
-    final missing =
-        LocalDreamModelPack.missingFiles(packDir, packTypeOf(model)!);
-    if (missing.isNotEmpty) {
-      return '模型包缺少文件：${missing.join('、')}，'
-          '请补齐或重新下载';
-    }
-    return null;
-  }
 
   @override
   Future<ImageGenerationResult> submit(

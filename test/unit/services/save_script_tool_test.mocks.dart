@@ -139,16 +139,6 @@ class MockSiteScriptRepository extends _i1.Mock
       ) as _i3.Future<void>);
 
   @override
-  _i3.Future<void> deleteByDomain(String? domain) => (super.noSuchMethod(
-        Invocation.method(
-          #deleteByDomain,
-          [domain],
-        ),
-        returnValue: _i3.Future<void>.value(),
-        returnValueForMissingStub: _i3.Future<void>.value(),
-      ) as _i3.Future<void>);
-
-  @override
   _i3.Future<void> setVerified(
     String? id,
     bool? verified,
@@ -201,51 +191,6 @@ class MockSiteScriptRepository extends _i1.Mock
         ),
         returnValue: _i3.Future<Map<String, String>>.value(<String, String>{}),
       ) as _i3.Future<Map<String, String>>);
-
-  @override
-  _i3.Future<({String id, bool isInsert})> upsertByDomain({
-    required String? domain,
-    required String? chapterListJs,
-    required String? chapterContentJs,
-    String? urlPattern = '',
-    String? sampleUrl = '',
-    bool? chapterListOcr = false,
-    bool? chapterContentOcr = false,
-  }) =>
-      (super.noSuchMethod(
-        Invocation.method(
-          #upsertByDomain,
-          [],
-          {
-            #domain: domain,
-            #chapterListJs: chapterListJs,
-            #chapterContentJs: chapterContentJs,
-            #urlPattern: urlPattern,
-            #sampleUrl: sampleUrl,
-            #chapterListOcr: chapterListOcr,
-            #chapterContentOcr: chapterContentOcr,
-          },
-        ),
-        returnValue: _i3.Future<({String id, bool isInsert})>.value((
-          id: _i7.dummyValue<String>(
-            this,
-            Invocation.method(
-              #upsertByDomain,
-              [],
-              {
-                #domain: domain,
-                #chapterListJs: chapterListJs,
-                #chapterContentJs: chapterContentJs,
-                #urlPattern: urlPattern,
-                #sampleUrl: sampleUrl,
-                #chapterListOcr: chapterListOcr,
-                #chapterContentOcr: chapterContentOcr,
-              },
-            ),
-          ),
-          isInsert: false
-        )),
-      ) as _i3.Future<({String id, bool isInsert})>);
 
   @override
   _i3.Future<({String? id, String? reason, bool success})> updateScriptPart({

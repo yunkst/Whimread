@@ -98,9 +98,7 @@ class ReorderableChapterListItem extends StatelessWidget {
               Icon(Icons.download_done, size: 16, color: colorScheme.primary),
           ],
         ),
-        onTap: () {
-          // 重排模式下点击不跳转
-        },
+        onTap: null, // 重排模式下点击不跳转
       ),
     );
   }

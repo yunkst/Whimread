@@ -288,35 +288,4 @@ class SiteScript {
       enabled: enabled ?? this.enabled,
     );
   }
-
-  /// 显式清空 [remoteId]，用于本地脚本「取消共享」后的清理。
-  ///
-  /// 直接 `copyWith(remoteId: null)` 无法区分「未传」与「传 null」，因此
-  /// 提供专门的清理方法。
-  SiteScript copyWithClearedRemote() {
-    return SiteScript(
-      id: id,
-      domain: domain,
-      urlPattern: urlPattern,
-      chapterListJs: chapterListJs,
-      chapterContentJs: chapterContentJs,
-      sampleUrl: sampleUrl,
-      createdAt: createdAt,
-      lastUsedAt: lastUsedAt,
-      useCount: useCount,
-      verified: verified,
-      chapterListOcr: chapterListOcr,
-      chapterContentOcr: chapterContentOcr,
-      bookshelfJs: bookshelfJs,
-      displayName: displayName,
-      preferredMode: preferredMode,
-      source: source,
-      remoteId: null,
-      remoteVersion: 0,
-      sha256: sha256,
-      shared: false,
-      lastSyncedAt: lastSyncedAt,
-      enabled: enabled,
-    );
-  }
 }

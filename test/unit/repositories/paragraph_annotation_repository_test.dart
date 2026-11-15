@@ -138,7 +138,9 @@ class _NoopVersionRepo implements IChapterVersionRepository {
   Future<int> deleteVersion(int id) async => 0;
 
   @override
-  Future<int> deleteVersionsByNovel(String novelUrl) async => 0;
+  Future<int> deleteVersionsByNovel(String novelUrl,
+        {DatabaseExecutor? executor}) async =>
+      0;
 
   @override
   Future<int> evictOldestVersions(String chapterUrl,

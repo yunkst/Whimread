@@ -229,7 +229,6 @@ void main() {
           title: '测试书',
           author: '作者',
           url: url,
-          isInBookshelf: true,
           lastReadChapterIndex: cachedIndex,
         );
 

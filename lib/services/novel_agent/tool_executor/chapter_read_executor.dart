@@ -35,7 +35,21 @@ class ChapterReadExecutor with ToolExecutorHelpers {
     final parser = ToolArgParser(args);
     final (position, posErr) = parser.requireInt('position');
     if (posErr != null) return posErr;
-    final resolveResult = await resolveChapterUrlByPosition(ctx, position);
+    final (sideStoryId, sideStoryErr) = parser.optionalInt('sideStoryId');
+    if (sideStoryErr != null) return sideStoryErr;
+
+    // sideStoryId 越界寻址：读番外章节（先读后改的核对通道）；
+    // 省略 = 宿主（既有契约）。窄越界校验见 resolveSideStoryTarget。
+    String? novelUrlOverride;
+    if (sideStoryId != null) {
+      final target = await resolveSideStoryTarget(sideStoryId, ctx,
+          toolName: 'read_chapter_content');
+      if (target.errorJson != null) return jsonEncode(target.errorJson);
+      novelUrlOverride = target.url;
+    }
+
+    final resolveResult = await resolveChapterUrlByPosition(ctx, position,
+        novelUrlOverride: novelUrlOverride);
     if (resolveResult.errorJson != null) {
       return jsonEncode(resolveResult.errorJson);
     }
@@ -64,11 +78,29 @@ class ChapterReadExecutor with ToolExecutorHelpers {
     Map<String, dynamic> args,
     AgentScenarioContext? ctx,
   ) async {
-    final novelResolve = await resolveCurrentNovelUrl(ctx);
-    if (novelResolve.errorJson != null) {
-      return jsonEncode(novelResolve.errorJson);
+    final parser = ToolArgParser(args);
+    final (sideStoryId, sideStoryErr) = parser.optionalInt('sideStoryId');
+    if (sideStoryErr != null) return sideStoryErr;
+
+    String novelUrl;
+    String? sideStoryTitle;
+    if (sideStoryId != null) {
+      // 越界寻址：列番外的章节目录（position 与 save_side_story_chapter
+      // / read/update 的 sideStoryId 路径同一套 chapterIndex 序）
+      final target = await resolveSideStoryTarget(sideStoryId, ctx,
+          toolName: 'list_chapters');
+      if (target.errorJson != null) return jsonEncode(target.errorJson);
+      novelUrl = target.url!;
+      final novel =
+          await ref.read(novelRepositoryProvider).getNovelById(sideStoryId);
+      sideStoryTitle = novel?.title;
+    } else {
+      final novelResolve = await resolveCurrentNovelUrl(ctx);
+      if (novelResolve.errorJson != null) {
+        return jsonEncode(novelResolve.errorJson);
+      }
+      novelUrl = novelResolve.url!;
     }
-    final novelUrl = novelResolve.url!;
 
     final repo = ref.read(chapterRepositoryProvider);
     final chapters = await repo.getCachedNovelChapters(novelUrl);
@@ -86,10 +118,12 @@ class ChapterReadExecutor with ToolExecutorHelpers {
 
     final novelContext = buildCurrentNovelContext(ctx);
     LoggerService.instance.i(
-        '列出章节: ${list.length} 章 (currentNovelId=${ctx?.currentNovelId})',
+        '列出章节: ${list.length} 章 (currentNovelId=${ctx?.currentNovelId}, '
+        'sideStoryId=$sideStoryId)',
         category: LogCategory.ai, tags: ['agent', 'tool', 'list_chapters']);
     return jsonEncode({
       'novel': novelContext,
+      if (sideStoryTitle != null) 'sideStoryTitle': sideStoryTitle,
       'chapters': list,
       'count': list.length,
     });

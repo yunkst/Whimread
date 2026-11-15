@@ -1,16 +1,18 @@
-/// 创建番外弹层 — 需求表单 + AI 创作启动
+/// 创建番外弹层 — 需求表单 + 主聊 AI 创作启动
 ///
 /// 交互（见 design/side-story-ui-design.html 画面 4/5）：
 /// 1. 挂载章节只读展示（从哪个入口进来就挂在哪章）
 /// 2. 需求描述多行输入（唯一必填项）
 /// 3. 期望章节数快选 chip（AI 决定 / 3 / 5 / 8，默认 AI 决定）
-/// 4. 提交 → 打开 Agent 对话窗（side_story 场景）→ startSideStoryCreation
-///    自动发送，逐章生成进度在对话窗内实时可见，可随时关闭浮窗
+/// 4. 提交 → 打开主聊对话窗（writing 场景）自动发送创作请求——番外创作
+///    并入主聊：Agent 用 create_side_story 定位锚点（= 本弹层带入的章节）
+///    并逐章 save_side_story_chapter，生成过程在对话窗内实时可见
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers/reading_context_providers.dart';
 import '../../core/providers/scenario_sessions_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
@@ -19,6 +21,7 @@ import '../../models/novel.dart';
 import '../../services/logger_service.dart';
 import '../../services/novel_agent/agent_scenario.dart';
 import '../../utils/error_helper.dart';
+import '../../utils/toast_utils.dart';
 import '../../widgets/agent_chat/agent_chat_launcher_entry.dart';
 
 /// 期望章节数快选项（value 为 null 表示 AI 决定）
@@ -99,23 +102,50 @@ class _SideStoryCreateSheetState extends ConsumerState<SideStoryCreateSheet> {
       tags: ['side-story', 'create', 'start'],
     );
 
-    // 打开对话窗（切到 side_story 场景），让用户实时看到逐章生成过程；
-    // 关闭浮窗不影响后台继续生成（会话在全局 scenarioSessionsProvider 中）。
+    // 锚点章对齐阅读上下文：主聊的 create_side_story 以「当前阅读章」为
+    // 默认锚点——弹层的锚点正是用户此刻操作的那一章，写入后 Agent 自动
+    // 定位，无需在 prompt 里传章节定位参数
+    ref.read(readingContextProvider.notifier).state = ReadingContext(
+      novelTitle: widget.anchorNovel.title,
+      chapterTitle: widget.anchorChapter.title,
+      novelUrl: widget.anchorNovel.url,
+      chapterUrl: widget.anchorChapter.url,
+    );
+
+    final countHint = _desiredChapterCount != null
+        ? '期望 $_desiredChapterCount 章。'
+        : '章节数由你根据需求体量决定。';
+    final prompt = '为《${widget.anchorNovel.title}》的'
+        '「${widget.anchorChapter.title}」这一章创作一部番外。\n\n'
+        '番外需求：\n$requirement\n\n'
+        '$countHint\n'
+        '请按流程完成：查证主线相关事实（涉及人物的既有设定）→ '
+        'create_side_story 建番外 → 逐章创作：在你的回复中直接写出该章完整'
+        '正文，随后立即调用 save_side_story_chapter 保存（一次只写一章、'
+        '保存一章），完成后简短总结。';
+
+    final session = ref
+        .read(scenarioSessionsProvider.notifier)
+        .get(ScenarioIds.writing);
+    final running = session.isRunning;
+
+    // 打开主聊对话窗（writing 场景），实时看到逐章生成过程；关闭浮窗不
+    // 影响后台继续生成（会话在全局 scenarioSessionsProvider 中）。
     if (mounted) {
-      AgentChatLauncherEntry.open(context, scenarioId: ScenarioIds.sideStory);
+      AgentChatLauncherEntry.open(
+        context,
+        scenarioId: ScenarioIds.writing,
+        initialDraft: running ? prompt : null,
+      );
     }
     try {
-      final session = ref
-          .read(scenarioSessionsProvider.notifier)
-          .get(ScenarioIds.sideStory);
-      await session.startSideStoryCreation(
-        anchorNovelUrl: widget.anchorNovel.url,
-        anchorNovelTitle: widget.anchorNovel.title,
-        anchorChapterUrl: widget.anchorChapter.url,
-        anchorChapterTitle: widget.anchorChapter.title,
-        requirement: requirement,
-        desiredChapterCount: _desiredChapterCount,
-      );
+      if (running) {
+        // 主聊已有任务在跑：不并发注入，prompt 已预填输入框，任务结束后
+        // 用户自行发送
+        ToastUtils.show('当前有任务进行中，创作请求已填入输入框');
+      } else {
+        await session.sendMessage(content: prompt);
+      }
       if (mounted) {
         Navigator.of(context).pop();
       }

@@ -167,9 +167,6 @@ mixin AutoScrollMixin<T extends StatefulWidget> on State<T> {
   /// 是否已暂停（用于UI区分暂停vs停止）
   bool get isAutoScrollPaused => _autoScrollController.isPaused;
 
-  /// 是否正在滚动（非暂停状态）
-  bool get isAutoScrollActive => _autoScrollController.isScrolling;
-
   /// 是否应该自动滚动（意图标记）
   bool get shouldAutoScroll => _shouldAutoScroll;
 

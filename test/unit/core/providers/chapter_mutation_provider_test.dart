@@ -139,9 +139,6 @@ class _FakeChapterWriter implements IChapterWriter {
 
   // ===== Notifier 不调用的方法（空实现，满足接口）=====
 
-  @override
-  Future<void> updateCustomChapter(
-      String chapterUrl, String title, String content) async {}
 }
 
 void main() {

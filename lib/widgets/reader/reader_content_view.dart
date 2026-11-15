@@ -176,10 +176,7 @@ class _ReaderContentViewState extends State<ReaderContentView> {
         itemBuilder: (context, index) {
           // 尾部占位（末章底部留白）
           if (index == layout.itemCount - 1) {
-            return SizedBox(
-              height: 160,
-              child: Container(),
-            );
+            return const SizedBox(height: 160);
           }
 
           // 章节分隔线（每章起点，携带章节级 GlobalKey 供上层采样/检测/定位）

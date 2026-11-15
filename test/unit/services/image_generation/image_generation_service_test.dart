@@ -37,9 +37,6 @@ class _FakeBackend implements ImageGenerationBackend {
   bool supports(ImageModelBackendType type) => true;
 
   @override
-  Future<String?> validate(ImageModel model) async => null;
-
-  @override
   Future<ImageGenerationResult> submit(
     ImageGenerationRequest request, {
     void Function(int step, int total)? onProgress,

@@ -80,12 +80,6 @@ class AgentChatMessage {
       .map((s) => s.content)
       .join('');
 
-  /// 提取所有工具调用（用于向后兼容）
-  List<AgentToolCall> get toolCalls => segments
-      .whereType<ToolCallSegment>()
-      .map((s) => s.call)
-      .toList();
-
   /// 创建系统消息
   factory AgentChatMessage.system(String content) => AgentChatMessage(
         role: AgentChatRole.system,
@@ -291,38 +285,6 @@ class AgentChatMessage {
       );
     }
     return AgentChatMessage(role: role, segments: segs, timestamp: ts);
-  }
-
-  /// 序列化为 LLM 历史格式（只保留 role + content，不含 segments 细节）
-  ///
-  /// 保留供历史/外部 LLM 历史回放使用，不被持久化路径调用。
-  Map<String, String> toMap() {
-    return {
-      'role': role.name,
-      'content': content,
-    };
-  }
-
-  factory AgentChatMessage.fromMap(Map<String, dynamic> map) {
-    final roleStr = map['role']?.toString() ?? 'user';
-    AgentChatRole role;
-    switch (roleStr) {
-      case 'system':
-        role = AgentChatRole.system;
-        break;
-      case 'assistant':
-        role = AgentChatRole.assistant;
-        break;
-      case 'marker':
-        role = AgentChatRole.marker;
-        break;
-      default:
-        role = AgentChatRole.user;
-    }
-    return AgentChatMessage(
-      role: role,
-      segments: [TextSegment(map['content']?.toString() ?? '')],
-    );
   }
 
   AgentChatMessage copyWith({

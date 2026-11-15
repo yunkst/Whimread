@@ -18,7 +18,6 @@ library;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:riverpod/riverpod.dart';
 import '../../../services/logger_service.dart';
-import '../../../services/llm_logger/llm_logger.dart';
 import '../../../services/log_reporter_service.dart';
 import '../../../services/preferences_service.dart';
 
@@ -55,23 +54,6 @@ part 'core_service_providers.g.dart';
 @riverpod
 LoggerService loggerService(Ref ref) {
   return LoggerService.instance;
-}
-
-/// LlmLogger Provider
-///
-/// 提供全局 LLM 调用日志服务实例，记录前端所有 LLM 请求/响应。
-///
-/// **功能**:
-/// - JSONL 文件落盘（按天分文件，7 天自动清理）
-/// - 内存缓存最近 200 条记录
-/// - 查询接口：getRecent / getById / clear
-/// - 通过 [LlmLogger.changeNotifier] 推送变化通知
-///
-/// **依赖**:
-/// - 需在 `main.dart` 启动时调用 `LlmLogger.instance.initialize()`
-@riverpod
-LlmLogger llmLogger(Ref ref) {
-  return LlmLogger.instance;
 }
 
 /// PreferencesService Provider

@@ -29,8 +29,7 @@ class ChatHistoryListItem extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final currentId = ref.watch(currentChatSessionIdProvider(scenarioId));
-    final selected = isCurrent || currentId == session.id;
+    final selected = isCurrent;
 
     return ListTile(
       selected: selected,

@@ -26,7 +26,7 @@ final appResourceManagerProvider =
 // ignore: unused_element
 typedef AppResourceManagerRef = AutoDisposeProviderRef<AppResourceManager>;
 String _$resourceBootstrapNotifierHash() =>
-    r'9653c39d75c0a079cd6b0115f06a7cc67e40b0ee';
+    r'4a07c74cbd553b3ab766bc36941d9f1744cfc8f1';
 
 /// 启动资源引导编排器（Notifier 驱动 ResourceBootstrapScreen）
 ///

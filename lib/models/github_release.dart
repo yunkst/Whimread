@@ -3,7 +3,6 @@
 /// 对应 GitHub API `/repos/{owner}/{repo}/releases/latest` 响应
 class GithubRelease {
   final String tagName;
-  final String name;
   final String? body;
   final String publishedAt;
   final bool prerelease;
@@ -12,7 +11,6 @@ class GithubRelease {
 
   GithubRelease({
     required this.tagName,
-    required this.name,
     this.body,
     required this.publishedAt,
     required this.prerelease,
@@ -23,7 +21,6 @@ class GithubRelease {
   factory GithubRelease.fromJson(Map<String, dynamic> json) {
     return GithubRelease(
       tagName: json['tag_name'] as String? ?? '',
-      name: json['name'] as String? ?? '',
       body: json['body'] as String?,
       publishedAt: json['published_at'] as String? ?? '',
       prerelease: json['prerelease'] as bool? ?? false,

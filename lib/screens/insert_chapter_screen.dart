@@ -13,15 +13,11 @@ class InsertChapterScreen extends ConsumerStatefulWidget {
   final Novel novel;
   final int afterIndex;
   final List<Chapter> chapters;
-  final String? prefillTitle;
-  final String? prefillContent;
 
   const InsertChapterScreen({
     required this.novel,
     required this.afterIndex,
     required this.chapters,
-    this.prefillTitle,
-    this.prefillContent,
     super.key,
   });
 
@@ -37,9 +33,9 @@ class _InsertChapterScreenState extends ConsumerState<InsertChapterScreen> {
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.prefillTitle ?? '');
+    _titleController = TextEditingController();
     _contentController =
-        TextEditingController(text: widget.prefillContent ?? '');
+        TextEditingController();
   }
 
   @override

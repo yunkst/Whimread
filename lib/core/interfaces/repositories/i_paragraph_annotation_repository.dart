@@ -1,4 +1,5 @@
 import '../../../models/paragraph_annotation.dart';
+import 'package:sqflite/sqflite.dart' show DatabaseExecutor;
 
 /// 段落标注仓库接口
 ///
@@ -22,5 +23,5 @@ abstract class IParagraphAnnotationRepository {
   Future<int> deleteByChapter(String chapterUrl);
 
   /// 删除指定小说所有章节的标注（小说删除时级联清理）
-  Future<int> deleteByNovel(String novelUrl);
+  Future<int> deleteByNovel(String novelUrl, {DatabaseExecutor? executor});
 }

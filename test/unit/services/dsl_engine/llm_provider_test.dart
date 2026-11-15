@@ -41,7 +41,7 @@ void main() {
           'data: {"choices":[{"delta":{"content":"!"}}]}\n'
           'data: [DONE]\n';
 
-      final chunks = SseParser.parseSseStreamWithReasoning(sseData).content;
+      final chunks = SseParser.parseStreamingResult(sseData).contentChunks;
       expect(chunks, ['Hello', ' world', '!']);
     });
 
@@ -50,7 +50,7 @@ void main() {
           'data: {"choices":[{"delta":{"content":"B"}}]}\n\n'
           'data: [DONE]\n\n';
 
-      final chunks = SseParser.parseSseStreamWithReasoning(sseData).content;
+      final chunks = SseParser.parseStreamingResult(sseData).contentChunks;
       expect(chunks, ['A', 'B']);
     });
 
@@ -60,7 +60,7 @@ void main() {
           ': comment line\n'
           'data: [DONE]\n';
 
-      final chunks = SseParser.parseSseStreamWithReasoning(sseData).content;
+      final chunks = SseParser.parseStreamingResult(sseData).contentChunks;
       expect(chunks, ['X']);
     });
 
@@ -69,7 +69,7 @@ void main() {
           'data: {"choices":[{"delta":{"content":"Y"}}]}\n'
           'data: [DONE]\n';
 
-      final chunks = SseParser.parseSseStreamWithReasoning(sseData).content;
+      final chunks = SseParser.parseStreamingResult(sseData).contentChunks;
       expect(chunks, ['Y']);
     });
 
@@ -78,7 +78,7 @@ void main() {
           'data: {"choices":[{"delta":{"content":"Z"}}]}\n'
           'data: [DONE]\n';
 
-      final chunks = SseParser.parseSseStreamWithReasoning(sseData).content;
+      final chunks = SseParser.parseStreamingResult(sseData).contentChunks;
       expect(chunks, ['Z']);
     });
 
@@ -88,9 +88,9 @@ void main() {
           'data: {"choices":[{"delta":{"content":"answer"}}]}\n'
           'data: [DONE]\n';
 
-      final result = SseParser.parseSseStreamWithReasoning(sseData);
-      expect(result.content, ['answer']);
-      expect(result.reasoning, ['thinking...']);
+      final result = SseParser.parseStreamingResult(sseData);
+      expect(result.contentChunks, ['answer']);
+      expect(result.reasoningChunks, ['thinking...']);
     });
   });
 

@@ -36,8 +36,6 @@ class ImageGenerationRequest {
   final int count;
 
   /// 出图参数；null 表示沿用 [ImageModel] 的默认值
-  final int? width;
-  final int? height;
   final int? steps;
   final double? cfg;
   final int? seed;
@@ -52,8 +50,6 @@ class ImageGenerationRequest {
     required this.prompt,
     this.negativePrompt,
     this.count = 1,
-    this.width,
-    this.height,
     this.steps,
     this.cfg,
     this.seed,
@@ -85,11 +81,6 @@ abstract class ImageGenerationBackend {
 
   /// 是否支持指定 backendType
   bool supports(ImageModelBackendType type);
-
-  /// 校验模型在本后端是否可用（local_sd 检查文件存在且头 magic 正确）
-  ///
-  /// 返回 null 表示通过；返回非 null 字符串作为 UI 错误文案
-  Future<String?> validate(ImageModel model);
 
   /// 提交生图请求。
   ///

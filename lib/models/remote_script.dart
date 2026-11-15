@@ -63,19 +63,6 @@ class RemoteScriptMeta {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'remote_id': remoteId,
-        'domain': domain,
-        'display_name': displayName,
-        'version': version,
-        'sha256': sha256,
-        'sample_url': sampleUrl,
-        'has_bookshelf_js': hasBookshelfJs,
-        'approved_at': approvedAt,
-        'download_count': downloadCount,
-        'author_display_id': authorDisplayId,
-      };
-
   /// 后端时间字段兼容 ISO 字符串 / 毫秒数两种形态
   static int _parseTime(dynamic value) {
     if (value is int) return value;

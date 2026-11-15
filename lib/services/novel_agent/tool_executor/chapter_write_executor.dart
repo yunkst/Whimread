@@ -201,6 +201,8 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     if (newErr != null) return newErr;
     final (replaceAll, allErr) = parser.optionalBool('replaceAll');
     if (allErr != null) return allErr;
+    final (sideStoryId, sideStoryErr) = parser.optionalInt('sideStoryId');
+    if (sideStoryErr != null) return sideStoryErr;
 
     // 把 LLM 入参里的 JSON 转义序列还原为真字符（防御纵深）。
     //
@@ -262,7 +264,18 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     // markdown 标记后再替换入正文。
     final sanitizedNewString = ContentSanitizer.sanitize(newString);
 
-    final resolveResult = await resolveChapterUrlByPosition(ctx, position);
+    // sideStoryId 越界寻址：patch 番外章节（内容锚定，错命名空间≈必
+    // not_found，无静默写坏风险）；省略 = 宿主（既有契约）。
+    String? novelUrlOverride;
+    if (sideStoryId != null) {
+      final target = await resolveSideStoryTarget(sideStoryId, ctx,
+          toolName: 'update_chapter_content');
+      if (target.errorJson != null) return jsonEncode(target.errorJson);
+      novelUrlOverride = target.url;
+    }
+
+    final resolveResult = await resolveChapterUrlByPosition(ctx, position,
+        novelUrlOverride: novelUrlOverride);
     if (resolveResult.errorJson != null) {
       return jsonEncode(resolveResult.errorJson);
     }
@@ -714,7 +727,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     return _callLlm(
       systemPrompt: systemPrompt,
       userPrompt: prompt.toString(),
-      failTag: 'update_chapter_content',
+      failTag: 'rewrite_chapter',
       scenarioId: scenarioId,
       onProgress: onProgress,
     );

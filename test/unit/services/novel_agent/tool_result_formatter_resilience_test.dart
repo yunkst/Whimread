@@ -75,11 +75,29 @@ void main() {
     });
 
     test('控制字符（换行/制表符）混杂 → llm 合法 JSON', () {
-      final s = 'line1\nline2\tcol\r\nline3' * 5000;
+      final s = 'line1\nline2\tcol\r\nline3' * 5000;
       final f = ToolResultFormatter(maxChars: 30000);
       final result = f.format({'content': s});
 
       expect(() => jsonDecode(result.llm), returnsNormally);
+    });
+
+    test('字符串内转义引号+逗号 + 兜底硬截 → llm 合法 JSON', () {
+      // 回归：_hardClamp 曾用 r'\\'（两字符 raw string）比较单字符 ch，
+      // 恒 false → 字符串内的 \" 会翻转引号态，结构符扫描把字符串内的
+      // 逗号误判为"字符串外合法截断点"（bestEnd 路径无 jsonDecode 校验），
+      // 截断产出未闭合 JSON 给 LLM。
+      // 内容设计：单长字段，字符串内既有转义引号又有逗号——裁剪后必然
+      // 超预算触发 _hardClamp，且误判截断点会落在字符串中间。
+      final body = 'a"b,c"d' * 2000;
+      final f = ToolResultFormatter(maxChars: 300);
+      final result = f.format({'summary': body});
+
+      expect(result.llm.length, lessThanOrEqualTo(300));
+      expect(() => jsonDecode(result.llm), returnsNormally,
+          reason: '含转义引号+逗号的内容截断后必须仍是合法 JSON');
+      final decoded = jsonDecode(result.llm) as Map<String, dynamic>;
+      expect(decoded['summary'], isA<String>());
     });
   });
 }

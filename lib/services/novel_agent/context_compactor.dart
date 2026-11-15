@@ -454,7 +454,7 @@ class ContextCompactor {
   // - 任意消息的 toolCallId / 消息顺序 / 配对关系
   //
   // 改写后的 content 必须是合法 JSON 字符串（read_chapter_content 纯文本特例除外），
-  // 保证 agent_loop L530-538 的 jsonDecode 回退路径不被触发。
+  // 保证 agent_loop 解析工具调用 arguments 的 jsonDecode 回退路径不被触发。
 
   /// 预剪枝主流程：返回改写后的 messages 列表 + 改写记录
   ///

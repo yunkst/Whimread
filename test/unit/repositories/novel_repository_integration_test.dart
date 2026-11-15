@@ -56,7 +56,6 @@ void main() {
         expect(novels[0].coverUrl, 'https://test.com/cover.jpg');
         expect(novels[0].description, '这是测试描述');
         expect(novels[0].backgroundSetting, '测试设定');
-        expect(novels[0].isInBookshelf, isTrue);
       });
 
       test('URL唯一性约束应该生效', () async {

@@ -227,8 +227,8 @@ class _SiteBookshelfRefreshSheetState
 
       final summary = await SiteBookshelfSyncer.sync(
         entries: entries,
-        isInBookshelf: novelRepo.isInBookshelf,
         isKnownBook: isKnownBook,
+        isInBookshelf: novelRepo.isInBookshelf,
         backfillCover: backfillCover,
         addNovel: bookshelfMut.addNovel,
         progress: (p) {

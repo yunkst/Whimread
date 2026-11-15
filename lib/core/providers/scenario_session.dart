@@ -150,12 +150,20 @@ class ScenarioSession with ScenarioSessionMessageChain {
   /// _agentMessages 计算成功 update 次数；用来排除历史轮次对本轮结果的干扰。
   int? _rewriteStartAgentIndex;
 
-  // ===== 番外创作（仅 side_story 场景使用） =====
-  /// 本会话正在跑的番外创作目标（startSideStoryCreation 设置）。
-  /// [_buildScenarioContext] 据此把 sideStoryTarget 注入 AgentScenarioContext，
-  /// factory 据此构造 SideStoryScenario 锁定宿主上下文。创作无完成等待器
-  /// （fire-and-forget：对话窗展示过程，完成态由消息流自然呈现）。
-  SideStoryTarget? _pendingSideStoryTarget;
+  // ===== 番外创作（主聊 writing 场景直接创作） =====
+  /// 本会话已定位的番外写入目标（create_side_story 工具成功后由
+  /// ToolCallEndEvent 接线设置，仿 _handleSelectNovelFromResult 模式）。
+  /// [_buildScenarioContext] 据此把 sideStoryWritingTarget 注入 context，
+  /// save_side_story_chapter 据此落库进番外命名空间。仅存内存——进程重启
+  /// 后由 Agent 重调 create_side_story（锚点+需求幂等查库）找回，不丢不重。
+  ActiveSideStoryWritingTarget? _activeSideStory;
+
+  /// 记录番外写入目标（scenario_session_chain 的工具事件接线入口。
+  /// 同库 mixin 只能调 mixin 声明面内的成员——selectNovel 同款模式）
+  @override
+  void applySideStoryTarget(ActiveSideStoryWritingTarget target) {
+    _activeSideStory = target;
+  }
 
   // ===== 会话状态 =====
   @override
@@ -895,6 +903,9 @@ class ScenarioSession with ScenarioSessionMessageChain {
       if (toolName == 'select_novel' || toolName == 'create_novel') {
         _handleSelectNovelFromResult(rawResult);
       }
+      if (toolName == 'create_side_story') {
+        _handleSideStoryFromResult(rawResult);
+      }
       return formatted.llm;
     } catch (e, st) {
       LoggerService.instance.e(
@@ -1235,99 +1246,6 @@ class ScenarioSession with ScenarioSessionMessageChain {
     completer.complete(outcome);
   }
 
-  /// 启动番外创作（仅 side_story 场景）。
-  ///
-  /// 与 startAnnotationRewrite 同型：清空上一轮历史 → 设置 pending target →
-  /// 构造首条 user 消息（需求原文 + 流程指令）→ 启动 agent run。
-  /// 无完成等待器（fire-and-forget）：对话窗实时展示逐章生成进度，
-  /// 完成态由消息流自然呈现，用户可随时关闭浮窗。
-  Future<void> startSideStoryCreation({
-    required String anchorNovelUrl,
-    required String anchorNovelTitle,
-    required String anchorChapterUrl,
-    required String anchorChapterTitle,
-    required String requirement,
-    int? desiredChapterCount,
-  }) async {
-    if (scenarioId != ScenarioIds.sideStory) {
-      throw StateError(
-          'startSideStoryCreation 只能在 side_story 场景的 session 上调用，当前 scenarioId=$scenarioId');
-    }
-    if (_isRunning) {
-      throw StateError('session已已有 agent 在运行，请等待完成或取消后再试');
-    }
-
-    // 每次创作都是干净开始（同 startAnnotationRewrite 的三步清空顺序）
-    await _persistence.clearMessagesFromDb();
-    await _ensureSessionId();
-    _pendingSegments.clear();
-    _agentMessages.clear();
-    _state = _state.copyWith(
-      messages: const [],
-      isLoading: false,
-      streamingSegments: const [],
-      error: null,
-    );
-    _notifyStateChanged();
-
-    _pendingSideStoryTarget = SideStoryTarget(
-      anchorNovelUrl: anchorNovelUrl,
-      anchorNovelTitle: anchorNovelTitle,
-      anchorChapterUrl: anchorChapterUrl,
-      anchorChapterTitle: anchorChapterTitle,
-      requirement: requirement,
-      desiredChapterCount: desiredChapterCount,
-    );
-
-    final countHint = desiredChapterCount != null
-        ? '期望 $desiredChapterCount 章。'
-        : '章节数由你根据需求体量决定。';
-    final userContent = '为《$anchorNovelTitle》的「$anchorChapterTitle」这一章创作一部番外。\n\n'
-        '番外需求：\n$requirement\n\n'
-        '$countHint\n'
-        '请按流程完成：read_chapter_content 通读锚点章 → 按需查人物卡与写作技巧 → '
-        'create_side_story 建番外 → 逐章创作：在你的回复中直接写出该章完整正文，'
-        '随后立即调用 save_chapter 保存（一次只写一章、保存一章），完成后简短总结。';
-
-    final userMsg = ChatMessage(role: 'user', content: userContent);
-    _agentMessages.add(userMsg);
-    _state = _state.copyWith(
-      messages: _uiMessages,
-      isLoading: true,
-      streamingSegments: const [],
-      error: null,
-    );
-    _notifyStateChanged();
-    await _persistence.persistAgentMessage(userMsg);
-
-    _isTokenCancelled = false;
-    _lifecycle = SessionLifecycle.active;
-    _isRunning = true;
-    _pendingSegments.clear();
-
-    LoggerService.instance.i(
-      'ScenarioSession [$scenarioId] 启动番外创作: anchor=$anchorChapterTitle '
-      'requirement长度=${requirement.length} sessionId=$_sessionId',
-      category: LogCategory.ai,
-      tags: ['session', 'side-story', 'start', scenarioId],
-    );
-
-    try {
-      await _launchAgentRun(
-        resume: false,
-        userInput: userContent,
-        runId: _sessionId?.toString(),
-      );
-    } catch (e, st) {
-      LoggerService.instance.e(
-        'ScenarioSession [$scenarioId] 番外创作异常: $e',
-        stackTrace: st.toString(),
-        category: LogCategory.ai,
-        tags: ['session', 'side-story', 'exception', scenarioId],
-      );
-      _finalizeAgentResponse(error: '番外创作异常: $e');
-    }
-  }
 
   /// 从本轮 agent 消息扫描成功 update_chapter_content 次数。
   ///
@@ -1601,7 +1519,7 @@ class ScenarioSession with ScenarioSessionMessageChain {
       currentNovelId: isTextGame ? null : _currentNovel?.id,
       currentNovelTitle: isTextGame ? null : _currentNovel?.title,
       rewriteTarget: _pendingRewriteTarget,
-      sideStoryTarget: _pendingSideStoryTarget,
+      sideStoryWritingTarget: _activeSideStory,
       textGameId: textGameId,
       chatSessionId: _sessionId,
     );

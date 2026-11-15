@@ -26,6 +26,7 @@ mixin ScenarioSessionMessageChain {
   set _agentSub(StreamSubscription<AgentEvent>? value);
   void _maybeCompleteRewriteCompleter({String? error});
   Future<CurrentNovel?> selectNovel(int novelId);
+  void applySideStoryTarget(ActiveSideStoryWritingTarget target);
   String get scenarioId;
   void _notifyStateChanged();
 
@@ -80,6 +81,9 @@ mixin ScenarioSessionMessageChain {
         if (e.success &&
             (e.name == 'select_novel' || e.name == 'create_novel')) {
           _handleSelectNovelFromResult(e.result);
+        }
+        if (e.success && e.name == 'create_side_story') {
+          _handleSideStoryFromResult(e.fullResult ?? e.result);
         }
         _state = _state.copyWith(
           streamingSegments:
@@ -286,6 +290,37 @@ mixin ScenarioSessionMessageChain {
         'ScenarioSession [$scenarioId] 解析 select_novel 结果失败: $result',
         category: LogCategory.ai,
         tags: ['session', 'select_novel', 'parse_failed', scenarioId],
+      );
+    }
+  }
+
+  /// 解析 create_side_story 工具返回的 JSON，记录番外写入目标
+  /// （save_side_story_chapter 落库定位；仿 _handleSelectNovelFromResult）
+  void _handleSideStoryFromResult(String? result) {
+    if (result == null) return;
+    try {
+      final parsed = jsonDecode(result) as Map<String, dynamic>;
+      if (parsed['success'] != true) return;
+      final id = parsed['sideStoryId'];
+      final url = parsed['sideStoryUrl'] as String?;
+      final title = parsed['sideStoryTitle'] as String?;
+      if (id is! int || url == null || title == null) return;
+      applySideStoryTarget(ActiveSideStoryWritingTarget(
+        novelId: id,
+        novelUrl: url,
+        title: title,
+        anchorChapterTitle: parsed['anchorChapterTitle']?.toString(),
+      ));
+      LoggerService.instance.i(
+        'ScenarioSession [$scenarioId] 定位番外写入目标: "$title" (id=$id)',
+        category: LogCategory.ai,
+        tags: ['session', 'side-story', 'target_set', scenarioId],
+      );
+    } catch (e) {
+      LoggerService.instance.e(
+        'ScenarioSession [$scenarioId] 解析 create_side_story 结果失败: $result',
+        category: LogCategory.ai,
+        tags: ['session', 'side-story', 'parse_failed', scenarioId],
       );
     }
   }

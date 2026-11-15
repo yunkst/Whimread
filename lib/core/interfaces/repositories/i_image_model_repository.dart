@@ -34,7 +34,6 @@ abstract class IImageModelRepository {
   Future<int> getNextSortOrder();
 
   /// 获取模型数量
-  Future<int> count();
 
   /// 更新下载/转换进度（0-100，高频调用，部分列 UPDATE）
   Future<void> updateProgress(int id, int progress);

@@ -10,11 +10,15 @@ class ReadingContext {
   final String? chapterTitle;
   /// 小说 URL（唯一标识，可用于查询详细信息）
   final String? novelUrl;
+  /// 当前章节 URL（唯一标识，仅阅读器内设置；目录页/书架页无「正在阅读的章」
+  /// 语义，保持 null——create_side_story 依赖它判断真正的阅读态）
+  final String? chapterUrl;
 
   const ReadingContext({
     this.novelTitle,
     this.chapterTitle,
     this.novelUrl,
+    this.chapterUrl,
   });
 
   /// 是否有有效的阅读上下文

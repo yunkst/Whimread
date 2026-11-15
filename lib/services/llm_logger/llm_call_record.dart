@@ -1,7 +1,7 @@
 /// LLM 调用日志记录的数据模型。
 ///
 /// 用法：由 [LlmLogger] 自动创建，不需要手动构造。
-/// 通过 [LlmLogger.getRecent] / [LlmLogger.getById] 查询后使用。
+/// 通过 [LlmLogger.getRecent] 查询后使用。
 class LlmCallRecord {
   final String id;
   final DateTime timestamp;

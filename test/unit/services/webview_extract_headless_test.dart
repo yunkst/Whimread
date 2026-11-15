@@ -134,38 +134,6 @@ void main() {
       // 5. 保存
       notifier.setPhase(ExtractionPhase.saving, toolName: 'save_script');
       expect(notifier.state.phase, ExtractionPhase.saving);
-
-      // 6. 完成
-      notifier.complete();
-      expect(notifier.state.phase, ExtractionPhase.done);
-      expect(notifier.state.isRunning, isFalse);
-    });
-
-    test('ExtractionTaskNotifier 错误流程', () {
-      final notifier = ExtractionTaskNotifier();
-
-      notifier.start('www.example.com');
-      notifier.setPhase(ExtractionPhase.executing, toolName: 'execute_js');
-      notifier.fail('JS_SYNTAX_ERROR');
-
-      expect(notifier.state.phase, ExtractionPhase.error);
-      expect(notifier.state.error, 'JS_SYNTAX_ERROR');
-      expect(notifier.state.isRunning, isFalse);
-    });
-
-    test('ExtractionTaskNotifier 重置后可再次使用', () {
-      final notifier = ExtractionTaskNotifier();
-
-      notifier.start('www.example.com');
-      notifier.fail('error');
-      notifier.reset();
-
-      expect(notifier.isIdle, isTrue);
-
-      // 可以再次启动
-      notifier.start('www.other.com');
-      expect(notifier.state.domain, 'www.other.com');
-      expect(notifier.state.isRunning, isTrue);
     });
   });
 
@@ -179,8 +147,6 @@ void main() {
       expect(ExtractionPhase.analyzing.name, 'analyzing');
       expect(ExtractionPhase.executing.name, 'executing');
       expect(ExtractionPhase.saving.name, 'saving');
-      expect(ExtractionPhase.done.name, 'done');
-      expect(ExtractionPhase.error.name, 'error');
     });
   });
 }

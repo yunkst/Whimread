@@ -90,18 +90,8 @@ class LocalDreamEngineManager {
   static const int _engineOutputBufferSize = 60;
   final List<String> _recentEngineOutput = [];
 
-  /// 状态变更广播（启动就绪 / 意外退出 / 主动停止后触发）
-  final StreamController<LocalDreamEngineStatus> _statusChanges =
-      StreamController<LocalDreamEngineStatus>.broadcast();
-
-  /// 释放资源（关闭状态流；容器销毁时调用）
-  void dispose() {
-    _statusChanges.close();
-  }
-
   void _setStatus(LocalDreamEngineStatus s) {
     _status = s;
-    if (!_statusChanges.isClosed) _statusChanges.add(s);
   }
 
   /// 引擎操作互斥链：ensureStarted 的"检查-启动"与 stop 串行执行，
@@ -115,9 +105,6 @@ class LocalDreamEngineManager {
   LocalDreamEngineManager({LocalDreamClient? client, AppResourceManager? resourceManager})
       : _client = client ?? LocalDreamClient(host: '127.0.0.1'),
         _resources = resourceManager ?? AppResourceManager();
-
-  /// 当前运行状态（同步快照）
-  LocalDreamEngineStatus get status => _status;
 
   /// 构造引擎启动参数（纯函数，便于测试参数矩阵）。
   ///

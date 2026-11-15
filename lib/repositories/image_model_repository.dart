@@ -175,14 +175,6 @@ class ImageModelRepository extends BaseRepository
     return maxSort + 1;
   }
 
-  @override
-  Future<int> count() async {
-    final db = await database;
-    final result =
-        await db.rawQuery('SELECT COUNT(*) as count FROM $_table');
-    return result.first['count'] as int;
-  }
-
   // ============================================================
   // 生命周期部分更新（下载/转换高频进度写库，避免整行 UPDATE）
   // ============================================================

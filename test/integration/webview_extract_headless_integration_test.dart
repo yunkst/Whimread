@@ -101,11 +101,6 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(notifier.state.phase, ExtractionPhase.saving);
 
-      // 完成
-      notifier.complete();
-      await Future<void>.delayed(Duration.zero);
-      expect(notifier.state.phase, ExtractionPhase.done);
-
       sub.close();
     });
 
@@ -132,31 +127,6 @@ void main() {
 
       sub1.close();
       sub2.close();
-    });
-
-    test('错误状态正确传递', () async {
-      final notifier = container.read(extractionTaskNotifierProvider);
-      ExtractionTaskState? lastErrorState;
-
-      container.listen<ExtractionTaskState>(
-        extractionTaskProvider,
-        (prev, next) {
-          if (next.phase == ExtractionPhase.error) {
-            lastErrorState = next;
-          }
-        },
-      );
-
-      notifier.start('www.example.com');
-      notifier.setPhase(ExtractionPhase.executing, toolName: 'execute_js');
-      notifier.fail('JS_SYNTAX_ERROR: 未闭合括号');
-
-      await Future<void>.delayed(Duration.zero);
-
-      expect(lastErrorState, isNotNull);
-      expect(lastErrorState!.phase, ExtractionPhase.error);
-      expect(lastErrorState!.error, contains('JS_SYNTAX_ERROR'));
-      expect(lastErrorState!.completedAt, isNotNull);
     });
   });
 
@@ -186,30 +156,6 @@ void main() {
   });
 
   group('场景生命周期事件完整性', () {
-    test('complete 和 fail 都会设置 completedAt', () async {
-      final notifier = ExtractionTaskNotifier();
-      notifier.start('test.com');
-      notifier.complete();
-      final doneAt = notifier.state.completedAt;
-      expect(doneAt, isNotNull);
-
-      notifier.reset();
-      notifier.start('test.com');
-      notifier.fail('error');
-      final errorAt = notifier.state.completedAt;
-      expect(errorAt, isNotNull);
-    });
-
-    test('roundCount 跨多个轮次累加', () {
-      final notifier = ExtractionTaskNotifier();
-      notifier.start('test.com');
-
-      for (var i = 0; i < 5; i++) {
-        notifier.incrementRound();
-      }
-      expect(notifier.state.roundCount, 5);
-    });
-
     test('setPhase 不影响 currentTool（除非显式传入）', () {
       final notifier = ExtractionTaskNotifier();
       notifier.start('test.com');

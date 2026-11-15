@@ -28,8 +28,6 @@ abstract interface class IChapterWriter {
 
   // ===== novel_chapters 表（部分跨两表）=====
   Future<void> cacheNovelChapters(String novelUrl, List<Chapter> chapters);
-  Future<void> updateCustomChapter(
-      String chapterUrl, String title, String content);
   Future<void> updateChaptersOrder(String novelUrl, List<Chapter> chapters);
   Future<void> markChapterAsRead(String novelUrl, String chapterUrl);
 
@@ -298,17 +296,19 @@ class ChapterRepository extends BaseRepository
           _removeFromMemoryCache(row['chapterUrl'] as String);
         }
 
-        // 级联删除版本历史
-        await _versionRepo.deleteVersionsByNovel(novelUrl);
-
-        // 级联删除段落标注
-        await _annotationRepo?.deleteByNovel(novelUrl);
-
-        final deleted = await db.delete(
-          'chapter_cache',
-          where: 'novelUrl = ?',
-          whereArgs: [novelUrl],
-        );
+        // 级联删除版本历史 → 段落标注 → 缓存行：收进单事务，避免中途
+        // 失败留下「缓存删了但版本/标注残留」的半删态。注意
+        // deleteVersionsByNovel 靠 chapter_cache JOIN 找章节 URL，必须
+        // 严格先于缓存行删除执行——顺序耦合由同事务内的语句顺序保证。
+        final deleted = await db.transaction<int>((txn) async {
+          await _versionRepo.deleteVersionsByNovel(novelUrl, executor: txn);
+          await _annotationRepo?.deleteByNovel(novelUrl, executor: txn);
+          return txn.delete(
+            'chapter_cache',
+            where: 'novelUrl = ?',
+            whereArgs: [novelUrl],
+          );
+        });
         LoggerService.instance.i(
           '删除小说所有缓存章节: novelUrl=$novelUrl count=$deleted',
           category: LogCategory.database,
@@ -387,22 +387,33 @@ class ChapterRepository extends BaseRepository
         chapterIndex: maps[i]['chapterIndex'],
         isUserInserted: maps[i]['isUserInserted'] == 1,
         readAt: maps[i]['readAt'] as int?,
-        isAccompanied: false,
       );
     });
   }
 
-  /// 重新排序章节索引
+  /// 重新排序章节索引（独立事务把 novel_chapters 的 chapterIndex 连续化）
   Future<void> _reorderChapters(String novelUrl) async {
     final db = await database;
-    final chapters = await db.query(
+    await db.transaction((txn) => _reindexChapters(txn, novelUrl));
+  }
+
+  /// 在 [executor] 上把 [novelUrl] 的章节索引连续化为 0..N-1
+  ///（按 chapterIndex ASC 重查后 batch update，id 定位）。
+  ///
+  /// 复用点：cacheNovelChapters 后的整理、deleteChapterAndReindex 的
+  /// 事务内重排。必须在调用方写操作所在的同一事务执行器上运行——
+  /// 「重排在 delete 之后查」的顺序耦合依赖这一点。
+  Future<void> _reindexChapters(
+      DatabaseExecutor executor, String novelUrl) async {
+    final chapters = await executor.query(
       'novel_chapters',
+      columns: ['id'],
       where: 'novelUrl = ?',
       whereArgs: [novelUrl],
       orderBy: 'chapterIndex ASC',
     );
 
-    final batch = db.batch();
+    final batch = executor.batch();
     for (var i = 0; i < chapters.length; i++) {
       batch.update(
         'novel_chapters',
@@ -414,41 +425,6 @@ class ChapterRepository extends BaseRepository
     await batch.commit(noResult: true);
   }
 
-
-  /// 更新用户创建的章节内容
-  ///
-  /// 跨 novel_chapters 与 chapter_cache 两表更新，使用事务保证原子性：
-  /// 任一表更新失败则整体回滚，避免出现标题已改但内容未改的不一致状态。
-  @override
-  Future<void> updateCustomChapter(
-      String chapterUrl, String title, String content) async {
-    final db = await database;
-
-    await db.transaction((txn) async {
-      await txn.update(
-        'novel_chapters',
-        {'title': title},
-        where: 'chapterUrl = ?',
-        whereArgs: [chapterUrl],
-      );
-
-      await txn.update(
-        'chapter_cache',
-        {
-          'content': content,
-          'cachedAt': DateTime.now().millisecondsSinceEpoch,
-        },
-        where: 'chapterUrl = ?',
-        whereArgs: [chapterUrl],
-      );
-    });
-
-    LoggerService.instance.i(
-      '更新自定义章节: $chapterUrl',
-      category: LogCategory.database,
-      tags: ['chapter', 'custom', 'update', 'success'],
-    );
-  }
 
   /// 将章节URL添加到内存缓存（LRU淘汰策略）
   ///
@@ -851,24 +827,7 @@ class ChapterRepository extends BaseRepository
           );
 
           // 重排必须在 delete 之后查，避免包含已删行
-          final chapters = await txn.query(
-            'novel_chapters',
-            columns: ['id'],
-            where: 'novelUrl = ?',
-            whereArgs: [novelUrl],
-            orderBy: 'chapterIndex ASC',
-          );
-
-          final batch = txn.batch();
-          for (var i = 0; i < chapters.length; i++) {
-            batch.update(
-              'novel_chapters',
-              {'chapterIndex': i},
-              where: 'id = ?',
-              whereArgs: [chapters[i]['id']],
-            );
-          }
-          await batch.commit(noResult: true);
+          await _reindexChapters(txn, novelUrl);
         });
 
         _removeFromMemoryCache(chapterUrl);

@@ -177,26 +177,23 @@ class _ContextLine extends ConsumerWidget {
     final colors = context.appColors;
     if (isWebview) {
       final url = ref.watch(webviewCurrentUrlProvider);
-      return InkWell(
-        onTap: () {},
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Row(children: [
-            Icon(AgentIcons.link, size: 12, color: colors.chatButtonPrimary),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Text(
-                url.isEmpty ? '当前无页面' : url,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: colors.inkSoft,
-                    fontFamily: 'JetBrainsMono'),
-              ),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          Icon(AgentIcons.link, size: 12, color: colors.chatButtonPrimary),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              url.isEmpty ? '当前无页面' : url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: colors.inkSoft,
+                  fontFamily: 'JetBrainsMono'),
             ),
-          ]),
-        ),
+          ),
+        ]),
       );
     }
     final novel = chatState.currentNovel;

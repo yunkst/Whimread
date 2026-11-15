@@ -368,7 +368,6 @@ class _GroupSectionTile extends StatelessWidget {
                 onRename: (title) => onRenameBookmark(b.id, title),
                 onMove: (groupId) => onMoveBookmark(b.id, groupId),
                 allGroups: allGroups,
-                ungroupedSectionId: ungroupedSectionId,
               ))
           .toList(),
     );
@@ -464,7 +463,6 @@ class _BookmarkTile extends StatelessWidget {
   final void Function(String title) onRename;
   final void Function(String? groupId) onMove;
   final List<BookmarkGroup> allGroups;
-  final String ungroupedSectionId;
 
   const _BookmarkTile({
     required this.bookmark,
@@ -473,7 +471,6 @@ class _BookmarkTile extends StatelessWidget {
     required this.onRename,
     required this.onMove,
     required this.allGroups,
-    required this.ungroupedSectionId,
   });
 
   @override

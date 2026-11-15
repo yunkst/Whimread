@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番外生成逻辑全景 — Whimread「随心阅读」</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ================= 主题变量（晨读书馆 / 暗夜书馆） ================= */
+:root, [data-theme="light"] {
+  --page-bg: #F4EFE3;
+  --bg: #FFFDF8;
+  --paper: #F7F1E3;
+  --ink: #2B2620;
+  --ink-soft: #6B6358;
+  --accent: #8C5A1F;
+  --accent-2: #B8843A;
+  --chip-bg: rgba(184, 132, 58, .14);
+  --divider: #E5DDCC;
+  --card-shadow: 0 1px 3px rgba(43,38,32,.08), 0 8px 28px rgba(43,38,32,.10);
+  --ok: #5E7A3C; --ok-bg: #E0E8CF;
+  --err: #B23A2E; --err-bg: #F3DAD5;
+  --info: #4A4034; --info-bg: #E8E0D0;
+  --side: #7A5230; --side-bg: #EFE3D0;
+}
+[data-theme="dark"] {
+  --page-bg: #17130D;
+  --bg: #1C1812;
+  --paper: #241F16;
+  --ink: #E8DCC4;
+  --ink-soft: #B5A482;
+  --accent: #B8843A;
+  --accent-2: #D9A05B;
+  --chip-bg: rgba(217, 160, 91, .18);
+  --divider: #3A3128;
+  --card-shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.5);
+  --ok: #7A9A55; --ok-bg: #2A3A14;
+  --err: #D9685A; --err-bg: #4A1A14;
+  --info: #B0A282; --info-bg: #342D22;
+  --side: #D9A05B; --side-bg: #3A2E1C;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--page-bg); color: var(--ink);
+  line-height: 1.75; transition: background .35s, color .35s;
+}
+.serif { font-family: "Noto Serif SC", Georgia, "STSong", serif; }
+
+/* ================= 顶栏 ================= */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--divider);
+  padding: 13px 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.topbar h1 { font-size: 18px; font-weight: 700; }
+.topbar h1 small { font-weight: 400; color: var(--ink-soft); font-size: 12.5px; margin-left: 10px; }
+.topbar .spacer { flex: 1; }
+.nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.nav button {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink-soft);
+  padding: 4px 12px; border-radius: 999px; font-size: 12.5px; cursor: pointer; transition: all .15s;
+}
+.nav button:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle {
+  border: 1px solid var(--divider); background: var(--paper); color: var(--ink);
+  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ================= 布局 ================= */
+.wrap { max-width: 1080px; margin: 0 auto; padding: 36px 28px 90px; }
+.section { margin-bottom: 76px; scroll-margin-top: 90px; }
+.section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+.section-head .no {
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  border: 1.5px solid var(--accent); border-radius: 8px; padding: 1px 9px;
+  letter-spacing: 1px; flex-shrink: 0;
+}
+.section-head h2 { font-size: 23px; font-weight: 700; }
+.section-sub { color: var(--ink-soft); font-size: 14.5px; margin-bottom: 24px; max-width: 860px; }
+.card {
+  background: var(--bg); border: 1px solid var(--divider);
+  border-radius: 18px; box-shadow: var(--card-shadow); padding: 28px;
+  margin-bottom: 20px; transition: box-shadow .3s;
+}
+.card.flash { animation: flash 1.4s ease; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent-2), var(--card-shadow); } }
+
+h3.block-title {
+  font-size: 16px; color: var(--accent); margin: 0 0 14px; letter-spacing: .5px;
+  display: flex; align-items: center; gap: 8px;
+}
+p + p { margin-top: 10px; }
+b { color: var(--accent); }
+.lead { font-size: 15.5px; }
+.small { font-size: 13px; color: var(--ink-soft); }
+ul.list { padding-left: 20px; font-size: 14px; }
+ul.list li { margin-bottom: 8px; }
+ul.list li b { color: var(--ink); font-weight: 700; }
+
+/* ================= chip ================= */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--chip-bg); color: var(--accent);
+  font-size: 12px; font-weight: 600; border-radius: 999px;
+  padding: 2px 11px; border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  white-space: nowrap;
+}
+.chip.new { background: var(--ok-bg); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.chip.warn { background: var(--err-bg); color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+.chip.info { background: var(--info-bg); color: var(--info); border-color: var(--divider); }
+.chip.side { background: var(--side-bg); color: var(--side); border-color: color-mix(in srgb, var(--side) 35%, transparent); }
+
+code.inline {
+  font-family: Consolas, monospace; font-size: 12.5px; background: var(--paper);
+  border: 1px solid var(--divider); border-radius: 6px; padding: 1px 7px; color: var(--accent);
+}
+
+/* ================= 端到端流程条 ================= */
+.flow { display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap; overflow-x: auto; padding: 8px 0 4px; }
+.flow .step {
+  flex: 1; min-width: 132px; background: var(--paper); border: 1.5px solid var(--divider);
+  border-radius: 12px; padding: 12px 12px 10px; position: relative; margin-right: 26px;
+}
+.flow .step:last-child { margin-right: 0; }
+.flow .step::after {
+  content: "→"; position: absolute; right: -22px; top: 50%; transform: translateY(-50%);
+  color: var(--accent-2); font-weight: 700; font-size: 16px;
+}
+.flow .step:last-child::after { content: none; }
+.flow .step .t { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
+.flow .step .d { font-size: 11.5px; color: var(--ink-soft); line-height: 1.55; }
+.flow .step.hl { border-color: var(--accent-2); background: var(--chip-bg); }
+@media (max-width: 900px) { .flow { flex-direction: column; } .flow .step { margin-right: 0; margin-bottom: 10px; } .flow .step::after { content: "↓"; right: 50%; top: auto; bottom: -19px; transform: translateX(50%); } .flow .step:last-child::after { content: none; } }
+
+/* ================= 双入口对比 ================= */
+.vs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .vs-grid { grid-template-columns: 1fr; } }
+.vs-label {
+  text-align: center; font-weight: 700; font-size: 13.5px; margin-bottom: 10px;
+  padding: 6px; border-radius: 9px;
+}
+.vs-label.bad { background: var(--info-bg); color: var(--info); }
+.vs-label.good { background: var(--side-bg); color: var(--side); }
+
+/* ================= 对话模拟 ================= */
+.sim { background: var(--paper); border-radius: 14px; padding: 20px 22px; border: 1px solid var(--divider); }
+.msg { font-size: 13.5px; border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; max-width: 92%; }
+.msg.agent { background: var(--bg); border: 1px solid var(--divider); }
+.msg.user { background: var(--side-bg); border: 1px solid color-mix(in srgb, var(--side) 30%, transparent); margin-left: 8%; }
+.msg.tool { font-family: Consolas, monospace; font-size: 12.5px; color: var(--ink-soft); padding-left: 26px; position: relative; }
+.msg.tool::before { content: "⚙"; position: absolute; left: 8px; opacity: .7; }
+.msg.err { background: var(--err-bg); border-left: 3px solid var(--err); color: var(--err); }
+.msg.good { background: var(--ok-bg); border-left: 3px solid var(--ok); }
+.msg .lost { color: var(--err); font-weight: 700; }
+.msg .gain { color: var(--ok); font-weight: 700; }
+
+/* ================= 工具网格 ================= */
+.tool-domains { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.domain { background: var(--paper); border: 1px solid var(--divider); border-radius: 14px; padding: 14px 16px; }
+.domain h4 { font-size: 13.5px; color: var(--ink); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.domain .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.tchip {
+  font-size: 12px; font-family: Consolas, monospace; color: var(--ink-soft);
+  border: 1px dashed var(--divider); border-radius: 7px; padding: 2px 8px;
+}
+.tchip.w { color: var(--accent); border-style: solid; border-color: color-mix(in srgb, var(--accent-2) 40%, transparent); }
+.tchip.new { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); font-weight: 700; }
+
+/* ================= 时序步骤 ================= */
+.steps { display: flex; flex-direction: column; gap: 0; }
+.stp { display: flex; gap: 16px; }
+.stp-rail { display: flex; flex-direction: column; align-items: center; width: 34px; flex-shrink: 0; }
+.stp-dot {
+  width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--accent-2);
+  background: var(--bg); z-index: 1; margin-top: 2px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--accent);
+}
+.stp-line { width: 2px; flex: 1; background: var(--divider); min-height: 22px; }
+.stp-body { padding-bottom: 20px; flex: 1; }
+.stp-body h4 { font-size: 14.5px; margin-bottom: 4px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.stp-body .d { font-size: 13.5px; color: var(--ink-soft); }
+.stp-body .d code.inline { font-size: 12px; }
+
+/* ================= 挂载关系树 ================= */
+.tree { font-family: Consolas, monospace; font-size: 13px; line-height: 2.05; background: var(--paper); border: 1px solid var(--divider); border-radius: 14px; padding: 18px 22px; overflow-x: auto; }
+.tree .host { color: var(--ink); font-weight: 700; }
+.tree .anchor { color: var(--accent); font-weight: 700; }
+.tree .branch { color: var(--side); font-weight: 700; }
+.tree .leaf { color: var(--ink-soft); }
+.tree .note { font-family: "Noto Sans SC", sans-serif; font-size: 12px; color: var(--ink-soft); }
+
+/* ================= 数据表 ================= */
+table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.data th, table.data td {
+  border-bottom: 1px solid var(--divider); padding: 10px 12px; text-align: left; vertical-align: top;
+}
+table.data th { color: var(--accent); font-size: 12.5px; letter-spacing: 1px; }
+table.data td code.inline { font-size: 12px; }
+
+/* ================= 闸门链 ================= */
+.gates { display: flex; flex-direction: column; gap: 8px; }
+.gate {
+  display: flex; align-items: center; gap: 14px;
+  border: 1.5px solid var(--divider); border-radius: 12px; padding: 10px 16px;
+  background: var(--paper);
+}
+.gate .gname { width: 190px; flex-shrink: 0; font-weight: 700; font-size: 13.5px; font-family: Consolas, monospace; }
+.gate .gdesc { flex: 1; font-size: 13px; color: var(--ink-soft); }
+.gate .gres { margin-left: auto; }
+.gate.rej { border-left: 4px solid var(--err); }
+.gate.pass { border-left: 4px solid var(--ok); }
+.gate-arrow { text-align: center; color: var(--ink-soft); font-size: 13px; opacity: .65; padding: 0 0 0 6px; }
+
+/* ================= 提醒 ================= */
+.note {
+  border-left: 4px solid var(--accent-2); background: var(--chip-bg);
+  border-radius: 0 12px 12px 0; padding: 14px 18px; font-size: 13.5px; margin-top: 16px;
+}
+.note b { color: var(--accent); }
+</style>
+</head>
+<body data-theme="light">
+
+<div class="topbar">
+  <h1>番外生成逻辑全景<small>入口 → 主聊直接创作 → 落库 → 阅读 · 截至 2026-11-15 已实现行为（v2：并入主聊架构）</small></h1>
+  <div class="spacer"></div>
+  <div class="nav">
+    <button data-goto="s0">总览</button>
+    <button data-goto="s1">入口</button>
+    <button data-goto="s2">番外工具</button>
+    <button data-goto="s3">创作流程</button>
+    <button data-goto="s3b">上下文策略</button>
+    <button data-goto="s4">数据模型</button>
+    <button data-goto="s5">落库防线</button>
+    <button data-goto="s6">阅读与生命周期</button>
+  </div>
+  <button class="theme-toggle" id="themeBtn">🌙 暗夜书馆</button>
+</div>
+
+<div class="wrap">
+
+  <!-- ================= S0 总览 ================= -->
+  <div class="section" id="s0">
+    <div class="card">
+      <h3 class="block-title serif">一句话版本</h3>
+      <p class="lead">番外是一本<b>不入书架的迷你小说</b>：有自己的章节列表与完整阅读体验，挂载在某个锚点章之下，可无限递归。创作<b>直接发生在主聊天里</b>——主聊 Agent（34 工具全集）本就带着这本书的上下文（聊过的剧情、读过的章节、人物卡），用 <code class="inline">create_side_story</code> 定位番外写入目标、逐章「回复中写全文 + <code class="inline">save_side_story_chapter</code> 落库」即完成创作，落库前过五道防线。<b>工作小说全程保持宿主不变</b>：读/搜/人物卡天然指宿主（查证通道），写番外走显式工具（写通道），读写硬分离。</p>
+      <div class="note" style="margin-top:16px">
+        <b>端到端流程</b>：
+      </div>
+      <div class="flow" style="margin-top:12px">
+        <div class="step hl"><div class="t">① 发起</div><div class="d">番外弹层 / 主聊天一句话<br>（锚点章 = 当前阅读章）</div></div>
+        <div class="step"><div class="t">② 查证主线</div><div class="d">read / search / 人物卡<br>全部作用于宿主（不切换）</div></div>
+        <div class="step"><div class="t">③ 建番外</div><div class="d">create_side_story<br>幂等（锚点+需求查库复用）</div></div>
+        <div class="step"><div class="t">④ 逐章创作</div><div class="d">回复中写全文 1500~3000 字<br>→ save_side_story_chapter 落库</div></div>
+        <div class="step"><div class="t">⑤ 交付</div><div class="d">跳转卡 → 番外章节列表 / 阅读器<br>书架不可见，可再挂番外</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S1 入口 ================= -->
+  <div class="section card" id="s1">
+    <div class="section-head"><span class="no">01</span><h2>入口：两条路，一个目的地</h2></div>
+    <p class="section-sub">无论从哪里发起，最终都是主聊 Agent 在同一个对话流里用同一组番外工具完成创作。</p>
+
+    <div class="vs-grid">
+      <div>
+        <div class="vs-label bad">路径 A · 番外弹层（UI 表单）</div>
+        <div class="sim">
+          <div class="msg tool">阅读器顶栏「番外 N」角标 / 右上菜单「本章番外」</div>
+          <div class="msg tool">目录页章节行「番外 N」徽标 / 菜单「番外列表」</div>
+          <div class="msg agent">→ 本章（或小说级）番外列表页 → 底部「创建番外」</div>
+          <div class="msg agent">→ 弹层表单：锚点章只读展示 + <b>需求描述（必填）</b> + 期望章节数（可选）</div>
+          <div class="msg good">提交 → 打开主聊对话窗自动发送创作请求 → 逐章生成实时可见</div>
+        </div>
+        <p class="small" style="margin-top:10px">锚点章由入口天然确定；弹层提交时会把阅读上下文对齐到锚点章，Agent 的 create_side_story 自动定位。主聊有任务在跑时请求预填输入框不并发注入。</p>
+      </div>
+      <div>
+        <div class="vs-label good">路径 B · 主聊天一句话</div>
+        <div class="sim">
+          <div class="msg user">「给这一章写个番外，讲讲女主的童年」</div>
+          <div class="msg agent">主聊天 Agent 识别番外意图 → 先查证主线相关事实（读章/搜索/人物卡）</div>
+          <div class="msg tool">调用 create_side_story(title, requirement)</div>
+          <div class="msg good">直接在本对话逐章创作：写全文 → save_side_story_chapter × N</div>
+        </div>
+        <p class="small" style="margin-top:10px">锚点章 = 用户<b>当前正在阅读的章节</b>；非阅读态时 Agent 引导先打开目标章节，或按用户指定的章节序号传 <code class="inline">anchorChapterPosition</code>。对话历史不切换、上下文不丢失。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S2 番外工具 ================= -->
+  <div class="section card" id="s2">
+    <div class="section-head"><span class="no">02</span><h2>番外工具三件套：主聊里的读写分离</h2></div>
+    <p class="section-sub">番外创作并入主聊（writing 场景，34 工具全集）后，专用工具只剩三个，职责极窄：<b>一个定位写入目标、一个显式写番外、一个只读盘点</b>。其余全部复用主聊既有工具。</p>
+
+    <div class="tool-domains">
+      <div class="domain">
+        <h4>🔖 create_side_story <span class="chip side">幂等</span></h4>
+        <div class="tools" style="margin-top:6px"><span class="tchip">title</span><span class="tchip">requirement?</span><span class="tchip">anchorChapterPosition?</span></div>
+        <p class="small" style="margin-top:8px">建隐藏行（不入书架）。锚点自动取当前阅读章（在番外章节内阅读时 novelUrl 即父番外 → <b>递归免费</b>）；非阅读态可传当前小说章节序号。同锚点 + 同需求重复调用<b>幂等找回</b>已建番外——续写、进程重启恢复都靠它。</p>
+      </div>
+      <div class="domain">
+        <h4>✍️ save_side_story_chapter</h4>
+        <div class="tools" style="margin-top:6px"><span class="tchip">position</span><span class="tchip">title?</span><span class="tchip">content</span></div>
+        <p class="small" style="margin-top:8px">显式写番外命名空间（与 <code class="inline">save_chapter</code>=正篇 在命名上分开）。复用五道落库闸门；结果携带 <code class="inline">sideStoryChapterCount</code> 供 Agent 校准下一章 position。无写入目标时返回 no_side_story 引导先 create。</p>
+      </div>
+      <div class="domain">
+        <h4>📋 list_side_stories</h4>
+        <div class="tools" style="margin-top:6px"><span class="tchip">（无参数）</span></div>
+        <p class="small" style="margin-top:8px">只读盘点当前小说的全部番外（标题/章数/字数/锚点章/需求），供回答「有哪些番外」与避免重复创作。</p>
+      </div>
+    </div>
+
+    <div class="steps" style="margin-top:20px">
+      <div class="stp">
+        <div class="stp-rail"><div class="stp-dot">1</div><div class="stp-line"></div></div>
+        <div class="stp-body">
+          <h4>写入目标怎么跨回合保持（select_novel 同款机制）</h4>
+          <div class="d">create_side_story 成功 → 工具结果 JSON（sideStoryId/sideStoryUrl/sideStoryTitle）→ 会话监听 <code class="inline">ToolCallEndEvent</code> 解析并记录写入目标 → 之后每轮构造上下文自动注入，<code class="inline">save_side_story_chapter</code> 据此落库。进程重启丢内存态后，Agent 重调 create（幂等查库）自动找回，<b>不丢不重</b>。</div>
+        </div>
+      </div>
+      <div class="stp">
+        <div class="stp-rail"><div class="stp-dot">2</div><div class="stp-line"></div></div>
+        <div class="stp-body">
+          <h4>为什么 currentNovel 不切换</h4>
+          <div class="d">主聊的一致性约定是「工具作用于当前小说」——保持宿主不变，read/search/list_chapters/list_characters 天然就是查证通道；番外写入走显式工具（save_side_story_chapter 内部自己构造指向番外的上下文），两个通道<b>硬分离</b>，Agent 无需在两本书之间来回切换。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>v1 → v2 架构变更说明</b>：此前番外由独立 side_story 场景（专用锁定工具面）+ 跨场景移交（start_side_story → 换会话干净开始）完成。v2 按用户判断「番外作为全新上下文不合理，应让主 Agent 直接写」重构：删除独立场景与移交机制，主聊上下文（聊过的剧情、读过的章节）全程复用，实现面净简化。存量 side_story 会话按 writing 场景兼容构建，可继续对话。
+    </div>
+  </div>
+
+  <!-- ================= S3 创作流程 ================= -->
+  <div class="section" id="s3">
+    <div class="section-head"><span class="no">03</span><h2>创作流程：主聊内一章一轮（系统提示词强约定）</h2></div>
+    <p class="section-sub">番外并入主聊后，Agent 用主聊全量工具创作——查证用宿主通道，写入用番外工具，一章一轮。整个流程发生在用户的既有对话流里，上下文不切换。</p>
+
+    <div class="card">
+      <div class="steps">
+        <div class="stp">
+          <div class="stp-rail"><div class="stp-dot">1</div><div class="stp-line"></div></div>
+          <div class="stp-body">
+            <h4>查证主线相关事实 <span class="chip new">防创作歪的关键步骤</span></h4>
+            <div class="d">涉及人物在锚点章之外有戏份 → <code class="inline">read_chapter_content(position)</code> 读相关章节或锚点前后相邻章；具体事实（口癖/旧伤/关系变化/道具/时间点）→ <code class="inline">search_in_chapters</code> 按关键词查证；人物卡 → <code class="inline">list_characters</code>；写作技巧 → <code class="inline">list_prompt_tags</code> / <code class="inline">get_prompt_tag</code>。<b>凡引用主线既有事实，先查证再落笔。</b>这些工具全部作用于宿主——currentNovel 不切换，查证零成本。</div>
+          </div>
+        </div>
+        <div class="stp">
+          <div class="stp-rail"><div class="stp-dot">2</div><div class="stp-line"></div></div>
+          <div class="stp-body">
+            <h4>建番外 <span class="chip side">幂等</span></h4>
+            <div class="d"><code class="inline">create_side_story(title, requirement)</code>：锚点自动取用户当前阅读章；同锚点 + 同需求重复调用幂等找回已建番外（续写/重启恢复都靠它，绝不重复建）。标题像作品名（4~10 字）。requirement 忠实转述用户需求——它同时是番外描述与幂等键。</div>
+          </div>
+        </div>
+        <div class="stp">
+          <div class="stp-rail"><div class="stp-dot">3</div><div class="stp-line"></div></div>
+          <div class="stp-body">
+            <h4>逐章创作（一章一轮）</h4>
+            <div class="d">在<b>回复中直接写出该章完整正文</b>（1500~3000 字），写完立即 <code class="inline">save_side_story_chapter(position, title, content)</code>，content 与回复正文<b>逐字一致</b>。position 从 1 连续递增，用结果里的 <code class="inline">sideStoryChapterCount</code> 校准下一章；一轮只写一章、保存一章。人物细节前后一致，章尾留推进感。</div>
+          </div>
+        </div>
+        <div class="stp">
+          <div class="stp-rail"><div class="stp-dot">4</div><div class="stp-line"></div></div>
+          <div class="stp-body">
+            <h4>收尾总结</h4>
+            <div class="d">全部保存后输出简短总结（番外名/章数/各章一句话简介），不再调工具——流程结束，对话窗出现「查看番外」「查看新保存的番外章节」跳转卡。</div>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        <b>为什么「正文写在回复里」</b>：这是 2026-11-14 的架构重构（save_chapter 取代旧 create_chapter 的独立 LLM 调用）。旧方案只靠一句 instruction 传上下文——细节错乱的根源。现在正文与锚点章、人物卡、聊过的剧情、已写章节共享同一份主聊上下文，一致性由会话记忆保证。
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= S3b 上下文管理策略 ================= -->
+  <div class="section card" id="s3b">
+    <div class="section-head"><span class="no">04</span><h2>Agent 上下文管理策略</h2></div>
+    <p class="section-sub">Agent 能写对的前提是「看得见」。上下文分五层来源，各自的生命周期与管理方式不同——番外创作的正确性取决于第 3 层的查证纪律与读写分离。</p>
+
+    <h3 class="block-title serif">五层上下文来源（全场景通用）</h3>
+    <table class="data">
+      <tr><th>层</th><th>内容</th><th>生命周期</th></tr>
+      <tr>
+        <td><b>① system prompt</b></td>
+        <td>场景身份 + 工作流程 + 硬性规则（主聊另有番外指引：意图识别 → 查证 → create → 逐章 save_side_story_chapter）</td>
+        <td>每次会话静态注入，永不压缩</td>
+      </tr>
+      <tr>
+        <td><b>② user 前缀注入</b></td>
+        <td>每条用户消息头部自动携带：正在阅读《》· 章节 / 当前工作小说（阅读器实时状态）</td>
+        <td>随消息持久保留</td>
+      </tr>
+      <tr>
+        <td><b>③ 工具拉取</b></td>
+        <td>读章节正文 / 全文搜索 / 人物卡 / 大纲 / 已写章节——<b>Agent 主动决定看什么</b>，结果进会话历史</td>
+        <td>会话内保留，受压缩器管理</td>
+      </tr>
+      <tr>
+        <td><b>④ 经验记忆</b></td>
+        <td>agent_memories 表：跨会话沉淀的写作经验</td>
+        <td>持久，每次会话注入</td>
+      </tr>
+      <tr>
+        <td><b>⑤ 上下文压缩器</b></td>
+        <td>超出阈值后的自动瘦身（详见下）</td>
+        <td>按需触发</td>
+      </tr>
+    </table>
+
+    <h3 class="block-title serif" style="margin-top:22px">番外创作期间，上下文发生什么（不换会话）</h3>
+    <p class="section-sub">用户在主聊天里说「给这一章写个番外」——<b>不再切换会话、不再丢历史</b>。变化只有一处：会话里多了一个「番外写入目标」。</p>
+
+    <table class="data">
+      <tr><th>时机</th><th>上下文变化</th></tr>
+      <tr><td>创作开始前</td><td>无变化——主聊已有的对话历史（聊过的剧情、此前的问答）全部在场，这正是主聊创作上下文更充实的来源</td></tr>
+      <tr><td>create_side_story 成功</td><td>会话记录「番外写入目标」（番外 id/url/标题，仿 select_novel 的状态接线）；此后每轮上下文自动携带。currentNovel <b>保持宿主</b>——读/搜/人物卡全部继续指宿主</td></tr>
+      <tr><td>逐章创作中</td><td>每章：Agent 回复（全文）→ save_side_story_chapter 工具结果（元信息）→ 追加进会话历史；已写章节自然留在上下文里，前后衔接靠会话记忆</td></tr>
+      <tr><td>进程重启 / 长会话压缩</td><td>若写入目标丢失，Agent 下次 save 收到 no_side_story → 重调 create_side_story → <b>幂等查库找回</b>（锚点+需求），不产生重复番外</td></tr>
+      <tr><td>创作结束后</td><td>写入目标保留在会话中（用户说「番外再加一章」可直接续写）；主聊继续正常问答/改文，save_chapter 照旧写正篇——两把钥匙各开各的门</td></tr>
+    </table>
+
+    <h3 class="block-title serif" style="margin-top:22px">上下文压缩器（长会话的瘦身机制）</h3>
+    <table class="data">
+      <tr><th>机制</th><th>行为</th></tr>
+      <tr><td>触发（双轨取先）</td><td>上一轮真实 prompt tokens &gt; 100K（128K 窗口留 28K 余量）；或字符估算 &gt; 500K</td></tr>
+      <tr><td>P1 预剪枝</td><td>&gt;200 字符的重复工具结果去重；&gt;500 字符的<b>老工具结果改写为一行摘要</b></td></tr>
+      <tr><td>尾部保护</td><td>最近 <b>6 条</b>工具结果（≈3 轮调用）保留原文；尾部 100K 字符整体保留</td></tr>
+      <tr><td>压缩执行</td><td>按切点丢弃 + 消息索引平移重建，压缩比可观测</td></tr>
+    </table>
+
+    <div class="note">
+      <b>对创作的含义（诚实标注）</b>：压缩器意味着「早前读过的章节正文」在长回合中可能被压成一行——所以系统提示词要求的是<b>查证纪律</b>（写涉及主线事实前先 read/search，而不是依赖会话早段的记忆）。一本番外通常 1~5 章，实际很少触发压缩。尚未做的前情摘要提取（对长篇自动生成每章摘要供低成本回看）是已评估的后续改进项。
+    </div>
+
+    <h3 class="block-title serif" style="margin-top:26px">命名空间隔离核对表：番外 vs 正篇，会不会读错？</h3>
+    <p class="section-sub">「读错命名空间」是番外体系最致命的故障模式。逐通道核对代码实现——每个工具的上下文来源、最终指向、以及靠什么机制保证不串：</p>
+
+    <table class="data">
+      <tr><th>通道</th><th>上下文来源</th><th>指向</th><th>隔离机制</th></tr>
+      <tr><td>read / search / list_chapters / list_characters（主聊，创作番外全程）</td><td>currentNovelId（保持宿主不变）</td><td>宿主（查证通道）</td><td>create_side_story <b>不切换工作小说</b>——查证通道零成本且永不指错</td></tr>
+      <tr><td><code class="inline">create_side_story</code></td><td>ReadingContext（当前阅读章）或 anchorChapterPosition</td><td>建番外隐藏行</td><td>幂等查库（锚点+需求）；递归锚点=父番外 URL</td></tr>
+      <tr><td><code class="inline">save_side_story_chapter</code></td><td>ctx.sideStoryWritingTarget（会话记录的番外 id）</td><td>番外命名空间</td><td>显式目标 + saveChapter 五道闸门；无目标 → no_side_story 安全失败，绝不触碰宿主</td></tr>
+      <tr><td><code class="inline">save_chapter</code> / update / rewrite / delete</td><td>currentNovelId（宿主）</td><td>正篇命名空间</td><td>番外在所有小说列表被 <code class="inline">isSideStory=0</code> 过滤、select 不到——正篇写工具永远够不到番外</td></tr>
+    </table>
+
+    <div class="note">
+      <b>核对结论（v2 架构复核）</b>：番外三工具 + 主聊全部通道逐一过——<b>不存在「番外读到正篇、正篇读到番外」的路径</b>。写入隔离靠「显式目标」：save_side_story_chapter 没有目标时只会安全失败（no_side_story），save_chapter 系工具经 currentNovel 只触达正篇（番外不可 select）——两个方向都无静默错。
+    </div>
+    <div class="note">
+      <b>诚实标注遗留点</b>：① save_side_story_chapter 的 position（番内序号）与 read 的 position（宿主序号）同名不同义——schema 已显式澄清，仍是认知负担；② 暂无「读番外自己已保存章节」的工具（正文在回复历史里，通常够用；极端场景可用 list_side_stories 看章数）；③ 主聊无「打开旧番外继续改」的直达工具——通过重新 create_side_story（同锚点同需求幂等找回）续写。
+    </div>
+  </div>
+
+  <!-- ================= S4 数据模型 ================= -->
+  <div class="section card" id="s4">
+    <div class="section-head"><span class="no">05</span><h2>数据模型：一条隐藏行，两个命名空间</h2></div>
+    <p class="section-sub">番外不建独立表体系——它就是一条 <code class="inline">bookshelf</code> 隐藏行 + 该行 novelUrl 命名空间下的普通章节行。章节列表页、阅读器、版本历史、备份全部零改动复用。</p>
+
+    <div class="tree">
+<span class="host">宿主小说《搭讪就有奖，加满5000个好友》</span> <span class="note">bookshelf 行（isSideStory=0，书架可见）</span><br>
+├─ 第 1 章 …… <span class="leaf">novel_chapters（宿主命名空间）</span><br>
+├─ …<br>
+├─ <span class="anchor">第 200 章 女主与闺蜜重逢</span> <span class="note">← 锚点章</span><br>
+│   └─ <span class="branch">番外《闺蜜往事》</span> <span class="note">bookshelf 行（isSideStory=1，书架过滤不可见）</span><br>
+│       ├─ URL: <span class="leaf">custom://sidestory/&lt;微秒时间戳&gt;</span><br>
+│       ├─ anchorNovelUrl → 宿主 URL　anchorChapterUrl → 锚点章 URL<br>
+│       ├─ description = 用户需求（幂等查库依据 + 列表页展示）<br>
+│       ├─ 第 1 章 初遇 …… <span class="leaf">novel_chapters（番外命名空间）</span><br>
+│       ├─ 第 2 章 分离 ……<br>
+│       │   └─ <span class="branch">番外《分离之后》</span> <span class="note">← 番外再挂番外（递归，层数不限）</span><br>
+</div>
+
+    <table class="data" style="margin-top:18px">
+      <tr><th>字段</th><th>语义</th></tr>
+      <tr><td><code class="inline">isSideStory = 1</code></td><td>隐藏标记：书架三类查询、全库小说列表、来源域查询统一加 <code class="inline">isSideStory = 0</code> 过滤——番外对书架完全隐身，但备份/恢复自然携带</td></tr>
+      <tr><td><code class="inline">anchorNovelUrl</code></td><td>宿主小说（主线或<b>父番外</b>）的 URL——递归因此免费获得</td></tr>
+      <tr><td><code class="inline">anchorChapterUrl</code></td><td>锚点章 URL；锚点章被删除/重排后番外保留，列表显示「原章节已移除」（不做静默删除）</td></tr>
+      <tr><td><code class="inline">description</code></td><td>用户需求原文——既是列表页展示，也是 create_side_story 幂等查库的依据</td></tr>
+      <tr><td><code class="inline">custom://sidestory/&lt;ts&gt;</code></td><td>URL 用微秒时间戳 + 探测去重（撞 UNIQUE 约束时追加 <code class="inline">_N</code> 后缀重试）</td></tr>
+    </table>
+
+    <div class="note">
+      <b>已读进度 / 继续阅读</b>：复用 novel_chapters.readAt + bookshelf.lastReadChapter（按番外自身 novelUrl），零额外开发。
+    </div>
+  </div>
+
+  <!-- ================= S5 落库防线 ================= -->
+  <div class="section card" id="s5">
+    <div class="section-head"><span class="no">06</span><h2>落库防线：save_side_story_chapter 的五道闸门</h2></div>
+    <p class="section-sub">save_side_story_chapter 是哑工具——不生成任何内容，只校验与落库（内部完全复用 save_chapter 的校验链）。所有垃圾内容在写进数据库前被拦下，拦截时返回<b>引导错误</b>（错误码 + 怎么改），模型一轮自纠。</p>
+
+    <div class="gates">
+      <div class="gate rej">
+        <span class="gname">① position_out_of_range</span>
+        <span class="gdesc">position 必须 ≤ 番外现有章节数 + 1；越界时引导先确认已保存章数</span>
+        <span class="gres chip warn">拒写</span>
+      </div>
+      <div class="gate pass">
+        <span class="gname">② 转义还原</span>
+        <span class="gdesc">unescapeJsonEscapeSequences：模型透传的字面 \n / \" 序列还原为真字符（防「字面转义落进正文」）</span>
+        <span class="gres chip info">清洗</span>
+      </div>
+      <div class="gate rej">
+        <span class="gname">③ JSON 污染检测 <span class="chip new">2026-11-15</span></span>
+        <span class="gdesc">detectJsonContamination 四规则：整体即 JSON / 围栏 JSON / 独立行工具回声 / <b>值内嵌键值对</b>（反馈 #16 实际故障形态）——命中即拒写，正文必须是纯文本散文</span>
+        <span class="gres chip warn">拒写</span>
+      </div>
+      <div class="gate pass">
+        <span class="gname">④ markdown 净化</span>
+        <span class="gdesc">ContentSanitizer：剥 ``` 围栏、**粗体**、# 标题、> 引用等标记，保文字——阅读器里永远看不到原始符号</span>
+        <span class="gres chip info">清洗</span>
+      </div>
+      <div class="gate rej">
+        <span class="gname">⑤ content_too_short</span>
+        <span class="gdesc">低于 300 字 = 回复被截断或偷懒，拒保存并引导完整重写（正常章节 1500~3000 字）</span>
+        <span class="gres chip warn">拒写</span>
+      </div>
+      <div class="gate-arrow">⬇ 全部通过 ⬇</div>
+      <div class="gate pass">
+        <span class="gname">ChapterMutation.createChapter</span>
+        <span class="gdesc">单事务 shift+insert 落库进番外命名空间（原有章节自动后移）+ 信号广播；返回 chapterUrl 驱动「查看新保存的番外章节」跳转卡</span>
+        <span class="gres chip new">入库</span>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>同一防线覆盖三个写入通道</b>：save_chapter（正篇新建）、save_side_story_chapter（番外新建）、update_chapter_content（正篇局部替换——检测只查模型增量 newString，<b>oldString 与全文绝不检测</b>，否则历史污染永远修不掉）。规则来自真实故障样本（反馈 #16 的 LLM 调用日志），误伤防线有专项测试：正常对话、程序员题材内嵌 {"a":1}、```text 围栏散文全部放行。
+    </div>
+  </div>
+
+  <!-- ================= S6 阅读与生命周期 ================= -->
+  <div class="section card" id="s6">
+    <div class="section-head"><span class="no">07</span><h2>阅读体验与生命周期</h2></div>
+
+    <h3 class="block-title serif">入口矩阵（生成后怎么找回来）</h3>
+    <table class="data">
+      <tr><th>位置</th><th>入口</th><th>去向</th></tr>
+      <tr><td>阅读器顶栏</td><td>「番外 N」角标（当前章有番外时显示）</td><td>本章番外列表</td></tr>
+      <tr><td>阅读器右上菜单</td><td>「本章番外」</td><td>本章番外列表（空态引导创建）</td></tr>
+      <tr><td>目录页章节行</td><td>「番外 N」徽标（点徽标不进阅读）</td><td>本章番外列表</td></tr>
+      <tr><td>目录页菜单</td><td>「番外列表」</td><td>小说级总列表（全部番外）</td></tr>
+      <tr><td>番外章节列表页</td><td>AppBar 标注「番外 · 挂载于第X章」+ 返回主线</td><td>逐章阅读 / 再挂番外（递归）</td></tr>
+      <tr><td>对话窗</td><td>跳转卡「查看番外 / 查看新保存的番外章节」</td><td>番外章节列表 / 阅读器</td></tr>
+      <tr><td>主聊天</td><td>说「继续写《XX》番外」→ Agent create_side_story 幂等找回续写</td><td>对话流内继续创作</td></tr>
+    </table>
+
+    <h3 class="block-title serif" style="margin-top:22px">删除与级联</h3>
+    <ul class="list">
+      <li><b>删除单个番外</b>：列表页长按/菜单 → 确认框 → 单事务删除番外行 + 其命名空间下全部章节/缓存/版本/标注</li>
+      <li><b>删除主线小说</b>：级联删除其全部番外（含番外的番外——递归收集 anchorNovelUrl 链，环路安全）</li>
+      <li><b>锚点章被删/重排</b>：番外保留，锚点显示「原章节已移除」</li>
+      <li><b>备份/恢复</b>：番外随 bookshelf/chapter 表自然进出备份</li>
+    </ul>
+
+    <div class="note">
+      <b>已知改进项（待办）</b>：① 对既有长篇做<b>前情摘要提取</b>（每章自动摘要供低成本回看，替代「Agent 自选章节去读」）；② <b>B 修复</b>：thinking 模型的 reasoning_content 回传（每轮 3 次 400 重试 + 退避，影响所有 AI 写作耗时）——已定位待实施。
+    </div>
+  </div>
+
+  <p class="small" style="text-align:center; margin-top:-30px">
+    依据实现代码梳理：side_story_executor.dart（番外三工具）· writing_scenario.dart（番外指引）·
+    chapter_write_executor.dart（五道闸门）· side_story_repository.dart（隐藏行）·
+    scenario_session_chain.dart（写入目标状态接线）· side_story_create_sheet.dart（弹层入口）
+    　·　v2（并入主聊架构）· 生成于 2026-11-15
+  </p>
+</div>
+
+<script>
+// 主题切换
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => {
+  const body = document.body;
+  const dark = body.getAttribute('data-theme') === 'dark';
+  body.setAttribute('data-theme', dark ? 'light' : 'dark');
+  themeBtn.textContent = dark ? '🌙 暗夜书馆' : '☀️ 晨读书馆';
+});
+// 锚点跳转 + 高亮
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-goto]');
+  if (!el) return;
+  const target = document.getElementById(el.getAttribute('data-goto'));
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  target.classList.remove('flash'); void target.offsetWidth;
+  target.classList.add('flash');
+});
+</script>
+</body>
+</html>

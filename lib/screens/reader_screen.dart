@@ -224,6 +224,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           novelTitle: widget.novel.title,
           chapterTitle: widget.chapter.title,
           novelUrl: widget.novel.url,
+          chapterUrl: widget.chapter.url,
         );
       }
     });
@@ -457,6 +458,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       novelTitle: widget.novel.title,
       chapterTitle: targetChapter.title,
       novelUrl: widget.novel.url,
+      chapterUrl: targetChapter.url,
     );
 
     // 加载新章节内容
@@ -575,11 +577,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         break;
       case 'theme_mode':
         _showThemeModeDialog();
-        break;
-      case 'font_size':
-      case 'scroll_speed':
-        // 兼容旧菜单项，统一跳转合并的阅读设置对话框
-        _showReaderSettingsDialog();
         break;
       case 'refresh':
         _refreshChapter();
@@ -1509,6 +1506,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       novelTitle: widget.novel.title,
       chapterTitle: chapter.title,
       novelUrl: widget.novel.url,
+      chapterUrl: chapter.url,
     );
 
     // 同步全局内容状态到新当前章（快照/编辑保存/改写场景依赖三者一致）。

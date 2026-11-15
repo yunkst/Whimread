@@ -31,7 +31,8 @@ abstract class IChapterVersionRepository {
   ///
   /// [novelUrl] 小说URL
   /// 返回受影响行数
-  Future<int> deleteVersionsByNovel(String novelUrl);
+  Future<int> deleteVersionsByNovel(String novelUrl,
+      {DatabaseExecutor? executor});
 
   /// 淘汰最老版本，使版本数不超过 [maxCount]
   ///

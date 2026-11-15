@@ -114,11 +114,6 @@ class ChapterContentStateNotifier extends _$ChapterContentStateNotifier {
     state = state.copyWith(content: '');
   }
 
-  /// 清空所有状态
-  void clear() {
-    state = const ChapterContentState();
-  }
-
   /// 更新内容（用于改写等场景）
   void updateContent(String newContent) {
     state = state.copyWith(content: newContent);

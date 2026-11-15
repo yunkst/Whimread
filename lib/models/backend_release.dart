@@ -7,7 +7,6 @@
 class BackendRelease {
   final String version;
   final int versionCode;
-  final String channel;
   final String changelog;
   final String publishedAt;
   final List<BackendReleaseFile> files;
@@ -15,7 +14,6 @@ class BackendRelease {
   BackendRelease({
     required this.version,
     required this.versionCode,
-    required this.channel,
     required this.changelog,
     required this.publishedAt,
     required this.files,
@@ -25,7 +23,6 @@ class BackendRelease {
     return BackendRelease(
       version: json['version'] as String? ?? '',
       versionCode: json['version_code'] as int? ?? 0,
-      channel: json['channel'] as String? ?? 'stable',
       changelog: json['changelog'] as String? ?? '',
       publishedAt: json['published_at'] as String? ?? '',
       files: (json['files'] as List<dynamic>?)

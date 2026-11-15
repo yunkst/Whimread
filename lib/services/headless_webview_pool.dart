@@ -62,7 +62,7 @@ class HeadlessWebViewPool {
   /// 排他等待超时：避免某个调用方忘记 release 导致后续调用方永久阻塞。
   static const Duration _acquireWaitTimeout = Duration(seconds: 30);
 
-  /// 是否已就绪
+  /// 是否已就绪（生产无消费方；供行为测试断言池状态）
   bool get isReady => _controller != null;
 
   /// 获取一个 Headless WebView controller（排他占用，直到 [release]）。
@@ -142,10 +142,10 @@ class HeadlessWebViewPool {
     );
   }
 
-  /// 当前引用计数
+  /// 当前引用计数（生产无消费方；供行为测试断言）
   int get refCount => _refCount;
 
-  /// controller 是否正被占用
+  /// controller 是否正被占用（生产无消费方；供行为测试断言）
   bool get isInUse => _isInUse;
 
   /// 销毁（理论上不需要，由 Riverpod 生命周期管理）

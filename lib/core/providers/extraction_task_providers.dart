@@ -17,10 +17,13 @@
 ///   ↓
 /// 读取 extractionTaskNotifierProvider（通过 ref.read 获取 notifier）
 ///   ↓
-/// 更新状态（setState）
+/// 更新状态（start/setPhase/toolStart/toolEnd）
 ///   ↓
 /// 任意页面 ref.watch(extractionTaskProvider) 收到通知
 /// ```
+///
+/// **注意**：订阅入口与写入侧均已就绪，但目前尚无 UI 页面实际
+/// watch [extractionTaskProvider]（进度条 UI 待接入）。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,12 +41,6 @@ enum ExtractionPhase {
 
   /// 正在保存脚本（save_script）
   saving,
-
-  /// 任务完成
-  done,
-
-  /// 任务错误
-  error,
 }
 
 /// 提取任务状态
@@ -57,43 +54,24 @@ class ExtractionTaskState {
   /// 当前正在执行的工具名
   final String? currentTool;
 
-  /// 累计执行轮数
-  final int roundCount;
-
-  /// 错误信息（phase=error 时）
-  final String? error;
-
   /// 任务开始时间
   final DateTime? startedAt;
-
-  /// 任务完成时间
-  final DateTime? completedAt;
 
   const ExtractionTaskState({
     this.phase = ExtractionPhase.idle,
     this.domain,
     this.currentTool,
-    this.roundCount = 0,
-    this.error,
     this.startedAt,
-    this.completedAt,
   });
 
   /// 是否正在进行中
-  bool get isRunning =>
-      phase != ExtractionPhase.idle &&
-      phase != ExtractionPhase.done &&
-      phase != ExtractionPhase.error;
+  bool get isRunning => phase != ExtractionPhase.idle;
 
   ExtractionTaskState copyWith({
     ExtractionPhase? phase,
     String? domain,
     String? currentTool,
-    int? roundCount,
-    String? error,
     DateTime? startedAt,
-    DateTime? completedAt,
-    bool clearError = false,
     bool clearDomain = false,
     bool clearCurrentTool = false,
   }) {
@@ -101,10 +79,7 @@ class ExtractionTaskState {
       phase: phase ?? this.phase,
       domain: clearDomain ? null : (domain ?? this.domain),
       currentTool: clearCurrentTool ? null : (currentTool ?? this.currentTool),
-      roundCount: roundCount ?? this.roundCount,
-      error: clearError ? null : (error ?? this.error),
       startedAt: startedAt ?? this.startedAt,
-      completedAt: completedAt ?? this.completedAt,
     );
   }
 }
@@ -148,35 +123,6 @@ class ExtractionTaskNotifier extends StateNotifier<ExtractionTaskState> {
     state = state.copyWith(
       clearCurrentTool: true,
     );
-  }
-
-  /// 增加轮数
-  void incrementRound() {
-    state = state.copyWith(roundCount: state.roundCount + 1);
-  }
-
-  /// 任务完成
-  void complete() {
-    state = state.copyWith(
-      phase: ExtractionPhase.done,
-      completedAt: DateTime.now(),
-      clearCurrentTool: true,
-    );
-  }
-
-  /// 任务错误
-  void fail(String error) {
-    state = state.copyWith(
-      phase: ExtractionPhase.error,
-      error: error,
-      completedAt: DateTime.now(),
-      clearCurrentTool: true,
-    );
-  }
-
-  /// 重置（清除）
-  void reset() {
-    state = const ExtractionTaskState();
   }
 }
 

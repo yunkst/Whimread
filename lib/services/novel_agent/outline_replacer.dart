@@ -21,7 +21,7 @@ typedef Replacer = Iterable<String> Function(String content, String find);
 /// `\"` → 引号, `\'` → 单引号, `` \` `` → 反引号, `\\` → 反斜杠, `\$` → 美元符号。
 /// 反斜杠后跟其它字符（含字面换行/制表符等）保持原文不变。
 ///
-/// 用法:章节写入工具（update_chapter_content / create_chapter 等）拿到 LLM
+/// 用法:章节写入工具（update_chapter_content / save_chapter 等）拿到 LLM
 /// 传来的 newString / oldString 后调一次,把字面 `\n` / `\"` 等还原成真字符,
 /// 避免被污染的转义序列落进正文存储（反馈 id=4 「json 混入原文」）。
 ///

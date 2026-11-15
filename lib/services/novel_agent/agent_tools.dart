@@ -64,6 +64,10 @@ class AgentTools {
     _dispatchSubagent,
     // ===== 用户交互 =====
     _askUser,
+    // ===== 番外创作（主聊直接创作）=====
+    _createSideStory,
+    _saveSideStoryChapter,
+    _listSideStories,
   ];
 
   /// 查找工具定义（带日志）
@@ -173,14 +177,22 @@ class AgentTools {
       'name': 'read_chapter_content',
       'description':
           '读取指定章节的完整正文内容。修改章节前应先调用此工具了解当前内容。'
-          'position 来自 list_chapters 返回的 position 字段（1-based 顺序号）。',
+          'position 来自 list_chapters 返回的 position 字段（1-based 顺序号）。'
+          '默认读当前小说；传 sideStoryId 则读对应番外的第 position 章'
+          '（position 按番外内章节序，来自 list_chapters(sideStoryId)）。',
       'parameters': {
         'type': 'object',
         'properties': {
           'position': {
             'type': 'integer',
             'description':
-                '章节在当前小说列表中的位置（1-based）。如不确定，请先调用 list_chapters。',
+                '章节在目标小说（或番外）列表中的位置（1-based）。如不确定，请先调用 list_chapters。',
+          },
+          'sideStoryId': {
+            'type': 'integer',
+            'description':
+                '可选。番外 ID（来自 list_side_stories / create_side_story）。'
+                '传入后读取该番外的章节；不传则读当前小说。',
           },
         },
         'required': ['position'],
@@ -193,11 +205,20 @@ class AgentTools {
     'function': {
       'name': 'list_chapters',
       'description':
-          '列出当前小说的所有章节目录。返回的每个章节包含 position（1-based 顺序号）、'
-          'title、chapterIndex 和 isCached。position 是其他章节操作工具的必填参数。',
+          '列出章节目录。默认列当前小说；传 sideStoryId 则列出对应番外的章节目录。'
+          '返回的每个章节包含 position（1-based 顺序号）、title、chapterIndex 和 '
+          'isCached。position 是其他章节操作工具的必填参数（对番外同样适用：'
+          'read/update_chapter_content 传同一 sideStoryId 即按番外内 position 定位）。',
       'parameters': {
         'type': 'object',
-        'properties': <String, dynamic>{},
+        'properties': <String, dynamic>{
+          'sideStoryId': {
+            'type': 'integer',
+            'description':
+                '可选。番外 ID（来自 list_side_stories / create_side_story）。'
+                '传入后列出该番外的章节；不传则列当前小说。',
+          },
+        },
         'required': <String>[],
       },
     },
@@ -305,13 +326,16 @@ class AgentTools {
           '- oldString 找不到 → not_found。请用 read_chapter_content 返回的原文逐字复制。\n'
           '- oldString 多处且未设 replaceAll=true → ambiguous_match。请补更多上下文行让匹配唯一，或设 replaceAll=true。\n'
           '- 章节未缓存 → not_cached。\n'
-          '大范围重写、风格转换、结构调整请改用 rewrite_chapter。',
+          '- sideStoryId 不存在或不属于当前小说 → side_story_not_found。用 list_side_stories 获取合法 ID。\n'
+          '默认改当前小说；传 sideStoryId 则 patch 对应番外的章节（调整番外内容的推荐路径：'
+          'list_chapters(sideStoryId) → read_chapter_content(position, sideStoryId) 核对 → 本工具打补丁）。'
+          '大范围重写、风格转换、结构调整请改用 rewrite_chapter（仅限当前小说）。',
       'parameters': {
         'type': 'object',
         'properties': {
           'position': {
             'type': 'integer',
-            'description': '章节在当前小说列表中的位置（1-based，从 list_chapters 获取）。',
+            'description': '章节在目标小说（或番外）列表中的位置（1-based，从 list_chapters 获取）。',
           },
           'oldString': {
             'type': 'string',
@@ -327,6 +351,12 @@ class AgentTools {
           'replaceAll': {
             'type': 'boolean',
             'description': '是否替换所有匹配（默认 false）。',
+          },
+          'sideStoryId': {
+            'type': 'integer',
+            'description':
+                '可选。番外 ID（来自 list_side_stories / create_side_story）。'
+                '传入后 patch 该番外的章节；不传则改当前小说。',
           },
         },
         'required': ['position', 'oldString', 'newString'],
@@ -1097,6 +1127,94 @@ class AgentTools {
           },
         },
         'required': ['question'],
+      },
+    },
+  };
+
+  static const _createSideStory = {
+    'type': 'function',
+    'function': {
+      'name': 'create_side_story',
+      'description':
+          '创建一部番外（独立于主线的支线故事：有自己的章节列表与完整阅读'
+          '体验，不混入主线正文、不出现在书架），挂载在锚点章之下。'
+          '锚点章 = 用户当前正在阅读的章节（自动获取，无需传入）；用户不在'
+          '阅读态时可由其指定章节，你传 anchorChapterPosition（当前小说的'
+          '章节序号）。\n'
+          '同一锚点 + 同一需求的重复调用会幂等找回已建番外（不会重复创建），'
+          '因此续写已有番外前也请先调用本工具定位写入目标。\n'
+          '创建成功后，逐章创作：在你的回复中直接写出该章完整正文'
+          '（1500~3000 字），然后调用 save_side_story_chapter 保存'
+          '（一次只写一章、保存一章）。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'title': {
+            'type': 'string',
+            'description': '番外标题，4~10 字，像作品名（如《闺蜜往事》）',
+          },
+          'requirement': {
+            'type': 'string',
+            'description': '番外需求（用户原话的忠实转述：剧情走向/涉及人物/'
+                '时间背景等）。写入番外描述用于幂等找回，建议总是携带',
+          },
+          'anchorChapterPosition': {
+            'type': 'integer',
+            'description': '可选。锚点章在当前小说中的位置（1-based，来自 '
+                'list_chapters）。用户正在阅读时不传——锚点自动取当前阅读章',
+          },
+        },
+        'required': ['title'],
+      },
+    },
+  };
+
+  static const _saveSideStoryChapter = {
+    'type': 'function',
+    'function': {
+      'name': 'save_side_story_chapter',
+      'description':
+          '保存一章番外正文（写入当前会话已定位的番外，不影响正篇章节）。'
+          '你必须在调用前的回复中已经完整写出该章全部正文（1500~3000 字），'
+          '然后把同一段正文逐字作为 content 传入。本工具只负责校验与落库，'
+          '不会生成任何内容；content 低于 300 字、含 JSON 结构包装都会被拒绝。'
+          '必须先 create_side_story 定位写入目标。\n'
+          '注意与 save_chapter 的分工：save_chapter 写正篇，本工具写番外。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': {
+          'position': {
+            'type': 'integer',
+            'description': '章节在番外内的序号（1 起连续递增；'
+                '工具结果里的 sideStoryChapterCount 可校准下一章位置）',
+          },
+          'title': {
+            'type': 'string',
+            'description': '章节标题。不传时默认使用「第 {position} 章」。',
+          },
+          'content': {
+            'type': 'string',
+            'description':
+                '番外章节正文全文。必须与你在回复中已经写出的正文逐字一致'
+                '（含段落换行）。纯文本散文，禁止 JSON/代码块包装。',
+          },
+        },
+        'required': ['position', 'content'],
+      },
+    },
+  };
+
+  static const _listSideStories = {
+    'type': 'function',
+    'function': {
+      'name': 'list_side_stories',
+      'description':
+          '列出当前小说的全部番外（标题/章数/字数/锚点章/需求描述）。'
+          '用户询问已有番外、或创作前想避免重复时使用。',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+        'required': <String>[],
       },
     },
   };

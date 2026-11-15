@@ -12,7 +12,6 @@ library;
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:novel_app/services/media/media_types.dart';
 import 'package:novel_app/widgets/agent_chat/media_gallery_card.dart';
 
 void main() {
@@ -89,7 +88,6 @@ void main() {
       expect(data, isNotNull);
       expect(data!.items.length, 2);
       expect(data.items[0].mediaId, 'valid');
-      expect(data.items[0].kind, MediaKind.image);
       expect(data.items[1].mediaId, 'also_valid');
     });
 
@@ -114,7 +112,6 @@ void main() {
       expect(data!.items.length, 1);
       final item = data.items.first;
       expect(item.mediaId, 'e7dd42b0-ee1a-48c9-ac30-d7001480ad97');
-      expect(item.kind, MediaKind.image);
       expect(item.prompt, '1girl, anime style');
     });
 

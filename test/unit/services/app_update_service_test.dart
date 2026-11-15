@@ -60,7 +60,6 @@ class _FakeBackendService implements BackendReleaseService {
 
 GithubRelease _githubRelease(String version) => GithubRelease(
       tagName: 'v$version',
-      name: 'v$version',
       body: 'body',
       publishedAt: '2026-09-01T00:00:00Z',
       prerelease: false,
