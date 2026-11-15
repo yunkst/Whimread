@@ -104,6 +104,25 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       );
     }
 
+    // JSON 污染检测（与 update_chapter_content 同一防线）：模型偶发把整章
+    // 正文写成 JSON 对象、或把工具调用结构吞进 content 值（反馈 #16 实测）。
+    // 拒写并引导重写，垃圾不得入库。
+    final contamination = ContentSanitizer.detectJsonContamination(content);
+    if (contamination != null) {
+      LoggerService.instance.w(
+        '工具引导错误: save_chapter json_contaminated shape=$contamination '
+        'contentLength=${content.length} position=$position',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'save_chapter', 'json_contaminated'],
+      );
+      return jsonEncode(guidanceError(
+        'json_contaminated_content',
+        'content 中检测到 JSON 结构（$contamination）。正文必须是纯文本散文，'
+            '禁止用 JSON、代码块或键值对包装。请把《$chapterTitle》的正文'
+            '直接写成叙述性文字，重新调用本工具保存。',
+      ));
+    }
+
     final newContent = ContentSanitizer.sanitize(content);
 
     // 长度下限：过短 = 回复被截断 / Agent 偷懒没写完整正文。拒绝保存并引导
@@ -214,6 +233,35 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       });
     }
 
+    // JSON 污染检测（反馈 #16「llm替换文字，出现错乱」的根治防线）：
+    // 模型生成的入参 JSON 结构错乱时，newString 值里会吞进工具调用的
+    // 结构尾巴（`正文……", "oldString": "……", "position": 79}`），整体
+    // 恰好仍是合法 JSON 而被正常解析。拒写并引导重写，垃圾不得入库。
+    // ⚠️ 只查 newString（模型本次产出的增量）——oldString 必须与原文
+    // 逐字匹配，绝不过检测/净化；也不查替换后的全文，否则正文里已存在
+    // 的历史污染会把「清理编辑」也拦死。
+    final contamination = ContentSanitizer.detectJsonContamination(newString);
+    if (contamination != null) {
+      LoggerService.instance.w(
+        '工具引导错误: update_chapter_content json_contaminated '
+        'shape=$contamination newStringLength=${newString.length} '
+        'position=$position',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'update_chapter_content', 'json_contaminated'],
+      );
+      return jsonEncode(guidanceError(
+        'json_contaminated_content',
+        'newString 中检测到 JSON 结构（$contamination）。正文必须是纯文本散文，'
+            '禁止用 JSON、代码块或键值对包装，不得包含 "oldString"、"position" '
+            '等任何工具参数结构。请把替换后的正文直接写成叙述性文字，'
+            '重新调用本工具。',
+      ));
+    }
+
+    // 替换片段同样过净化器（与 save_chapter 对齐）：剥掉模型可能混入的
+    // markdown 标记后再替换入正文。
+    final sanitizedNewString = ContentSanitizer.sanitize(newString);
+
     final resolveResult = await resolveChapterUrlByPosition(ctx, position);
     if (resolveResult.errorJson != null) {
       return jsonEncode(resolveResult.errorJson);
@@ -237,7 +285,7 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
       newContent = replaceOutlineSnippet(
         content: originalContent,
         oldString: oldString,
-        newString: newString,
+        newString: sanitizedNewString,
         replaceAll: replaceAll ?? false,
       );
     } on OutlineEditException catch (e) {
@@ -363,7 +411,29 @@ class ChapterWriteExecutor with ToolExecutorHelpers {
     if (rewriteResult.errorJson != null) {
       return jsonEncode(rewriteResult.errorJson);
     }
-    final newContent = ContentSanitizer.sanitize(rewriteResult.content!);
+    // JSON 污染检测（与 save/update 同一防线）：内层 LLM 偶发把重写产出
+    // 写成 JSON。这里已花掉一次 LLM 调用，拒写并引导外层 Agent 重试。
+    final rawRewritten = rewriteResult.content!;
+    final contamination =
+        ContentSanitizer.detectJsonContamination(rawRewritten);
+    if (contamination != null) {
+      LoggerService.instance.w(
+        '工具引导错误: rewrite_chapter json_contaminated shape=$contamination '
+        'contentLength=${rawRewritten.length} position=$position',
+        category: LogCategory.ai,
+        tags: ['agent', 'tool', 'rewrite_chapter', 'json_contaminated'],
+      );
+      return jsonEncode(guidanceError(
+        'json_contaminated_content',
+        '内层重写产出中检测到 JSON 结构（$contamination），未保存。请把'
+            'rewriteInstruction 里补一句「输出纯文本正文，禁止 JSON/代码块包装」'
+            '后重新调用本工具；只想小范围修改时改用 update_chapter_content '
+            '更省 token。',
+        suggestedTool: 'update_chapter_content',
+        suggestedArgs: <String, dynamic>{},
+      ));
+    }
+    final newContent = ContentSanitizer.sanitize(rawRewritten);
 
     // 保存到数据库
     final affected = await ref

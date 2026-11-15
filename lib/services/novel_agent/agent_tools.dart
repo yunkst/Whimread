@@ -278,7 +278,9 @@ class AgentTools {
             'description':
                 '章节正文全文。必须与你在回复中已经写出的正文逐字一致'
                 '（含段落换行），不要缩写、不要用「同上/省略」占位，'
-                '不要混入标题或任何说明性文字。',
+                '不要混入标题或任何说明性文字。\n'
+                '正文必须是纯文本散文，禁止用 JSON、代码块或键值对包装'
+                '（会被 json_contaminated_content 拒绝）。',
           },
         },
         'required': ['position', 'content'],
@@ -317,7 +319,10 @@ class AgentTools {
           },
           'newString': {
             'type': 'string',
-            'description': '替换后的内容（必须与 oldString 不同）',
+            'description':
+                '替换后的内容（必须与 oldString 不同）。必须是纯文本散文片段，'
+                '禁止用 JSON、代码块或键值对包装，不得包含 "oldString"、'
+                '"position" 等工具参数结构（会被 json_contaminated_content 拒绝）。',
           },
           'replaceAll': {
             'type': 'boolean',

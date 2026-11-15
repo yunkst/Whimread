@@ -134,4 +134,82 @@ void main() {
       expect(ContentSanitizer.sanitize(input), expected);
     });
   });
+
+  group('detectJsonContamination — JSON 污染检测', () {
+    // 反馈 #16「llm替换文字，出现错乱」实测样本（feedback llm_logs seq=14）：
+    // 模型生成入参时 JSON 结构错乱，newString 值吞进了工具调用的结构尾巴。
+    // 这是 embedded_key_value 形态——正文开头干净、尾部带回声，整体不是
+    // 合法 JSON，也无围栏，规则①②③均拦不住，只有规则④能拦。
+    const seq14Sample =
+        '等了大概十分钟。\n许曼璃终于姗姗来迟。\n"不好意思啊，陈北，我迟到了。"\n'
+        '许曼璃抱着陈北的胳膊，一脸微笑的往店里走去。\n她柔软的身子紧紧贴着'
+        '陈北的手臂，让陈北心头微微一荡。", "oldString": "等了大概十分钟。\n'
+        '许曼璃终于姗姗来迟。", "position": 79}';
+
+    test('规则④：反馈 #16 实际样本（embedded_key_value）→ 拦截', () {
+      expect(
+        ContentSanitizer.detectJsonContamination(seq14Sample),
+        'embedded_key_value',
+      );
+    });
+
+    test('规则①：整体即 JSON 对象 → 拦截', () {
+      expect(
+        ContentSanitizer.detectJsonContamination('{"title": "第3章", "content": "正文"}'),
+        'whole_string_json',
+      );
+    });
+
+    test('规则①：整体即 JSON 数组 → 拦截', () {
+      expect(
+        ContentSanitizer.detectJsonContamination('[{"p": "第一段"}, {"p": "第二段"}]'),
+        'whole_string_json',
+      );
+    });
+
+    test('规则②：```json 围栏内是 JSON → 拦截', () {
+      const input = '正文开头。\n```json\n{"oldString": "a", "newString": "b"}\n```\n正文结尾。';
+      expect(ContentSanitizer.detectJsonContamination(input), 'fenced_json');
+    });
+
+    test('规则③：独立行工具调用回声（≥2 已知键）→ 拦截', () {
+      const input = '正文开头。\n{"position": 79, "oldString": "原文", "newString": "新文"}\n正文结尾。';
+      expect(ContentSanitizer.detectJsonContamination(input), 'tool_call_echo');
+    });
+
+    test('误伤防线：含冒号引号换行的正常对话 → 放行', () {
+      const input = '"不好意思啊，陈北，我迟到了，让你久等了。"\n他说：没事，我们走。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('误伤防线：正文内嵌非工具键的 JSON（程序员题材）→ 放行', () {
+      const input = '他在白板上写下 {"a": 1, "b": 2} 然后转身。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('误伤防线：独立行 JSON 但无已知工具键 → 放行', () {
+      const input = '配置如下\n{"host": "localhost", "port": 8080}\n完毕。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('误伤防线：```text 围栏里的散文 → 放行', () {
+      const input = '他念出了屏幕上的话。\n```text\n这不是一段 JSON，只是一句话。\n```\n念完他笑了。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('误伤防线：``` 围栏里的非 JSON 代码 → 放行', () {
+      const input = '代码如下。\n```\nprint("hello world")\n```\n运行成功。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('误伤防线：中文引号对话中的逗号冒号 → 放行', () {
+      const input = '“你好，”她说，“这是“position”：一个词。”';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+
+    test('纯正文（多段落）→ 放行', () {
+      const input = '第一段。\n\n第二段，有标点。"引号"\n\n第三段。';
+      expect(ContentSanitizer.detectJsonContamination(input), isNull);
+    });
+  });
 }
